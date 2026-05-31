@@ -171,6 +171,42 @@ const formatSeconds = (s) => {
   return `${h}h ${m}min`;
 };
 
+// Format how far away the next review is
+const formatNextDue = date => {
+  const diff=date-Date.now();
+  if(diff<=0)return"maintenant";
+  const m=Math.round(diff/60000);
+  if(m<2)return"dans moins d'une minute";
+  if(m<60)return`dans ${m} min`;
+  const h=Math.round(m/60);
+  if(h<24)return`dans ${h}h`;
+  const d=Math.round(h/24);
+  return`dans ${d} jour${d>1?"s":""}`;
+};
+
+// Smart empty queue message: distinguishes "up to date", "daily limit reached", etc.
+const getEmptyQueueMsg = (filtered, prog, settings, newShownToday) => {
+  const {newCardsPerDay=20}=settings;
+  const dueCards=filtered.filter(c=>!prog[c.id]?.buried&&isDue(prog[c.id]));
+  if(dueCards.length===0){
+    // Find next scheduled review
+    const dates=filtered.filter(c=>!prog[c.id]?.buried&&prog[c.id]?.next).map(c=>new Date(prog[c.id].next)).sort((a,b)=>a-b);
+    if(dates.length){
+      return`✨ Toutes tes cartes sont à jour !\nProchaine révision ${formatNextDue(dates[0])}.`;
+    }
+    return"✨ Aucune carte dans cette sélection pour l'instant.";
+  }
+  const newDue=dueCards.filter(c=>isNew(prog[c.id]));
+  const reviewDue=dueCards.filter(c=>!isNew(prog[c.id]));
+  if(reviewDue.length===0&&newDue.length>0&&newShownToday>=(newCardsPerDay||20)){
+    return`🎯 Plafond de nouvelles cartes atteint !\nTu as déjà découvert ${newShownToday} nouvelle${newShownToday>1?"s":""} carte${newShownToday>1?"s":""} aujourd'hui (plafond : ${newCardsPerDay||20}).\n💡 Reviens demain ou augmente le plafond dans les Paramètres.`;
+  }
+  if(dueCards.length>0){
+    return`📋 ${dueCards.length} carte${dueCards.length>1?"s":""} disponible${dueCards.length>1?"s":""} mais exclue${dueCards.length>1?"s":""} par tes filtres de matières ou de paquets.\nModifie les filtres dans les Paramètres.`;
+  }
+  return"✨ Aucune carte à réviser pour le moment.";
+};
+
 // ─── UserCards persistence helpers ───────────────────────────────────────────
 // integrated IDs: localStorage fallback so integration survives even if Supabase column is missing
 const getIntegratedIds = u => { try { return new Set(JSON.parse(localStorage.getItem(`mx6-integrated-${u}`)||'[]')); } catch { return new Set(); } };
@@ -1376,8 +1412,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
                         </button>
                       );
                     })()}
-                    {/* ── À jour pill : cartes maîtrisées ── */}
-                    {(()=>{const utd=chapterUpToDate(allCards,progress,group.id,activeCours,chIdx);return utd>0?<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 8px",borderRadius:6,background:C.goodBg,border:`1px solid ${C.good}30`,minWidth:48,gap:2}}><span style={{fontFamily:mono,fontSize:9,color:C.good,fontWeight:700}}>✓</span><span style={{fontSize:9,color:C.good,fontWeight:400}}>{utd}</span></div>:null;})()}
+                    {/* ── À jour pill : cartes maîtrisées (non dues) ── */}
+                    {(()=>{const utd=chapterUpToDate(allCards,progress,group.id,activeCours,chIdx);return utd>0?<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"5px 9px",borderRadius:6,background:C.goodBg,border:`1px solid ${C.good}30`,minWidth:52,gap:1}}><span style={{fontSize:10,color:C.good,fontWeight:700}}>{utd}</span><span style={{fontFamily:mono,fontSize:7,letterSpacing:1,color:C.good,textTransform:"uppercase",whiteSpace:"nowrap"}}>à jour</span></div>:null;})()}
                   </div>
                 </div>
               );
@@ -1916,22 +1952,23 @@ function App(){
   const startStudy=useCallback((gid,num,chapterId,pkId)=>{
     if(gid==="__user__"){
       const queue=buildQueue(userCards,prog,settings,getNewShownToday(),true);
-      if(!queue.length){alert("Aucune carte personnelle à réviser !");return;}
+      if(!queue.length){alert(getEmptyQueueMsg(userCards,prog,settings,getNewShownToday()));return;}
       setStudyCtx({label:"Mes flashcards personnelles",queue});setView("study");return;
     }
     const grp=GROUPS.find(g=>g.id===gid);
     if(pkId==="__all__"||pkId==="__course__"){
       const isCourse=pkId==="__course__";
       const filtered=allCards.filter(c=>c.groupId===gid&&c.num===num&&(isCourse||c.chapterId===chapterId));
-      const queue=buildQueue(filtered,prog,settings,getNewShownToday(),true); // scopeOnly: nouvelles cartes de ce cours uniquement
-      if(!queue.length){alert(isCourse?"Aucune carte à réviser pour ce cours !":"Aucune carte à réviser pour ce chapitre !");return;}
+      const queue=buildQueue(filtered,prog,settings,getNewShownToday(),true);
+      if(!queue.length){alert(getEmptyQueueMsg(filtered,prog,settings,getNewShownToday()));return;}
       const chName=!isCourse&&chapterId?getChapters(gid,num)[chapterId-1]:`Ch.${chapterId}`;
       const label=isCourse?`${grp?.label} · Cours ${num} · Cours complet`:`${grp?.label} · Cours ${num} · ${chName} · Tout`;
       setStudyCtx({label,queue});setView("study");return;
     }
     // Normal SRS — use effective packet, scopeOnly (nouvelles cartes de ce chapitre uniquement)
-    const queue=buildQueue(allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId),prog,settings,getNewShownToday(),true);
-    if(!queue.length){alert("Aucune carte à réviser !");return;}
+    const scopeFiltered=allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId);
+    const queue=buildQueue(scopeFiltered,prog,settings,getNewShownToday(),true);
+    if(!queue.length){alert(getEmptyQueueMsg(scopeFiltered,prog,settings,getNewShownToday()));return;}
     const chName=getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`;
     setStudyCtx({label:`${grp?.label} · Cours ${num} · ${chName} · ${PACKETS.find(p=>p.id===pkId)?.label}`,queue});
     setView("study");
@@ -1939,9 +1976,9 @@ function App(){
 
   const startGlobalStudy=useCallback(pkId=>{
     const ids=currentUser?.plan?.groups||[];
-    // Global study: scopeOnly=false → dailyGroups/dailyPackets filters apply
-    const queue=buildQueue(allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)),prog,settings,getNewShownToday(),false);
-    if(!queue.length){alert("Aucune carte à réviser !");return;}
+    const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId));
+    const queue=buildQueue(globalFiltered,prog,settings,getNewShownToday(),false);
+    if(!queue.length){alert(getEmptyQueueMsg(globalFiltered,prog,settings,getNewShownToday()));return;}
     setStudyCtx({label:pkId?`Révision globale · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Révision globale · Toutes",queue});
     setView("study");
   },[allCards,prog,currentUser,settings,getNewShownToday]);
