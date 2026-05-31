@@ -1797,9 +1797,14 @@ function App(){
   },[allCards,prog,currentUser,settings,getNewShownToday]);
 
   const handleRate=useCallback(async(card,rating,elapsedMs=0)=>{
-    const wasNew=isNew(prog[card.id]); // Track before state changes
-    const np=computeNext(prog[card.id],rating,settings);
-    saveProg({...prog,[card.id]:np});
+    const existing=prog[card.id]||{};
+    const wasNew=isNew(existing);
+    const np=computeNext(existing,rating,settings);
+    // computeNext only returns SRS fields — preserve user-specific fields it doesn't know about
+    const preserved={};
+    if(existing.packetOverride)preserved.packetOverride=existing.packetOverride;
+    if(existing.buried)preserved.buried=existing.buried;
+    saveProg({...prog,[card.id]:{...np,...preserved}});
     if(currentUser&&currentUser.role!=="admin"){
       recordStat(currentUser.username,rating>=3,elapsedMs,wasNew);
     }
@@ -1817,10 +1822,16 @@ function App(){
     saveProg({...prog,[cardId]:rest});
   },[prog,saveProg]);
 
-  // Override a card's packet for this user only (stored in progress)
+  // Override a card's packet for this user only (stored in progress, survives ratings)
   const handleChangePacket=useCallback((card,newPktId)=>{
     const existing=prog[card.id]||{};
-    saveProg({...prog,[card.id]:{...existing,packetOverride:newPktId}});
+    if(newPktId===card.packetId){
+      // Resetting to original: remove the override field cleanly
+      const {packetOverride:_,...rest}=existing;
+      saveProg({...prog,[card.id]:rest});
+    } else {
+      saveProg({...prog,[card.id]:{...existing,packetOverride:newPktId}});
+    }
   },[prog,saveProg]);
 
   if(view==="loading") return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}><p style={{fontFamily:serif,fontSize:28,letterSpacing:-0.5}}>MyFlashcard</p><p style={{color:C.textLt,fontSize:13}}>Chargement…</p></div>;
