@@ -287,7 +287,7 @@ const SUBJECT_PLAN_MAP = {
 
 const ADMIN_USERNAME = "admin";
 const ADMIN_PASSWORD = "medecine2024";
-const DEFAULT_SETTINGS = { againMin:1, hardMin:5, goodMin:10, easyDays:4, newCardsPerDay:20, maxReviewsPerDay:100, dailyGroups:[], dailyPackets:[] };
+const DEFAULT_SETTINGS = { againMin:1, hardMin:5, goodMin:10, easyDays:4, newCardsPerDay:20, maxReviewsPerDay:100, dailyGroups:[], dailyPackets:[], newCardOrder:"first", newCardEvery:5 };
 const INITIAL_CARDS = []; // Les cartes sont créées par l'admin via le panneau d'administration
 
 const groupLabel = (g) => g.label + (g.sem===0?" — Pré-rentrée":g.sem===1?" — Sem. 1":" — Sem. 2");
@@ -327,23 +327,44 @@ function stateLabel(p){if(!p||p.state==="new")return"Nouveau";if(p.state==="lear
 // Effective packet for a card = user's override if set, otherwise original
 const effPkt=(card,prog)=>prog[card.id]?.packetOverride||card.packetId;
 
-function buildQueue(cardList,prog,settings,newShownToday=0){
-  const {dailyGroups,dailyPackets,maxReviewsPerDay,newCardsPerDay=20}=settings;
+function buildQueue(cardList,prog,settings,newShownToday=0,scopeOnly=false){
+  const {dailyGroups=[],dailyPackets=[],maxReviewsPerDay=100,newCardsPerDay=20,newCardOrder="first",newCardEvery=5}=settings;
   const newLimit=Math.max(0,(newCardsPerDay||20)-newShownToday);
   let newCount=0;
-  return cardList.filter(c=>{
+  const newQ=[],revQ=[];
+
+  cardList.forEach(c=>{
     const p=prog[c.id];
-    if(p?.buried)return false;
-    if(!isDue(p))return false;
+    if(p?.buried)return;
+    if(!isDue(p))return;
     const ep=effPkt(c,prog);
     if(isNew(p)){
-      if(newCount>=newLimit)return false; // newCardsPerDay limit applied here
-      if(dailyGroups.length>0&&!dailyGroups.includes(c.groupId))return false;
-      if(dailyPackets.length>0&&!dailyPackets.includes(ep))return false;
-      newCount++;
+      if(newCount>=newLimit)return;
+      // dailyGroups/Packets only filter in global study; skip when studying specific course
+      if(!scopeOnly){
+        if((dailyGroups||[]).length>0&&!dailyGroups.includes(c.groupId))return;
+        if((dailyPackets||[]).length>0&&!dailyPackets.includes(ep))return;
+      }
+      newQ.push(c);newCount++;
+    } else {
+      revQ.push(c);
     }
-    return true;
-  }).slice(0,maxReviewsPerDay);
+  });
+
+  let result;
+  if((newCardOrder||"first")==="last"){
+    result=[...revQ,...newQ];
+  } else if(newCardOrder==="every"){
+    result=[];const n=Math.max(1,newCardEvery||5);let ni=0;
+    revQ.forEach((card,i)=>{
+      result.push(card);
+      if((i+1)%n===0&&ni<newQ.length)result.push(newQ[ni++]);
+    });
+    while(ni<newQ.length)result.push(newQ[ni++]);
+  } else {
+    result=[...newQ,...revQ]; // "first": nouvelles cartes en tête
+  }
+  return result.slice(0,maxReviewsPerDay||100);
 }
 function chapterStats(cards,prog,gid,num,chId,pkId){
   // Uses effective packet so user overrides are reflected in counts
@@ -367,6 +388,60 @@ function globalDue(cards,prog,ids,settings,pkId=null){
 // ─── Design ──────────────────────────────────────────────────────────────────
 const C={bg:"#f5f3ee",surface:"#ffffff",border:"#d0ccc4",text:"#1a1917",textMed:"#4e4a46",textLt:"#7a7672",accent:"#2c4a7c",accentBg:"#eef3fb",prio:"#9b2335",prioBg:"#fef2f4",imp:"#8b5e00",impBg:"#fef8e8",util:"#1e5a3a",utilBg:"#edf7f2",again:"#b91c1c",againBg:"#fff0f0",hard:"#b45309",hardBg:"#fff8ed",good:"#15803d",goodBg:"#edfdf3",easy:"#1d4ed8",easyBg:"#eff6ff"};
 const pC=id=>id==="prioritaire"?C.prio:id==="important"?C.imp:C.util;
+
+// ─── Rich card content helpers ────────────────────────────────────────────────
+// Cards can store {text, img} as JSON or plain string for backward compat
+const parseContent=raw=>{
+  if(!raw)return{text:"",img:null};
+  try{const p=JSON.parse(raw);if(p?.type==="occlusion")return{text:"",img:null};if(p?.text!==undefined)return{text:p.text||"",img:p.img||null};}catch{}
+  return{text:raw,img:null};
+};
+const serializeContent=(text,img)=>img?JSON.stringify({text,img}):text;
+const compressImage=(src,maxSize=900,quality=0.75)=>new Promise(resolve=>{
+  const img=new Image();
+  img.onload=()=>{
+    let w=img.width,h=img.height;
+    if(w>maxSize||h>maxSize){if(w>h){h=Math.round(h*maxSize/w);w=maxSize;}else{w=Math.round(w*maxSize/h);h=maxSize;}}
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    c.getContext("2d").drawImage(img,0,0,w,h);
+    resolve(c.toDataURL("image/jpeg",quality));
+  };
+  img.src=src;
+});
+
+// ─── Image Drop Zone ──────────────────────────────────────────────────────────
+function ImageDropZone({value,onChange,label="Image (optionnelle)"}){
+  const [drag,setDrag]=useState(false);
+  const handleFile=async file=>{
+    if(!file?.type.startsWith("image/"))return;
+    const reader=new FileReader();
+    reader.onload=async e=>{
+      const compressed=await compressImage(e.target.result);
+      onChange(compressed);
+    };
+    reader.readAsDataURL(file);
+  };
+  return(
+    <div>
+      <p style={{fontFamily:mono,fontSize:9,letterSpacing:2.5,textTransform:"uppercase",color:C.textLt,margin:"0 0 6px"}}>{label}</p>
+      {value?(
+        <div style={{position:"relative",display:"inline-block",maxWidth:"100%"}}>
+          <img src={value} style={{maxWidth:"100%",maxHeight:180,borderRadius:8,display:"block",border:`1px solid ${C.border}`}}/>
+          <button onClick={()=>onChange(null)} style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:C.again,color:"#fff",border:"none",cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>×</button>
+        </div>
+      ):(
+        <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}} style={{border:`2px dashed ${drag?C.accent:C.border}`,borderRadius:8,padding:"16px",textAlign:"center",background:drag?C.accentBg:C.bg,cursor:"pointer",transition:"all 0.15s"}}>
+          <label style={{cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,color:C.textLt,fontSize:13}}>
+            <span style={{fontSize:20}}>📷</span>
+            <span>Glisser une image ou <span style={{color:C.accent,textDecoration:"underline"}}>cliquer pour importer</span></span>
+            <input type="file" accept="image/*" onChange={e=>handleFile(e.target.files[0])} style={{display:"none"}}/>
+          </label>
+          <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0"}}>JPG, PNG, GIF · compressé automatiquement</p>
+        </div>
+      )}
+    </div>
+  );
+}
 const pB=id=>id==="prioritaire"?C.prioBg:id==="important"?C.impBg:C.utilBg;
 const font="system-ui,-apple-system,'Segoe UI',sans-serif";
 const serif="Georgia,'Times New Roman',serif";
@@ -571,6 +646,14 @@ function CardEditor({card,onSave,onCancel,userGroups}){
   const defaultPacket=card?.packetId||(lastClass?.packetId)||"prioritaire";
 
   const [form,setForm]=useState({front:card?.front||"",back:card?.back||"",groupId:defaultGroup,num:defaultNum,chapterId:defaultChapter,packetId:defaultPacket});
+  // Parse existing card images if editing
+  const existingFront=parseContent(card?.front||"");
+  const existingBack=parseContent(card?.back||"");
+  const [frontImg,setFrontImg]=useState(existingFront.img||null);
+  const [backImg,setBackImg]=useState(existingBack.img||null);
+  // Use parsed text for form if editing a rich card
+  const [formFront,setFormFront]=useState(existingFront.text||(card?.front?.startsWith("{")?"":(card?.front||"")));
+  const [formBack,setFormBack]=useState(existingBack.text||(card?.back?.startsWith("{")?"":(card?.back||"")));
   const [saved,setSaved]=useState(false),[errors,setErrors]=useState({});
   const COLORS=["#e74c3c","#3498db","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#e91e63","#00bcd4","#8bc34a"];
   const [image,setImage]=useState(null),[imgW,setImgW]=useState(0),[imgH,setImgH]=useState(0),[zones,setZones]=useState([]),[drawing,setDrawing]=useState(false),[startPos,setStartPos]=useState(null),[currentRect,setCurrentRect]=useState(null);
@@ -580,9 +663,8 @@ function CardEditor({card,onSave,onCancel,userGroups}){
   const selPacket=PACKETS.find(p=>p.id===form.packetId);
   const handleGroupChange=v=>{const g=GROUPS.find(g=>g.id===v);const newNum=g?.nums.includes(form.num)?form.num:g?.nums[0]||1;setForm(p=>({...p,groupId:v,num:newNum,chapterId:1}));};
   const handleNumChange=v=>setForm(p=>({...p,num:v,chapterId:1}));
-  const validate=()=>{const e={};if(!form.front.trim())e.front=true;if(!form.back.trim())e.back=true;setErrors(e);return!Object.keys(e).length;};
-  // Save classification then call onSave — next new card will start with these values
-  const handleSaveText=()=>{if(!validate())return;saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);onSave({...form,id:card?.id||`card-${Date.now()}`});setSaved(true);};
+  const validate=()=>{const e={};if(!formFront.trim()&&!frontImg)e.front=true;if(!formBack.trim()&&!backImg)e.back=true;setErrors(e);return!Object.keys(e).length;};
+  const handleSaveText=()=>{if(!validate())return;saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);onSave({...form,front:serializeContent(formFront,frontImg),back:serializeContent(formBack,backImg),id:card?.id||`card-${Date.now()}`});setSaved(true);};
   const pct=(v,total)=>total?`${(v/total*100).toFixed(4)}%`:"0%";
   const getSvgPos=e=>{const rect=e.currentTarget.getBoundingClientRect();return{x:((e.clientX-rect.left)/rect.width)*imgW,y:((e.clientY-rect.top)/rect.height)*imgH};};
   const onMouseDown=e=>{e.preventDefault();const pos=getSvgPos(e);setDrawing(true);setStartPos(pos);setCurrentRect({x:pos.x,y:pos.y,w:0,h:0});};
@@ -595,7 +677,36 @@ function CardEditor({card,onSave,onCancel,userGroups}){
     <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
       {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid ${C.accent}20`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
       {isNew&&(<div style={{marginBottom:24}}><Lbl>Type de carte</Lbl><div style={{display:"flex",gap:8,marginTop:8}}>{[["text","📝 Texte","Recto / Verso classique"],["occlusion","🖼 Image Occlusion","Masquer des zones sur une image"]].map(([t,lbl,desc])=>(<button key={t} onClick={()=>setCardType(t)} style={{fontFamily:font,fontSize:13,fontWeight:cardType===t?600:400,padding:"12px 20px",cursor:"pointer",borderRadius:8,border:`2px solid ${cardType===t?C.accent:C.border}`,background:cardType===t?C.accentBg:C.surface,color:cardType===t?C.accent:C.textMed,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:3}}><span>{cardType===t&&"✓ "}{lbl}</span><span style={{fontSize:11,fontWeight:400,color:cardType===t?C.accent:C.textLt}}>{desc}</span></button>))}</div></div>)}
-      {cardType==="text"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}><div style={{display:"flex",flexDirection:"column",gap:16}}><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 16px"}}>Contenu</p><div style={{marginBottom:14}}><Lbl color={errors.front?C.again:undefined}>Recto{errors.front?" (requis)":""}</Lbl><textarea style={{...iBox,minHeight:90,marginTop:6,display:"block",borderColor:errors.front?C.again:C.border}} value={form.front} onChange={e=>{setForm(p=>({...p,front:e.target.value}));setErrors(er=>({...er,front:false}));}} placeholder="La question..." rows={3}/></div><div><Lbl color={errors.back?C.again:undefined}>Verso{errors.back?" (requis)":""}</Lbl><textarea style={{...iBox,minHeight:110,marginTop:6,display:"block",borderColor:errors.back?C.again:C.border}} value={form.back} onChange={e=>{setForm(p=>({...p,back:e.target.value}));setErrors(er=>({...er,back:false}));}} placeholder="La réponse..." rows={4}/></div></div><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px"}}><Lbl>Aperçu classification</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"8px 0 0"}}><Tag color={pC(form.packetId)} bg={pB(form.packetId)}>{selPacket?.label}</Tag><Tag color={C.accent} bg={C.accentBg}>{selGroup?.label}</Tag><Tag color={C.textMed} bg={C.bg}>Cours {form.num}</Tag>{availChapters[form.chapterId-1]&&<Tag color={C.textMed} bg={C.bg}>Ch. {form.chapterId} — {availChapters[form.chapterId-1]}</Tag>}</div>{form.front&&<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.5}}>{form.front.slice(0,100)}{form.front.length>100?"…":""}</p>}</div><div style={{display:"flex",gap:10}}><Btn fill full onClick={handleSaveText}>{saved?"✓":isNew?"Créer la carte":"Mettre à jour"}</Btn><Btn full onClick={onCancel}>Annuler</Btn></div></div><ClassPanel/></div>)}
+      {cardType==="text"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px"}}>
+            <p style={{fontFamily:serif,fontSize:16,margin:"0 0 16px"}}>Contenu</p>
+            <div style={{marginBottom:20}}>
+              <Lbl color={errors.front?C.again:undefined}>Recto — Question{errors.front?" (requis)":""}</Lbl>
+              <textarea style={{...iBox,minHeight:80,marginTop:6,display:"block",borderColor:errors.front?C.again:C.border}} value={formFront} onChange={e=>{setFormFront(e.target.value);setErrors(er=>({...er,front:false}));}} placeholder="La question..." rows={3}/>
+              <div style={{marginTop:10}}><ImageDropZone value={frontImg} onChange={img=>{setFrontImg(img);setErrors(er=>({...er,front:false}));}} label="Image recto (optionnelle)"/></div>
+            </div>
+            <div>
+              <Lbl color={errors.back?C.again:undefined}>Verso — Réponse{errors.back?" (requis)":""}</Lbl>
+              <textarea style={{...iBox,minHeight:90,marginTop:6,display:"block",borderColor:errors.back?C.again:C.border}} value={formBack} onChange={e=>{setFormBack(e.target.value);setErrors(er=>({...er,back:false}));}} placeholder="La réponse..." rows={4}/>
+              <div style={{marginTop:10}}><ImageDropZone value={backImg} onChange={img=>{setBackImg(img);setErrors(er=>({...er,back:false}));}} label="Image verso (optionnelle)"/></div>
+            </div>
+          </div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px"}}>
+            <Lbl>Aperçu classification</Lbl>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"8px 0 0"}}>
+              <Tag color={pC(form.packetId)} bg={pB(form.packetId)}>{selPacket?.label}</Tag>
+              <Tag color={C.accent} bg={C.accentBg}>{selGroup?.label}</Tag>
+              <Tag color={C.textMed} bg={C.bg}>Cours {form.num}</Tag>
+              {availChapters[form.chapterId-1]&&<Tag color={C.textMed} bg={C.bg}>Ch. {form.chapterId} — {availChapters[form.chapterId-1]}</Tag>}
+            </div>
+            {formFront&&<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.5}}>{formFront.slice(0,100)}{formFront.length>100?"…":""}</p>}
+            {frontImg&&<img src={frontImg} style={{maxWidth:"100%",maxHeight:80,borderRadius:6,marginTop:8,display:"block"}}/>}
+          </div>
+          <div style={{display:"flex",gap:10}}><Btn fill full onClick={handleSaveText}>{saved?"✓":isNew?"Créer la carte":"Mettre à jour"}</Btn><Btn full onClick={onCancel}>Annuler</Btn></div>
+        </div>
+        <ClassPanel/>
+      </div>)}
       {cardType==="occlusion"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20,alignItems:"start"}}><div>{!image?(<div style={{border:`2px dashed ${C.border}`,borderRadius:12,padding:"60px 24px",textAlign:"center",background:C.surface}}><p style={{fontSize:40,margin:"0 0 12px"}}>🖼</p><p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Importer une image</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Dessine des zones à masquer sur l'image.</p><label style={{fontFamily:font,fontSize:13,fontWeight:500,padding:"10px 20px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"inline-block"}}>Choisir une image<input type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/></label></div>):(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}><div style={{padding:"10px 14px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.bg}}><p style={{fontSize:12,color:C.textMed,margin:0}}>🖱 Clique et glisse pour créer des zones</p><label style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,color:C.textMed,background:C.surface}}>Changer<input type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/></label></div><div style={{position:"relative",userSelect:"none",lineHeight:0}}><img src={image} onLoad={e=>{setImgW(e.target.naturalWidth);setImgH(e.target.naturalHeight);}} style={{width:"100%",display:"block"}} draggable={false}/>{imgW>0&&<svg style={{position:"absolute",inset:0,width:"100%",height:"100%",cursor:"crosshair"}} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>{zones.map((z,i)=><g key={z.id}><rect x={pct(z.x,imgW)} y={pct(z.y,imgH)} width={pct(z.w,imgW)} height={pct(z.h,imgH)} fill={z.color+"55"} stroke={z.color} strokeWidth="2"/><text x={pct(z.x+6,imgW)} y={pct(z.y+20,imgH)} fill="white" fontSize="14" fontWeight="bold" style={{pointerEvents:"none"}}>{i+1}</text></g>)}{currentRect&&currentRect.w>0&&<rect x={pct(currentRect.x,imgW)} y={pct(currentRect.y,imgH)} width={pct(currentRect.w,imgW)} height={pct(currentRect.h,imgH)} fill="#2c4a7c22" stroke="#2c4a7c" strokeWidth="2" strokeDasharray="6 3"/>}</svg>}</div></div>)}</div><div style={{display:"flex",flexDirection:"column",gap:14}}><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:16}}><p style={{fontFamily:serif,fontSize:15,margin:"0 0 10px"}}>Zones ({zones.length})</p>{zones.length===0?<p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Dessine des rectangles sur l'image. Chaque rectangle = 1 flashcard.</p>:<div style={{display:"flex",flexDirection:"column",gap:6}}>{zones.map((z,i)=><div key={z.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:6,border:`1.5px solid ${z.color}`,background:z.color+"11"}}><div style={{width:14,height:14,borderRadius:3,background:z.color,flexShrink:0}}/><span style={{fontSize:13,flex:1}}>Zone {i+1}</span><button onClick={()=>setZones(zs=>zs.filter(x=>x.id!==z.id))} style={{background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:16,lineHeight:1}}>×</button></div>)}<p style={{fontSize:11,color:C.textMed,margin:"6px 0 0"}}>{zones.length} zone{zones.length>1?"s":""} → {zones.length} flashcard{zones.length>1?"s":""}</p></div>}</div><ClassPanel/>{zones.length>0&&<Btn fill full onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>}</div></div>)}
     </div>
   </div>;
@@ -1395,16 +1506,35 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
         <div style={{marginBottom:22}}>
           <div style={{background:C.surface,border:`1.5px solid ${showBack?col:C.border}`,borderRadius:12,padding:"16px 20px",transition:"border-color 0.3s"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><Lbl>{showBack?"Réponse révélée":showOthers?"Indices visibles (image)":"Zone rouge = à deviner · Zones noires = masquées"}</Lbl>{showBack&&<Tag color={C.good} bg={C.goodBg} small>Révélé</Tag>}</div>
-            <div onClick={()=>!showBack&&setShowBack(true)} style={{cursor:showBack?"default":"pointer"}}><OcclusionCanvas cardFront={card.front} showBack={showBack} showOthers={showOthers}/></div>
+            <div onClick={()=>showBack?setShowBack(false):setShowBack(true)} style={{cursor:"pointer"}}><OcclusionCanvas cardFront={card.front} showBack={showBack} showOthers={showOthers}/></div>
             {!showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={e=>{e.stopPropagation();setShowOthers(s=>!s);}} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${showOthers?C.imp:C.border}`,background:showOthers?C.impBg:"transparent",color:showOthers?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>{showOthers?"🔲 Masquer les indices":"👁 Voir les indices (image)"}</button><button onClick={()=>setShowBack(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${col}`,background:pB(card.packetId),color:col}}>Révéler →</button></div>}
+            {showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={()=>setShowBack(false)} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,padding:0}}>← Cliquer sur l'image pour revoir la question</button></div>}
           </div>
         </div>
       ):(
-        <div style={{perspective:1200,height:260,marginBottom:22}}>
-          <div style={{width:"100%",height:"100%",position:"relative",transformStyle:"preserve-3d",transform:showBack?"rotateY(180deg)":"rotateY(0)",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)",cursor:showBack?"default":"pointer"}} onClick={()=>!showBack&&setShowBack(true)}>
-            <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"28px 32px",display:"flex",flexDirection:"column",justifyContent:"center"}}><Lbl>Question</Lbl><p style={{fontFamily:serif,fontSize:20,lineHeight:1.6,margin:"8px 0 0",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{card.front}</p><p style={{fontSize:12,color:C.textLt,position:"absolute",bottom:16,right:22}}>Cliquez pour révéler →</p></div>
-            <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${col}`,padding:"28px 32px",display:"flex",flexDirection:"column",justifyContent:"center",transform:"rotateY(180deg)"}}><Lbl>Réponse</Lbl><p style={{fontSize:15,lineHeight:1.8,margin:"8px 0 0",color:C.textMed,...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{card.back}</p></div>
-          </div>
+        <div style={{perspective:1200,marginBottom:22}}>
+          {(()=>{
+            const fc=parseContent(card.front);
+            const bc=parseContent(card.back);
+            const minH=fc.img||bc.img?300:260;
+            return(
+              <div style={{width:"100%",minHeight:minH,position:"relative",transformStyle:"preserve-3d",transform:showBack?"rotateY(180deg)":"rotateY(0)",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)",cursor:showBack?"pointer":"pointer"}} onClick={()=>showBack?setShowBack(false):setShowBack(true)}>
+                {/* Front face */}
+                <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",minHeight:minH}}>
+                  <Lbl>Question · cliquer pour révéler</Lbl>
+                  {fc.text&&<p style={{fontFamily:serif,fontSize:20,lineHeight:1.6,margin:"8px 0 0",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{fc.text}</p>}
+                  {fc.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,marginTop:fc.text?12:0,display:"block",objectFit:"contain"}}/>}
+                  <p style={{fontSize:12,color:C.textLt,position:"absolute",bottom:14,right:18}}>Cliquer pour révéler →</p>
+                </div>
+                {/* Back face */}
+                <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${col}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",transform:"rotateY(180deg)",minHeight:minH}}>
+                  <Lbl>Réponse · cliquer pour revoir la question</Lbl>
+                  {bc.text&&<p style={{fontSize:15,lineHeight:1.8,margin:"8px 0 0",color:C.textMed,...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{bc.text}</p>}
+                  {bc.img&&<img src={bc.img} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,marginTop:bc.text?12:0,display:"block",objectFit:"contain"}}/>}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
       {showBack&&<div>
@@ -1443,7 +1573,26 @@ function SettingsView({settings,onSave,onBack}){
     <div style={{maxWidth:600,margin:"0 auto",padding:"28px 24px"}}>
       <Sec title="🎯 Nouvelles cartes du jour"><div style={{display:"flex",flexDirection:"column",gap:10}}><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><MultiToggle label="Matières à découvrir" value={s.dailyGroups} onChange={v=>setS(p=>({...p,dailyGroups:v}))} options={GROUPS.map(g=>({value:g.id,label:groupLabel(g)}))} colorFn={()=>C.accent}/></div><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><MultiToggle label="Paquets à découvrir" value={s.dailyPackets} onChange={v=>setS(p=>({...p,dailyPackets:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label}))} colorFn={pC}/></div></div></Sec>
       <Sec title="⏱ Intervalles d'apprentissage"><div style={{display:"flex",flexDirection:"column",gap:8}}><Sl k="againMin" label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><Sl k="hardMin" label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><Sl k="goodMin" label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><Sl k="easyDays" label="Facile" desc="Graduation immédiate." min={1} max={14} step={1} unit="jours"/></div></Sec>
-      <Sec title="📚 Session d'étude"><div style={{display:"flex",flexDirection:"column",gap:8}}><Sl k="newCardsPerDay" label="Nouvelles cartes / jour" desc="Limite quotidienne." min={5} max={100} step={5} unit=""/><Sl k="maxReviewsPerDay" label="Révisions max / session" desc="Plafond par session." min={20} max={500} step={10} unit=""/></div></Sec>
+      <Sec title="📚 Session d'étude">
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <Sl k="newCardsPerDay" label="Nouvelles cartes / jour" desc="Limite quotidienne de nouvelles cartes à découvrir." min={5} max={100} step={5} unit=""/>
+          <Sl k="maxReviewsPerDay" label="Révisions max / session" desc="Plafond total de cartes par session (nouvelles + révisions)." min={20} max={500} step={10} unit=""/>
+          {/* Ordre d'apparition des nouvelles cartes */}
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}>
+            <p style={{fontSize:13,fontWeight:500,margin:"0 0 4px"}}>Position des nouvelles cartes dans la session</p>
+            <p style={{fontSize:11,color:C.textMed,margin:"0 0 12px"}}>Quand réviser les cartes jamais vues ?</p>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[["first","⬆ En début de session","Toutes les nouvelles cartes d'abord, puis les révisions (par défaut)"],["last","⬇ En fin de session","Révisions d'abord, nouvelles cartes ensuite"],["every","🔀 Intercalées toutes les N révisions","Une nouvelle carte s'insère automatiquement toutes les N cartes révisées"]].map(([val,lbl,desc])=>(
+                <label key={val} onClick={()=>setS(p=>({...p,newCardOrder:val}))} style={{cursor:"pointer",display:"flex",alignItems:"flex-start",gap:10,padding:"10px 12px",borderRadius:7,border:`1.5px solid ${s.newCardOrder===val?C.accent:C.border}`,background:s.newCardOrder===val?C.accentBg:"transparent"}}>
+                  <input type="radio" readOnly checked={s.newCardOrder===val} style={{marginTop:2,accentColor:C.accent,flexShrink:0}}/>
+                  <div><p style={{fontSize:13,fontWeight:s.newCardOrder===val?600:400,margin:"0 0 2px",color:s.newCardOrder===val?C.accent:C.text}}>{lbl}</p><p style={{fontSize:11,color:C.textMed,margin:0}}>{desc}</p></div>
+                </label>
+              ))}
+              {s.newCardOrder==="every"&&<div style={{marginLeft:8}}><Sl k="newCardEvery" label="Fréquence d'intercalage" desc="Une nouvelle carte toutes les X révisions." min={2} max={20} step={1} unit="révisions"/></div>}
+            </div>
+          </div>
+        </div>
+      </Sec>
       <Btn fill full style={{fontSize:14}} onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder tous les paramètres"}</Btn>
     </div>
   </div>;
@@ -1766,7 +1915,7 @@ function App(){
 
   const startStudy=useCallback((gid,num,chapterId,pkId)=>{
     if(gid==="__user__"){
-      const queue=buildQueue(userCards,prog,settings,getNewShownToday());
+      const queue=buildQueue(userCards,prog,settings,getNewShownToday(),true);
       if(!queue.length){alert("Aucune carte personnelle à réviser !");return;}
       setStudyCtx({label:"Mes flashcards personnelles",queue});setView("study");return;
     }
@@ -1774,14 +1923,14 @@ function App(){
     if(pkId==="__all__"||pkId==="__course__"){
       const isCourse=pkId==="__course__";
       const filtered=allCards.filter(c=>c.groupId===gid&&c.num===num&&(isCourse||c.chapterId===chapterId));
-      const queue=buildQueue(filtered,prog,settings,getNewShownToday());
+      const queue=buildQueue(filtered,prog,settings,getNewShownToday(),true); // scopeOnly: nouvelles cartes de ce cours uniquement
       if(!queue.length){alert(isCourse?"Aucune carte à réviser pour ce cours !":"Aucune carte à réviser pour ce chapitre !");return;}
       const chName=!isCourse&&chapterId?getChapters(gid,num)[chapterId-1]:`Ch.${chapterId}`;
       const label=isCourse?`${grp?.label} · Cours ${num} · Cours complet`:`${grp?.label} · Cours ${num} · ${chName} · Tout`;
       setStudyCtx({label,queue});setView("study");return;
     }
-    // Normal SRS — use effective packet
-    const queue=buildQueue(allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId),prog,settings,getNewShownToday());
+    // Normal SRS — use effective packet, scopeOnly (nouvelles cartes de ce chapitre uniquement)
+    const queue=buildQueue(allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId),prog,settings,getNewShownToday(),true);
     if(!queue.length){alert("Aucune carte à réviser !");return;}
     const chName=getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`;
     setStudyCtx({label:`${grp?.label} · Cours ${num} · ${chName} · ${PACKETS.find(p=>p.id===pkId)?.label}`,queue});
@@ -1790,7 +1939,8 @@ function App(){
 
   const startGlobalStudy=useCallback(pkId=>{
     const ids=currentUser?.plan?.groups||[];
-    const queue=buildQueue(allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)),prog,settings,getNewShownToday());
+    // Global study: scopeOnly=false → dailyGroups/dailyPackets filters apply
+    const queue=buildQueue(allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)),prog,settings,getNewShownToday(),false);
     if(!queue.length){alert("Aucune carte à réviser !");return;}
     setStudyCtx({label:pkId?`Révision globale · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Révision globale · Toutes",queue});
     setView("study");
