@@ -139,15 +139,16 @@ const computeGroups = (subscriptionPlanId, supaGroups, extraGroups) => {
 const dateKey = (d=new Date()) => d.toISOString().slice(0,10);
 const getStats = u => { try { return JSON.parse(localStorage.getItem(`mx6-stats-${u}`)||"null")||{days:{},total:{cards:0,correct:0,seconds:0}}; } catch { return {days:{},total:{cards:0,correct:0,seconds:0}}; } };
 const saveStats = (u,st) => { try { localStorage.setItem(`mx6-stats-${u}`,JSON.stringify(st)); } catch {} };
-const recordStat = (username, correct, elapsedMs) => {
+const recordStat = (username, correct, elapsedMs, isNewCard=false) => {
   if(!username)return;
   const st = getStats(username);
   const key = dateKey();
-  const secs = Math.min(Math.round(elapsedMs/1000), 120); // cap 2 min/card
-  if(!st.days[key]) st.days[key] = {cards:0,correct:0,seconds:0};
+  const secs = Math.min(Math.round(elapsedMs/1000), 120);
+  if(!st.days[key]) st.days[key] = {cards:0,correct:0,seconds:0,newShown:0};
   st.days[key].cards++;
   if(correct) st.days[key].correct++;
   st.days[key].seconds += secs;
+  if(isNewCard) st.days[key].newShown=(st.days[key].newShown||0)+1; // Track new cards seen today
   st.total.cards++;
   if(correct) st.total.correct++;
   st.total.seconds += secs;
@@ -323,25 +324,43 @@ function getIntervalLabel(prev,rating,s=DEFAULT_SETTINGS){
 function isDue(p){return !p?.next||new Date(p.next)<=new Date();}
 function isNew(p){return !p||p.state==="new";}
 function stateLabel(p){if(!p||p.state==="new")return"Nouveau";if(p.state==="learning")return"Apprentissage";if(p.state==="relearning")return"Réapprentissage";return`Révision · J+${p.interval}`;}
-function buildQueue(cardList,prog,settings){
-  const {dailyGroups,dailyPackets,maxReviewsPerDay}=settings;
-  return cardList.filter(c=>{const p=prog[c.id];if(p?.buried)return false; // Skip buried cards
-  if(!isDue(p))return false;if(isNew(p)){if(dailyGroups.length>0&&!dailyGroups.includes(c.groupId))return false;if(dailyPackets.length>0&&!dailyPackets.includes(c.packetId))return false;}return true;}).slice(0,maxReviewsPerDay);
+// Effective packet for a card = user's override if set, otherwise original
+const effPkt=(card,prog)=>prog[card.id]?.packetOverride||card.packetId;
+
+function buildQueue(cardList,prog,settings,newShownToday=0){
+  const {dailyGroups,dailyPackets,maxReviewsPerDay,newCardsPerDay=20}=settings;
+  const newLimit=Math.max(0,(newCardsPerDay||20)-newShownToday);
+  let newCount=0;
+  return cardList.filter(c=>{
+    const p=prog[c.id];
+    if(p?.buried)return false;
+    if(!isDue(p))return false;
+    const ep=effPkt(c,prog);
+    if(isNew(p)){
+      if(newCount>=newLimit)return false; // newCardsPerDay limit applied here
+      if(dailyGroups.length>0&&!dailyGroups.includes(c.groupId))return false;
+      if(dailyPackets.length>0&&!dailyPackets.includes(ep))return false;
+      newCount++;
+    }
+    return true;
+  }).slice(0,maxReviewsPerDay);
 }
 function chapterStats(cards,prog,gid,num,chId,pkId){
-  const l=cards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chId&&c.packetId===pkId);
-  return{total:l.length,due:l.filter(c=>isDue(prog[c.id])).length};
+  // Uses effective packet so user overrides are reflected in counts
+  const l=cards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chId&&effPkt(c,prog)===pkId);
+  return{total:l.length,due:l.filter(c=>isDue(prog[c.id])&&!prog[c.id]?.buried).length};
+}
+function chapterUpToDate(cards,prog,gid,num,chId){
+  // Cards studied (not new) and not currently due = mastered/à jour
+  return cards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chId&&!prog[c.id]?.buried&&prog[c.id]&&!isNew(prog[c.id])&&!isDue(prog[c.id])).length;
 }
 function courseDueCount(cards,prog,gid,num){
   const chs=getChapters(gid,num);
-  if(!chs.length){
-    // No chapters defined (e.g. pré-rentrée groups) — count cards directly
-    return cards.filter(c=>c.groupId===gid&&c.num===num&&isDue(prog[c.id])).length;
-  }
+  if(!chs.length){return cards.filter(c=>c.groupId===gid&&c.num===num&&isDue(prog[c.id])&&!prog[c.id]?.buried).length;}
   return chs.reduce((acc,_,i)=>acc+PACKETS.reduce((a2,pk)=>a2+chapterStats(cards,prog,gid,num,i+1,pk.id).due,0),0);
 }
 function globalDue(cards,prog,ids,settings,pkId=null){
-  const el=cards.filter(c=>ids.includes(c.groupId)&&(!pkId||c.packetId===pkId));
+  const el=cards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId));
   return buildQueue(el,prog,settings).length;
 }
 
@@ -1246,6 +1265,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
                         </button>
                       );
                     })()}
+                    {/* ── À jour pill : cartes maîtrisées ── */}
+                    {(()=>{const utd=chapterUpToDate(allCards,progress,group.id,activeCours,chIdx);return utd>0?<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"6px 8px",borderRadius:6,background:C.goodBg,border:`1px solid ${C.good}30`,minWidth:48,gap:2}}><span style={{fontFamily:mono,fontSize:9,color:C.good,fontWeight:700}}>✓</span><span style={{fontSize:9,color:C.good,fontWeight:400}}>{utd}</span></div>:null;})()}
                   </div>
                 </div>
               );
@@ -1326,8 +1347,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
 }
 
 // ─── Study ────────────────────────────────────────────────────────────────────
-function StudyView({label,queue,onRate,onBury,onBack,settings,isAdmin,progress}){
-  const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false);
+function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isAdmin,progress}){
+  const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false);
   const cardStart=useRef(Date.now());
   const card=localQ[idx];
 
@@ -1386,7 +1407,27 @@ function StudyView({label,queue,onRate,onBury,onBack,settings,isAdmin,progress})
           </div>
         </div>
       )}
-      {showBack&&<div><Lbl>Comment était-ce ?</Lbl><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginTop:10}}>{[[1,"À revoir",C.again,C.againBg],[2,"Difficile",C.hard,C.hardBg],[3,"Bien",C.good,C.goodBg],[4,"Facile",C.easy,C.easyBg]].map(([r,lbl,btnCol,btnBg])=><button key={r} onClick={()=>handleRate(r)} style={{fontFamily:font,padding:"14px 8px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${btnCol}`,background:btnBg,color:btnCol,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:12,fontWeight:600}}>{lbl}</span><span style={{fontSize:14,fontWeight:700}}>{getIntervalLabel(null,r,settings)}</span></button>)}</div></div>}
+      {showBack&&<div>
+        <Lbl>Comment était-ce ?</Lbl>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginTop:10}}>
+          {[[1,"À revoir",C.again,C.againBg],[2,"Difficile",C.hard,C.hardBg],[3,"Bien",C.good,C.goodBg],[4,"Facile",C.easy,C.easyBg]].map(([r,lbl,btnCol,btnBg])=><button key={r} onClick={()=>handleRate(r)} style={{fontFamily:font,padding:"14px 8px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${btnCol}`,background:btnBg,color:btnCol,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:12,fontWeight:600}}>{lbl}</span><span style={{fontSize:14,fontWeight:700}}>{getIntervalLabel(cardProg,r,settings)}</span></button>)}
+        </div>
+        {/* Changer l'importance de cette carte (pour cet utilisateur uniquement) */}
+        {!isAdmin&&onChangePacket&&<div style={{marginTop:14}}>
+          <button onClick={()=>setShowPktChange(s=>!s)} style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${showPktChange?C.accent:C.border}`,background:showPktChange?C.accentBg:"transparent",color:showPktChange?C.accent:C.textLt,display:"flex",alignItems:"center",gap:5}}>📦 Changer l'importance (pour moi uniquement) {showPktChange?"▲":"▼"}</button>
+          {showPktChange&&<div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+            {PACKETS.map(pk=>{
+              const currentPkt=progress?.[card.id]?.packetOverride||card.packetId;
+              const isActive=currentPkt===pk.id;
+              const isOriginal=!progress?.[card.id]?.packetOverride&&card.packetId===pk.id;
+              return<button key={pk.id} onClick={()=>{onChangePacket(card,pk.id);setShowPktChange(false);}} style={{fontFamily:font,fontSize:12,fontWeight:isActive?600:400,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${isActive?pC(pk.id):C.border}`,background:isActive?pB(pk.id):"transparent",color:isActive?pC(pk.id):C.textMed,display:"flex",alignItems:"center",gap:5}}>
+                {isActive&&"✓ "}{pk.label}{isOriginal&&<span style={{fontSize:9,color:C.textLt}}>(original)</span>}
+              </button>;
+            })}
+            {progress?.[card.id]?.packetOverride&&<button onClick={()=>{onChangePacket(card,card.packetId);setShowPktChange(false);}} style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again}}>↩ Rétablir l'original</button>}
+          </div>}
+        </div>}
+      </div>}
     </div>
   </div>;
 }
@@ -1718,60 +1759,68 @@ function App(){
     ...userCards.filter(c=>c.integrated) // Only integrated personal cards appear in GroupBlock/onglets
   ],[cards,userCards]);
 
+  const getNewShownToday=useCallback(()=>{
+    if(!currentUser||currentUser.role==="admin")return 0;
+    return getStats(currentUser.username).days[dateKey()]?.newShown||0;
+  },[currentUser]);
+
   const startStudy=useCallback((gid,num,chapterId,pkId)=>{
-    // Personal cards mode
     if(gid==="__user__"){
-      const queue=buildQueue(userCards,prog,settings);
+      const queue=buildQueue(userCards,prog,settings,getNewShownToday());
       if(!queue.length){alert("Aucune carte personnelle à réviser !");return;}
       setStudyCtx({label:"Mes flashcards personnelles",queue});setView("study");return;
     }
     const grp=GROUPS.find(g=>g.id===gid);
-    // "Tout" (chapitre) ou "Cours complet" → même SRS que les boutons de paquets, mais tous paquets combinés
     if(pkId==="__all__"||pkId==="__course__"){
       const isCourse=pkId==="__course__";
       const filtered=allCards.filter(c=>c.groupId===gid&&c.num===num&&(isCourse||c.chapterId===chapterId));
-      const queue=buildQueue(filtered,prog,settings); // SRS: only due cards
+      const queue=buildQueue(filtered,prog,settings,getNewShownToday());
       if(!queue.length){alert(isCourse?"Aucune carte à réviser pour ce cours !":"Aucune carte à réviser pour ce chapitre !");return;}
       const chName=!isCourse&&chapterId?getChapters(gid,num)[chapterId-1]:`Ch.${chapterId}`;
-      const label=isCourse
-        ?`${grp?.label} · Cours ${num} · Cours complet`
-        :`${grp?.label} · Cours ${num} · ${chName} · Tout`;
-      setStudyCtx({label,queue});
-      setView("study");return;
+      const label=isCourse?`${grp?.label} · Cours ${num} · Cours complet`:`${grp?.label} · Cours ${num} · ${chName} · Tout`;
+      setStudyCtx({label,queue});setView("study");return;
     }
-    // Normal SRS study (only due cards)
-    const queue=buildQueue(allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&c.packetId===pkId),prog,settings);
+    // Normal SRS — use effective packet
+    const queue=buildQueue(allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId),prog,settings,getNewShownToday());
     if(!queue.length){alert("Aucune carte à réviser !");return;}
     const chName=getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`;
     setStudyCtx({label:`${grp?.label} · Cours ${num} · ${chName} · ${PACKETS.find(p=>p.id===pkId)?.label}`,queue});
     setView("study");
-  },[allCards,userCards,prog,settings]);
+  },[allCards,userCards,prog,settings,getNewShownToday]);
 
   const startGlobalStudy=useCallback(pkId=>{
     const ids=currentUser?.plan?.groups||[];
-    const queue=buildQueue(allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||c.packetId===pkId)),prog,settings);
+    const queue=buildQueue(allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)),prog,settings,getNewShownToday());
     if(!queue.length){alert("Aucune carte à réviser !");return;}
     setStudyCtx({label:pkId?`Révision globale · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Révision globale · Toutes",queue});
     setView("study");
-  },[allCards,prog,currentUser,settings]);
+  },[allCards,prog,currentUser,settings,getNewShownToday]);
 
   const handleRate=useCallback(async(card,rating,elapsedMs=0)=>{
+    const wasNew=isNew(prog[card.id]); // Track before state changes
     const np=computeNext(prog[card.id],rating,settings);
     saveProg({...prog,[card.id]:np});
-    if(currentUser&&currentUser.role!=="admin"){recordStat(currentUser.username,rating>=3,elapsedMs);}
+    if(currentUser&&currentUser.role!=="admin"){
+      recordStat(currentUser.username,rating>=3,elapsedMs,wasNew);
+    }
     return np;
   },[prog,saveProg,settings,currentUser]);
 
   const handleBury=useCallback((card)=>{
-    // Bury: set buried:true in progress — only affects this user's sessions
     const existing=prog[card.id]||{};
     saveProg({...prog,[card.id]:{...existing,buried:true}});
   },[prog,saveProg]);
 
   const handleUnbury=useCallback((cardId)=>{
     const existing=prog[cardId]||{};
-    const {buried:_,...rest}=existing; // Remove buried flag
+    const {buried:_,...rest}=existing;
     saveProg({...prog,[cardId]:rest});
+  },[prog,saveProg]);
+
+  // Override a card's packet for this user only (stored in progress)
+  const handleChangePacket=useCallback((card,newPktId)=>{
+    const existing=prog[card.id]||{};
+    saveProg({...prog,[card.id]:{...existing,packetOverride:newPktId}});
   },[prog,saveProg]);
 
   if(view==="loading") return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}><p style={{fontFamily:serif,fontSize:28,letterSpacing:-0.5}}>MyFlashcard</p><p style={{color:C.textLt,fontSize:13}}>Chargement…</p></div>;
@@ -1781,7 +1830,7 @@ function App(){
   // User card editor: CardEditor in user mode (creates to user_cards table)
   if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]}/>;
   if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)}/>;
-  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog}/>;
+  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onBack={()=>setView("dashboard")}/>;
   if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")}/>;
   return null;
