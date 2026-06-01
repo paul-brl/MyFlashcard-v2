@@ -1994,13 +1994,14 @@ function App(){
   },[currentUser,userCards,userCardEditor]);
 
   const handleBatchSortCards=useCallback(async(updatedCards)=>{
-    // updatedCards: array of cards with new sort_order values
     setCards(prev=>{
       const map={};updatedCards.forEach(c=>{map[c.id]=c;});
       return prev.map(c=>map[c.id]||c).sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
     });
     await supa.batchUpdateSort(updatedCards.map(c=>({id:c.id,sort_order:c.sort_order})));
   },[]);
+
+  const handleDeleteUserCard=useCallback(async id=>{
     await supa.deleteUserCard(id);
     setUserCards(prev=>{
       const newCards=prev.filter(c=>c.id!==id);
