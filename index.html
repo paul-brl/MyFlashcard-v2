@@ -846,6 +846,25 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   };
   const handleCancelOrder=()=>setPendingCards(null);
 
+  // Position input with local state — allows deleting digits, applies on blur/Enter
+  function PosInput({card,currentPos,max,onMove}){
+    const[val,setVal]=useState(String(currentPos));
+    useEffect(()=>setVal(String(currentPos)),[currentPos]);
+    const apply=()=>{
+      const n=parseInt(val);
+      if(n>=1&&n<=max)onMove(card,n);
+      else setVal(String(currentPos)); // reset if invalid
+    };
+    return<input
+      type="number" min={1} max={max} value={val}
+      onChange={e=>setVal(e.target.value)}
+      onBlur={apply}
+      onKeyDown={e=>{if(e.key==="Enter")apply();if(e.key==="Escape")setVal(String(currentPos));}}
+      style={{width:"100%",textAlign:"center",fontFamily:mono,fontSize:11,fontWeight:700,color:C.accent,background:"transparent",border:"none",outline:"none",cursor:"text",padding:0,MozAppearance:"textfield"}}
+      title={`Position dans le chapitre (1–${max}). Taper un numéro + Entrée pour déplacer.`}
+    />;
+  }
+
   const Pill=({active,onClick,children,color,bg})=>(<button onClick={onClick} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"5px 12px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${active?(color||C.accent):C.border}`,background:active?(bg||C.accentBg):"transparent",color:active?(color||C.accent):C.textMed,whiteSpace:"nowrap",transition:"all 0.12s"}}>{children}</button>);
   const q=search.toLowerCase().trim();
   const highlight=text=>{if(!q||!text)return text;const idx=text.toLowerCase().indexOf(q);if(idx===-1)return text;return<>{text.slice(0,idx)}<mark style={{background:"#fef08a",borderRadius:2,padding:"0 1px"}}>{text.slice(idx,idx+q.length)}</mark>{text.slice(idx+q.length)}</>;};
@@ -913,13 +932,11 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               {/* Position — editable input in chapter view, static badge otherwise */}
               {canReorder?(
                 <div style={{width:44,background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,borderRight:`1px solid ${C.border}`,padding:"4px 2px"}}>
-                  <input
-                    type="number" min={1} max={filtered.length}
-                    value={(pendingCards?pendingCards.find(p=>p.id===card.id)?.sort_order:card.sort_order)||idx+1}
-                    onChange={e=>e.target.value&&handlePositionInput(card,e.target.value)}
-                    onKeyDown={e=>e.key==="Enter"&&e.target.blur()}
-                    style={{width:"100%",textAlign:"center",fontFamily:mono,fontSize:11,fontWeight:700,color:C.accent,background:"transparent",border:"none",outline:"none",cursor:"text",padding:0}}
-                    title="Taper un numéro pour déplacer la carte"
+                  <PosInput
+                    card={card}
+                    currentPos={(pendingCards?pendingCards.find(p=>p.id===card.id)?.sort_order:card.sort_order)||idx+1}
+                    max={filtered.length}
+                    onMove={handlePositionInput}
                   />
                 </div>
               ):(
