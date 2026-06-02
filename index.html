@@ -1017,7 +1017,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
                   <div><p style={{fontFamily:serif,fontSize:15,color:C.text,margin:"0 0 10px"}}>Image Occlusion</p><OcclusionCanvas cardFront={card.front} showBack={false} showOthers={false}/></div>
                 ):(
                   <>
-                    {fc?.text&&<p style={{fontFamily:serif,fontSize:17,lineHeight:1.7,margin:"0 0 8px",color:C.text}}>{fc.text}</p>}
+                    {fc?.text&&<p style={{fontFamily:serif,fontSize:17,lineHeight:1.7,margin:"0 0 8px",color:C.text,whiteSpace:"pre-wrap"}}>{fc.text}</p>}
                     {fc?.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}
                     {!fc?.text&&!fc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}
                   </>
@@ -1027,7 +1027,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               {!isOcclusion(card)&&(
                 <div style={{background:C.surface,border:`1.5px solid ${col}`,borderRadius:10,padding:"18px 20px"}}>
                   <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Verso — Réponse</p>
-                  {bc?.text&&<p style={{fontSize:15,lineHeight:1.7,margin:"0 0 8px",color:C.textMed}}>{bc.text}</p>}
+                  {bc?.text&&<p style={{fontSize:15,lineHeight:1.7,margin:"0 0 8px",color:C.textMed,whiteSpace:"pre-wrap"}}>{bc.text}</p>}
                   {bc?.img&&<img src={bc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}
                   {!bc?.text&&!bc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}
                 </div>
@@ -1825,14 +1825,14 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
                 {/* Front face */}
                 <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",minHeight:minH}}>
                   <Lbl>Question · cliquer pour révéler</Lbl>
-                  {fc.text&&<p style={{fontFamily:serif,fontSize:20,lineHeight:1.6,margin:"8px 0 0",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{fc.text}</p>}
+                  {fc.text&&<p style={{fontFamily:serif,fontSize:20,lineHeight:1.6,margin:"8px 0 0",whiteSpace:"pre-wrap",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{fc.text}</p>}
                   {fc.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,marginTop:fc.text?12:0,display:"block",objectFit:"contain"}}/>}
                   <p style={{fontSize:12,color:C.textLt,position:"absolute",bottom:14,right:18}}>Cliquer pour révéler →</p>
                 </div>
                 {/* Back face */}
                 <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${col}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",transform:"rotateY(180deg)",minHeight:minH}}>
                   <Lbl>Réponse · cliquer pour revoir la question</Lbl>
-                  {bc.text&&<p style={{fontSize:15,lineHeight:1.8,margin:"8px 0 0",color:C.textMed,...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{bc.text}</p>}
+                  {bc.text&&<p style={{fontSize:15,lineHeight:1.8,margin:"8px 0 0",color:C.textMed,whiteSpace:"pre-wrap",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}>{bc.text}</p>}
                   {bc.img&&<img src={bc.img} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,marginTop:bc.text?12:0,display:"block",objectFit:"contain"}}/>}
                 </div>
               </div>
