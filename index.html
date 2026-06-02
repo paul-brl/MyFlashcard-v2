@@ -2078,6 +2078,7 @@ function Landing({onBack,onRegister}){
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 function App(){
+  const [supaError,setSupaError]=useState(null); // shows banner when Supabase is unreachable
   const [view,setView]=useState("loading"),[currentUser,setCurrentUser]=useState(null),[cards,setCards]=useState([]),[prog,setProg]=useState({}),[settings,setSettings]=useState(DEFAULT_SETTINGS),[accounts,setAccounts]=useState([]),[studyCtx,setStudyCtx]=useState(null),[paymentStatus,setPaymentStatus]=useState(null);
   const [userCards,setUserCards]=useState([]); // Personal cards for the logged-in user
   const [userCardEditor,setUserCardEditor]=useState(null); // null=hidden, false=new, card=edit
@@ -2088,22 +2089,46 @@ function App(){
       try {
         const savedSet=storage.get("mx6-settings");
         if(savedSet)setSettings({...DEFAULT_SETTINGS,...savedSet});
-        // Supabase free tier peut mettre jusqu'à 15s sur cold start — timeout augmenté
         const fetchWithTimeout=(url,opts,ms=15000)=>{const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),ms);return fetch(url,{...opts,signal:ctrl.signal}).finally(()=>clearTimeout(timer));};
+
+        // Paginated card fetch: 200 cards per batch to avoid Supabase timeout on large base64 image data
         let loadedCards=null;
-        // Retry up to 2 times in case of Supabase cold start
-        for(let attempt=0;attempt<2&&loadedCards===null;attempt++){
-          try {
-            if(attempt>0)await new Promise(r=>setTimeout(r,2000)); // 2s wait before retry
-            // Simple fetch — JS handles sorting (avoids issues if sort_order column doesn't exist yet)
-            const r=await fetchWithTimeout(`${SUPA_URL}/rest/v1/cards?select=*`,{headers:H},15000);
+        try {
+          const BATCH=200;
+          const allRows=[];
+          let from=0;
+          let hasMore=true;
+          while(hasMore){
+            const r=await fetchWithTimeout(
+              `${SUPA_URL}/rest/v1/cards?select=*&order=id.asc`,
+              {headers:{...H,"Range":`${from}-${from+BATCH-1}`,"Range-Unit":"items","Prefer":"count=none"}},
+              15000
+            );
             const d=await r.json();
-            if(r.ok&&Array.isArray(d)){
-              loadedCards=d.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
-              console.log(`Cards loaded: ${loadedCards.length} (attempt ${attempt+1})`);
-            } else { console.warn("Cards fetch unexpected response:",d); }
-          } catch(e){ console.warn(`Cards fetch failed (attempt ${attempt+1}):`,e); }
-        }
+            if(!r.ok||!Array.isArray(d)){
+              // If range not supported or error, fall back to simple fetch with smaller timeout
+              if(allRows.length===0){
+                console.warn("Paginated fetch failed, trying simple fetch:",d);
+                const r2=await fetchWithTimeout(`${SUPA_URL}/rest/v1/cards?select=*`,{headers:H},20000);
+                const d2=await r2.json();
+                if(r2.ok&&Array.isArray(d2))allRows.push(...d2);
+                else{setSupaError(d2?.message||d?.message||"Supabase inaccessible");console.warn("Cards fetch failed:",d2);}
+              }
+              break;
+            }
+            allRows.push(...d);
+            console.log(`Cards batch ${from}-${from+d.length-1}: ${d.length} rows`);
+            hasMore=d.length===BATCH;
+            from+=BATCH;
+          }
+          if(allRows.length>0){
+            loadedCards=allRows.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
+            console.log(`✅ Total cards loaded: ${loadedCards.length}`);
+            setSupaError(null);
+          } else if(allRows.length===0&&loadedCards===null){
+            loadedCards=[];
+          }
+        } catch(e){ console.warn("Cards fetch error:",e);setSupaError("Erreur réseau — "+e.message); }
         if(loadedCards&&loadedCards.length>0){
           try {
             const needsInit=loadedCards.some(c=>c.sort_order==null);
@@ -2490,7 +2515,16 @@ function App(){
     }
   },[prog,saveProg]);
 
-  if(view==="loading") return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}><p style={{fontFamily:serif,fontSize:28,letterSpacing:-0.5}}>MyFlashcard</p><p style={{color:C.textLt,fontSize:13}}>Chargement…</p></div>;
+  if(view==="loading") return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+    <p style={{fontFamily:serif,fontSize:28,letterSpacing:-0.5}}>MyFlashcard</p>
+    <p style={{color:C.textLt,fontSize:13}}>Connexion à Supabase…</p>
+    {supaError&&<div style={{marginTop:12,maxWidth:400,background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:10,padding:"16px 20px",textAlign:"center"}}>
+      <p style={{fontSize:14,fontWeight:600,color:"#dc2626",margin:"0 0 8px"}}>⚠️ Supabase ne répond pas</p>
+      <p style={{fontSize:12,color:"#7f1d1d",margin:"0 0 12px",lineHeight:1.6}}>Erreur : <code>{supaError}</code><br/>Ton projet Supabase est peut-être <strong>en pause</strong> (plan gratuit).</p>
+      <a href="https://supabase.com/dashboard" target="_blank" style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",borderRadius:6,background:"#dc2626",color:"#fff",textDecoration:"none",display:"inline-block"}}>→ Ouvrir Supabase Dashboard</a>
+      <p style={{fontSize:11,color:"#7f1d1d",margin:"10px 0 0"}}>Cherche "Restore project" ou "Unpause" sur ton projet.</p>
+    </div>}
+  </div>;
   if(view==="landing")   return <Landing onBack={()=>setView("login")} onRegister={()=>setView("register")}/>;
   if(view==="login")     return <LoginView onLogin={handleLogin} onShowLanding={()=>setView("landing")} onRegister={()=>setView("register")} accounts={accounts} onPasswordReset={(em,pwd)=>setAccounts(p=>p.map(a=>a.username===em?{...a,password:pwd}:a))}/>;
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
