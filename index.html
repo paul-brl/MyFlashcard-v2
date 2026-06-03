@@ -79,6 +79,21 @@ const supa = {
   },
   deleteCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
   getAccounts: async () => { try { const r=await fetch(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H}); return await r.json(); } catch { return []; } },
+  // Admin: fetch full cards (with front+back) server-side filtered — used in AdminCards
+  getCardsAdmin: async (filters={}) => {
+    try {
+      let url=`${SUPA_URL}/rest/v1/cards?select=id,front,back,group_id,num,chapter_id,packet_id,sort_order`;
+      if(filters.groupId)url+=`&group_id=eq.${encodeURIComponent(filters.groupId)}`;
+      if(filters.num!==null&&filters.num!==undefined&&filters.num!=="all")url+=`&num=eq.${filters.num}`;
+      if(filters.chapterId!==null&&filters.chapterId!==undefined&&filters.chapterId!=="all")url+=`&chapter_id=eq.${filters.chapterId}`;
+      if(filters.packetId&&filters.packetId!=="all")url+=`&packet_id=eq.${encodeURIComponent(filters.packetId)}`;
+      url+=`&order=sort_order.asc,id.asc&limit=500`;
+      const r=await fetch(url,{headers:H});
+      const d=await r.json();
+      if(!r.ok||!Array.isArray(d))return[];
+      return d.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
+    } catch(e){console.warn("getCardsAdmin error:",e);return[];}
+  },
   upsertAccount: async (acc) => {
     try {
       await fetch(`${SUPA_URL}/rest/v1/accounts`, {
@@ -971,7 +986,9 @@ function CardEditor({card,onSave,onCancel,userGroups}){
 function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   const [search,setSearch]=useState(""),[sem,setSem]=useState("all"),[fg,setFg]=useState("all"),[fn,setFn]=useState("all"),[fc,setFc]=useState("all"),[fp,setFp]=useState("all"),[delId,setDelId]=useState(null),[showFilters,setShowFilters]=useState(true);
   const [dragIdx,setDragIdx]=useState(null),[dragOverIdx,setDragOverIdx]=useState(null),[pendingCards,setPendingCards]=useState(null),[saving,setSaving]=useState(false);
-  const [previewIdx,setPreviewIdx]=useState(null); // index in filtered list for preview modal
+  const [previewIdx,setPreviewIdx]=useState(null);
+  const [adminCards,setAdminCards]=useState([]); // full cards with front+back, loaded from Supabase
+  const [adminLoading,setAdminLoading]=useState(false);
   const searchRef=useRef(null);
   const semGroups=sem==="all"?GROUPS:GROUPS.filter(g=>sem==="pr"?g.sem===0:sem==="s1"?g.sem===1:g.sem===2);
   const selGroup=GROUPS.find(g=>g.id===fg);
@@ -983,25 +1000,55 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   const clearAll=()=>{setSem("all");setFg("all");setFn("all");setFc("all");setFp("all");setSearch("");};
   const hasFilters=sem!=="all"||fg!=="all"||fn!=="all"||fc!=="all"||fp!=="all"||search.trim();
 
+  // Server-side fetch: loads full card content based on current filters
+  useEffect(()=>{
+    let cancelled=false;
+    const fetchAdmin=async()=>{
+      setAdminLoading(true);
+      const filters={};
+      if(fg!=="all")filters.groupId=fg;
+      if(fn!=="all")filters.num=fn;
+      if(fc!=="all")filters.chapterId=fc;
+      if(fp!=="all")filters.packetId=fp;
+      const result=await supa.getCardsAdmin(filters);
+      if(!cancelled){setAdminCards(result);setPendingCards(null);}
+      setAdminLoading(false);
+    };
+    fetchAdmin();
+    return()=>{cancelled=true;};
+  },[fg,fn,fc,fp]);
+
   const baseFiltered=useMemo(()=>{
     const q=search.toLowerCase().trim();
-    return cards.filter(c=>{
+    return adminCards.filter(c=>{
       const g=GROUPS.find(gr=>gr.id===c.groupId);
       if(sem!=="all"){const gSem=sem==="pr"?0:sem==="s1"?1:2;if(g?.sem!==gSem)return false;}
-      if(fg!=="all"&&c.groupId!==fg)return false;if(fn!=="all"&&c.num!==fn)return false;
-      if(fc!=="all"&&c.chapterId!==fc)return false;if(fp!=="all"&&c.packetId!==fp)return false;
-      if(q){const chName=getChapters(c.groupId,c.num)[c.chapterId-1]||"";const text=`${c.front} ${c.back} ${g?.label||""} ${chName}`.toLowerCase();if(!text.includes(q))return false;}
+      if(q){const chName=getChapters(c.groupId,c.num)[c.chapterId-1]||"";const text=`${c.front||""} ${c.back||""} ${g?.label||""} ${chName}`.toLowerCase();if(!text.includes(q))return false;}
       return true;
     });
-  },[cards,sem,fg,fn,fc,fp,search]);
+  },[adminCards,sem,search]);
 
   // pendingCards tracks reordered state; falls back to baseFiltered
   const filtered=pendingCards||baseFiltered;
-  // Reset pending when filters change
-  useEffect(()=>{setPendingCards(null);},[sem,fg,fn,fc,fp,search]);
+
+  // Fetch front/back content for visible filtered cards that don't have it yet
+  useEffect(()=>{
+    const idsNeeded=filtered.filter(c=>!c.front&&!contentMap[c.id]).map(c=>c.id);
+    if(idsNeeded.length===0)return;
+    setContentLoading(true);
+    supa.getCardsContent(idsNeeded).then(content=>{
+      setContentMap(prev=>({...prev,...content}));
+      setContentLoading(false);
+    }).catch(()=>setContentLoading(false));
+  },[filtered.map(c=>c.id).join(',')]); // re-run when filtered card IDs change
+
+  // Get display content for a card (from state if available, else from contentMap)
+  const getCardContent=(card)=>({
+    front:card.front||contentMap[card.id]?.front||null,
+    back:card.back||contentMap[card.id]?.back||null,
+  });
 
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
-
   // Drag & drop — only active when a specific chapter is selected
   const canReorder=fc!=="all";
   const handleDragStart=(e,idx)=>{if(!canReorder)return;setDragIdx(idx);e.dataTransfer.effectAllowed="move";};
@@ -1081,7 +1128,12 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     {/* Header + save order banner */}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
       <div style={{display:"flex",alignItems:"center",gap:12}}>
-        <p style={{fontSize:13,color:C.textMed,margin:0}}><strong style={{color:C.text,fontSize:15}}>{stats.total}</strong> carte{stats.total!==1?"s":""}{hasFilters&&<span style={{color:C.textLt,fontSize:12}}> / {cards.length} au total</span>}</p>
+        <p style={{fontSize:13,color:C.textMed,margin:0}}>
+                {adminLoading
+                  ?<span style={{color:C.accent}}>⏳ Chargement…</span>
+                  :<><strong style={{color:C.text,fontSize:15}}>{stats.total}</strong> carte{stats.total!==1?"s":""} · {cards.length} total en base</>
+                }
+              </p>
         {stats.total>0&&<div style={{display:"flex",gap:5}}><span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:C.prioBg,color:C.prio,fontWeight:600}}>{stats.prio} P</span><span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:C.impBg,color:C.imp,fontWeight:600}}>{stats.imp} I</span><span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:C.utilBg,color:C.util,fontWeight:600}}>{stats.utile} U</span></div>}
         {pendingCards&&<div style={{display:"flex",alignItems:"center",gap:8,background:"#fff7ed",border:"1px solid #f59e0b",borderRadius:8,padding:"4px 12px"}}>
           <span style={{fontSize:12,color:"#b45309",fontWeight:500}}>⚠ Ordre modifié, non sauvegardé</span>
@@ -1156,16 +1208,18 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
                     <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:0}}>Image Occlusion</p>
                   </div>
                 ):(()=>{
-                  const fc=parseContent(card.front),bc=parseContent(card.back);
-                  const ft=(fc.text||"").slice(0,200),bt=(bc.text||"").slice(0,150);
+                  const{front:cardFront,back:cardBack}=getCardContent(card);
+                  const fc=parseContent(cardFront),bc=parseContent(cardBack);
+                  const ft=(fc?.text||"").slice(0,200),bt=(bc?.text||"").slice(0,150);
+                  if(!cardFront&&contentLoading)return<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Chargement…</p>;
                   return<>
                     <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(ft)}</p>
-                      {fc.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
+                      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(ft)||<span style={{color:C.textLt,fontStyle:"italic"}}>—</span>}</p>
+                      {fc?.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <p style={{fontSize:12,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(bt)}</p>
-                      {bc.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
+                      <p style={{fontSize:12,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(bt)||<span style={{fontStyle:"italic"}}>—</span>}</p>
+                      {bc?.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
                     </div>
                   </>;
                 })()}
@@ -1187,8 +1241,9 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
       const grp=GROUPS.find(g=>g.id===card.groupId);
       const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
       const col=pC(card.packetId);
-      const fc=isOcclusion(card)?null:parseContent(card.front);
-      const bc=isOcclusion(card)?null:parseContent(card.back);
+      const{front:cardFront,back:cardBack}=getCardContent(card);
+      const fc=isOcclusion(card)?null:parseContent(cardFront);
+      const bc=isOcclusion(card)?null:parseContent(cardBack);
       return(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setPreviewIdx(null)}>
           <div style={{background:C.bg,borderRadius:14,width:"100%",maxWidth:640,maxHeight:"90vh",overflow:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.35)"}} onClick={e=>e.stopPropagation()}>
