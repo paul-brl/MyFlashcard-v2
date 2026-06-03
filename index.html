@@ -27,14 +27,40 @@ const EDGE_URL = `${SUPA_URL}/functions/v1`;
 const H = { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${SUPA_KEY}` };
 
 const supa = {
-  getCards: async () => {
+  // Load metadata only — NO front/back. Fast even for 100k cards.
+  getCardsMeta: async () => {
+    const allRows=[];
+    let offset=0;
+    const BATCH=1000; // metadata rows are tiny (~100 bytes each)
     try {
-      const r = await fetch(`${SUPA_URL}/rest/v1/cards?select=*&order=sort_order.asc,id.asc`, { headers: H });
-      const d = await r.json();
-      if(!Array.isArray(d))return null;
-      return d.map((c,i) => ({ id:c.id, front:c.front, back:c.back, groupId:c.group_id, num:c.num, chapterId:c.chapter_id||1, packetId:c.packet_id, sort_order:c.sort_order??i }));
-    } catch { return null; }
+      while(true){
+        const r=await fetch(`${SUPA_URL}/rest/v1/cards?select=id,group_id,num,chapter_id,packet_id,sort_order&limit=${BATCH}&offset=${offset}`,{headers:H});
+        const d=await r.json();
+        if(!r.ok||!Array.isArray(d)||d.length===0)break;
+        allRows.push(...d);
+        if(d.length<BATCH)break;
+        offset+=BATCH;
+      }
+      return allRows.map(c=>({id:c.id,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null,front:null,back:null}));
+    } catch(e){console.warn("getCardsMeta error:",e);return null;}
   },
+  // Load front+back for specific card IDs only (called when starting a study session)
+  getCardsContent: async (ids) => {
+    if(!ids||ids.length===0)return {};
+    const CHUNK=100; // PostgREST URL length limit
+    const result={};
+    try {
+      for(let i=0;i<ids.length;i+=CHUNK){
+        const chunk=ids.slice(i,i+CHUNK);
+        const idList=chunk.map(id=>`"${id}"`).join(',');
+        const r=await fetch(`${SUPA_URL}/rest/v1/cards?select=id,front,back&id=in.(${idList})`,{headers:H});
+        const d=await r.json();
+        if(r.ok&&Array.isArray(d))d.forEach(c=>{result[c.id]={front:c.front,back:c.back};});
+      }
+    } catch(e){console.warn("getCardsContent error:",e);}
+    return result;
+  },
+  getCards: async () => { return null; }, // deprecated — use getCardsMeta
   upsertCard: async (card) => {
     try {
       await fetch(`${SUPA_URL}/rest/v1/cards`, {
@@ -2105,40 +2131,19 @@ function App(){
       try {
         const savedSet=storage.get("mx6-settings");
         if(savedSet)setSettings({...DEFAULT_SETTINGS,...savedSet});
-        const fetchWithTimeout=(url,opts,ms=15000)=>{const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),ms);return fetch(url,{...opts,signal:ctrl.signal}).finally(()=>clearTimeout(timer));};
-
-        // Paginated card fetch using limit/offset — continues until empty response
+        // Load card METADATA only (no front/back) — instant even for 100k cards
         let loadedCards=null;
         try {
-          const BATCH=100; // smaller batches to avoid statement timeout
-          const allRows=[];
-          let offset=0;
-          let keepGoing=true;
-          while(keepGoing){
-            const url=`${SUPA_URL}/rest/v1/cards?select=*&limit=${BATCH}&offset=${offset}`;
-            const r=await fetchWithTimeout(url,{headers:H},15000);
-            const d=await r.json();
-            if(!r.ok||!Array.isArray(d)){
-              console.warn(`Batch at offset ${offset} failed:`,d);
-              keepGoing=false;
-              break;
-            }
-            if(d.length===0){keepGoing=false;break;}
-            allRows.push(...d);
-            console.log(`Batch offset=${offset}: ${d.length} rows (total so far: ${allRows.length})`);
-            keepGoing=d.length===BATCH; // continue only if we got a full batch
-            offset+=d.length;
-          }
-          if(allRows.length>0){
-            loadedCards=allRows.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
-            console.log(`✅ Total cards loaded: ${loadedCards.length}`);
+          loadedCards=await supa.getCardsMeta();
+          if(loadedCards){
+            console.log(`✅ Metadata loaded: ${loadedCards.length} cards`);
             setSupaError(null);
           } else {
-            loadedCards=[];
-            console.log("No cards found in database");
+            console.warn("getCardsMeta returned null");
+            setSupaError("Impossible de charger les cartes — vérifie Supabase");
           }
         } catch(e){
-          console.warn("Cards fetch error:",e);
+          console.warn("Cards metadata fetch error:",e);
           setSupaError("Erreur réseau — "+e.message);
         }
         if(loadedCards&&loadedCards.length>0){
@@ -2460,7 +2465,15 @@ function App(){
     return getStats(currentUser.username).days[dateKey()]?.newShown||0;
   },[currentUser]);
 
-  const startStudy=useCallback((gid,num,chapterId,pkId)=>{
+  // Enrich queue cards with front/back content from Supabase (only cards that don't have it yet)
+  const enrichCards=useCallback(async(queue)=>{
+    const needsContent=queue.filter(c=>!c.front);
+    if(needsContent.length===0)return queue;
+    const content=await supa.getCardsContent(needsContent.map(c=>c.id));
+    return queue.map(c=>c.front?c:{...c,...(content[c.id]||{front:"[contenu non disponible]",back:""})});
+  },[]);
+
+  const startStudy=useCallback(async(gid,num,chapterId,pkId)=>{
     if(gid==="__user__"){
       const queue=buildQueue(userCards,prog,settings,getNewShownToday(),true);
       if(!queue.length){alert(getEmptyQueueMsg(userCards,prog,settings,getNewShownToday()));return;}
@@ -2472,27 +2485,29 @@ function App(){
       const filtered=allCards.filter(c=>c.groupId===gid&&c.num===num&&(isCourse||c.chapterId===chapterId));
       const queue=buildQueue(filtered,prog,settings,getNewShownToday(),true);
       if(!queue.length){alert(getEmptyQueueMsg(filtered,prog,settings,getNewShownToday()));return;}
+      const fullQueue=await enrichCards(queue);
       const chName=!isCourse&&chapterId?getChapters(gid,num)[chapterId-1]:`Ch.${chapterId}`;
       const label=isCourse?`${grp?.label} · Cours ${num} · Cours complet`:`${grp?.label} · Cours ${num} · ${chName} · Tout`;
-      setStudyCtx({label,queue});setView("study");return;
+      setStudyCtx({label,queue:fullQueue});setView("study");return;
     }
-    // Normal SRS — use effective packet, scopeOnly (nouvelles cartes de ce chapitre uniquement)
     const scopeFiltered=allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId);
     const queue=buildQueue(scopeFiltered,prog,settings,getNewShownToday(),true);
     if(!queue.length){alert(getEmptyQueueMsg(scopeFiltered,prog,settings,getNewShownToday()));return;}
+    const fullQueue=await enrichCards(queue);
     const chName=getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`;
-    setStudyCtx({label:`${grp?.label} · Cours ${num} · ${chName} · ${PACKETS.find(p=>p.id===pkId)?.label}`,queue});
+    setStudyCtx({label:`${grp?.label} · Cours ${num} · ${chName} · ${PACKETS.find(p=>p.id===pkId)?.label}`,queue:fullQueue});
     setView("study");
-  },[allCards,userCards,prog,settings,getNewShownToday]);
+  },[allCards,userCards,prog,settings,getNewShownToday,enrichCards]);
 
-  const startGlobalStudy=useCallback(pkId=>{
+  const startGlobalStudy=useCallback(async pkId=>{
     const ids=currentUser?.plan?.groups||[];
     const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId));
     const queue=buildQueue(globalFiltered,prog,settings,getNewShownToday(),false);
     if(!queue.length){alert(getEmptyQueueMsg(globalFiltered,prog,settings,getNewShownToday()));return;}
-    setStudyCtx({label:pkId?`Révision globale · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Révision globale · Toutes",queue});
+    const fullQueue=await enrichCards(queue);
+    setStudyCtx({label:pkId?`Révision globale · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Révision globale · Toutes",queue:fullQueue});
     setView("study");
-  },[allCards,prog,currentUser,settings,getNewShownToday]);
+  },[allCards,prog,currentUser,settings,getNewShownToday,enrichCards]);
 
   const handleRate=useCallback(async(card,rating,elapsedMs=0)=>{
     const existing=prog[card.id]||{};
