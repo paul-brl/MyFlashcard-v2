@@ -304,6 +304,22 @@ const CHAPTERS = {
 
 const getChapters = (groupId, num) => CHAPTERS[groupId]?.[num] || [];
 
+// Returns chapters to DISPLAY in GroupBlock: defined ones + any extra found in cards
+// This prevents cards with chapter_id > defined chapters from being invisible
+const getDisplayChapters = (groupId, num, cards) => {
+  const defined = CHAPTERS[groupId]?.[num] || [];
+  const maxInCards = cards
+    .filter(c => c.groupId === groupId && c.num === num)
+    .reduce((m, c) => Math.max(m, c.chapterId || 1), 0);
+  if (maxInCards <= defined.length) return defined;
+  // Extend with "Chapitre N" for undeclared chapters
+  const extended = [...defined];
+  for (let i = defined.length + 1; i <= maxInCards; i++) {
+    extended.push(`Chapitre ${i}`);
+  }
+  return extended;
+};
+
 const PACKETS = [
   { id:"prioritaire", label:"Prioritaire" },
   { id:"important",   label:"Important"   },
@@ -1293,7 +1309,7 @@ function ShopTab({userGroups,planId,username,cards,progress,settings,onStudy,onS
     const [activeCours,setActiveCours]=useState(null);
     const group=GROUPS.find(g=>g.id===plan.groups[0]);
     if(!group)return null;
-    const chapters=activeCours?getChapters(group.id,activeCours):[];
+    const chapters=activeCours?getDisplayChapters(group.id,activeCours,cards):[];
     const totalDue=group.nums.reduce((acc,n)=>acc+courseDueCount(cards,progress,group.id,n),0);
 
     function PktBtn({chapterId,pk}){
@@ -1756,7 +1772,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
   // GroupBlock with course tabs → chapter rows (uses allCards for accurate stats)
   function GroupBlock({group}){
     const [activeCours,setActiveCours]=useState(null);
-    const chapters=activeCours?getChapters(group.id,activeCours):[];
+    const chapters=activeCours?getDisplayChapters(group.id,activeCours,allCards):[];
 
     function PktBtn({chapterId,pk}){
       const col=pC(pk.id),bg=pB(pk.id);
@@ -2091,44 +2107,40 @@ function App(){
         if(savedSet)setSettings({...DEFAULT_SETTINGS,...savedSet});
         const fetchWithTimeout=(url,opts,ms=15000)=>{const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),ms);return fetch(url,{...opts,signal:ctrl.signal}).finally(()=>clearTimeout(timer));};
 
-        // Paginated card fetch: 200 cards per batch to avoid Supabase timeout on large base64 image data
+        // Paginated card fetch using limit/offset — continues until empty response
         let loadedCards=null;
         try {
-          const BATCH=200;
+          const BATCH=100; // smaller batches to avoid statement timeout
           const allRows=[];
-          let from=0;
-          let hasMore=true;
-          while(hasMore){
-            const r=await fetchWithTimeout(
-              `${SUPA_URL}/rest/v1/cards?select=*&order=id.asc`,
-              {headers:{...H,"Range":`${from}-${from+BATCH-1}`,"Range-Unit":"items","Prefer":"count=none"}},
-              15000
-            );
+          let offset=0;
+          let keepGoing=true;
+          while(keepGoing){
+            const url=`${SUPA_URL}/rest/v1/cards?select=*&limit=${BATCH}&offset=${offset}`;
+            const r=await fetchWithTimeout(url,{headers:H},15000);
             const d=await r.json();
             if(!r.ok||!Array.isArray(d)){
-              // If range not supported or error, fall back to simple fetch with smaller timeout
-              if(allRows.length===0){
-                console.warn("Paginated fetch failed, trying simple fetch:",d);
-                const r2=await fetchWithTimeout(`${SUPA_URL}/rest/v1/cards?select=*`,{headers:H},20000);
-                const d2=await r2.json();
-                if(r2.ok&&Array.isArray(d2))allRows.push(...d2);
-                else{setSupaError(d2?.message||d?.message||"Supabase inaccessible");console.warn("Cards fetch failed:",d2);}
-              }
+              console.warn(`Batch at offset ${offset} failed:`,d);
+              keepGoing=false;
               break;
             }
+            if(d.length===0){keepGoing=false;break;}
             allRows.push(...d);
-            console.log(`Cards batch ${from}-${from+d.length-1}: ${d.length} rows`);
-            hasMore=d.length===BATCH;
-            from+=BATCH;
+            console.log(`Batch offset=${offset}: ${d.length} rows (total so far: ${allRows.length})`);
+            keepGoing=d.length===BATCH; // continue only if we got a full batch
+            offset+=d.length;
           }
           if(allRows.length>0){
             loadedCards=allRows.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
             console.log(`✅ Total cards loaded: ${loadedCards.length}`);
             setSupaError(null);
-          } else if(allRows.length===0&&loadedCards===null){
+          } else {
             loadedCards=[];
+            console.log("No cards found in database");
           }
-        } catch(e){ console.warn("Cards fetch error:",e);setSupaError("Erreur réseau — "+e.message); }
+        } catch(e){
+          console.warn("Cards fetch error:",e);
+          setSupaError("Erreur réseau — "+e.message);
+        }
         if(loadedCards&&loadedCards.length>0){
           try {
             const needsInit=loadedCards.some(c=>c.sort_order==null);
@@ -2283,11 +2295,16 @@ function App(){
     const saved={...cd};
     if(!saved.id){
       saved.id=`card-${Date.now()}`;
-      // Assign local sort_order = max in this chapter + 1
       const chCards=cards.filter(c=>c.groupId===saved.groupId&&c.num===saved.num&&c.chapterId===saved.chapterId);
       saved.sort_order=chCards.length>0?Math.max(...chCards.map(c=>c.sort_order||0))+1:1;
     }
-    await supa.upsertCard(saved);
+    try {
+      await supa.upsertCard(saved);
+    } catch(e){
+      alert(`⚠️ ERREUR DE SAUVEGARDE\n\nLa carte n'a pas pu être enregistrée dans Supabase :\n${e.message||e}\n\nNote le contenu manuellement et réessaie.`);
+      console.error("upsertCard failed:",e);
+      return; // Don't add to local state if DB save failed
+    }
     setCards(prev=>{
       const exists=prev.find(c=>c.id===saved.id);
       return sortCardsGlobally(exists?prev.map(c=>c.id===saved.id?saved:c):[...prev,saved]);
