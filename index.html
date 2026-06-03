@@ -70,12 +70,16 @@ const supa = {
     } catch {}
   },
   batchUpdateSort: async (updates) => {
-    // updates = [{id, sort_order}]
-    try {
-      await Promise.all(updates.map(({id,sort_order})=>
-        fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"PATCH",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify({sort_order})})
-      ));
-    } catch {}
+    // Sequential chunks of 20 to avoid rate limiting
+    const CHUNK=20;
+    for(let i=0;i<updates.length;i+=CHUNK){
+      const chunk=updates.slice(i,i+CHUNK);
+      try {
+        await Promise.all(chunk.map(({id,sort_order})=>
+          fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"PATCH",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify({sort_order})})
+        ));
+      } catch(e){ console.warn("batchUpdateSort chunk failed:",e); }
+    }
   },
   deleteCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
   getAccounts: async () => { try { const r=await fetch(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H}); return await r.json(); } catch { return []; } },
@@ -1023,15 +1027,27 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   // Reset pending when filters change
   useEffect(()=>{setPendingCards(null);},[sem,fg,fn,fc,fp,search]);
 
-  // Auto-load front/back for filtered cards using ID-based fetch (fast — uses primary key index)
+  // Auto-load front/back for filtered cards — progressively in batches of 50
   const [contentMap,setContentMap]=useState({});
   useEffect(()=>{
     if(filtered.length===0)return;
     const missing=filtered.filter(c=>!contentMap[c.id]).map(c=>c.id);
     if(missing.length===0)return;
-    supa.getCardsContent(missing).then(data=>{
-      if(Object.keys(data).length>0)setContentMap(prev=>({...prev,...data}));
-    }).catch(()=>{});
+    let cancelled=false;
+    const BATCH=50;
+    const loadBatches=async()=>{
+      for(let i=0;i<missing.length;i+=BATCH){
+        if(cancelled)break;
+        const chunk=missing.slice(i,i+BATCH);
+        try {
+          const data=await supa.getCardsContent(chunk);
+          if(!cancelled&&Object.keys(data).length>0)
+            setContentMap(prev=>({...prev,...data}));
+        } catch(e){ console.warn("Content batch failed:",e); }
+      }
+    };
+    loadBatches();
+    return()=>{cancelled=true;};
   },[filtered.map(c=>c.id).join(',')]);
 
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
@@ -2191,9 +2207,10 @@ function App(){
         } else if(loadedCards&&loadedCards.length===0){ setCards([]); }
         let loadedAccounts=[];
         try {
-          const r=await fetchWithTimeout(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H});
-          loadedAccounts=await r.json();
-          if(!Array.isArray(loadedAccounts))loadedAccounts=[];
+          const r=await fetch(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H});
+          const d=await r.json();
+          if(r.ok&&Array.isArray(d))loadedAccounts=d;
+          else console.warn("Accounts fetch error:",d);
         } catch(e){ console.warn("Supabase accounts inaccessible",e); }
         setAccounts(loadedAccounts);
       } catch(e){
