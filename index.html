@@ -34,14 +34,14 @@ const supa = {
     const BATCH=1000; // metadata rows are tiny (~100 bytes each)
     try {
       while(true){
-        const r=await fetch(`${SUPA_URL}/rest/v1/cards?select=id,group_id,num,chapter_id,packet_id,sort_order&limit=${BATCH}&offset=${offset}`,{headers:H});
+        const r=await fetch(`${SUPA_URL}/rest/v1/cards?select=id,group_id,num,chapter_id,packet_id,sort_order,card_type&limit=${BATCH}&offset=${offset}`,{headers:H});
         const d=await r.json();
         if(!r.ok||!Array.isArray(d)||d.length===0)break;
         allRows.push(...d);
         if(d.length<BATCH)break;
         offset+=BATCH;
       }
-      return allRows.map(c=>({id:c.id,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null,front:null,back:null}));
+      return allRows.map(c=>({id:c.id,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null,card_type:c.card_type||'text',front:null,back:null}));
     } catch(e){console.warn("getCardsMeta error:",e);return null;}
   },
   // Load front+back for specific card IDs only (called when starting a study session)
@@ -65,7 +65,7 @@ const supa = {
     try {
       await fetch(`${SUPA_URL}/rest/v1/cards`, {
         method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
-        body: JSON.stringify({ id:card.id, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, sort_order:card.sort_order??0 }),
+        body: JSON.stringify({ id:card.id, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, sort_order:card.sort_order??0, card_type:card.card_type||'text' }),
       });
     } catch {}
   },
@@ -705,7 +705,7 @@ function RegisterView({onRegister,onBack,accounts}){
 }
 
 // ─── Occlusion ────────────────────────────────────────────────────────────────
-const isOcclusion = (card) => { try { return JSON.parse(card.front)?.type==="occlusion"; } catch { return false; } };
+const isOcclusion = (card) => { if(card.card_type==='occlusion')return true; try { return JSON.parse(card.front)?.type==="occlusion"; } catch { return false; } };
 
 function OcclusionCanvas({cardFront,showBack,showOthers}){
   const canvasRef=useRef(null);
@@ -865,7 +865,7 @@ function CardEditor({card,onSave,onCancel,userGroups}){
   },[image,zones,selectedZoneId,histVer]);
 
   const handleFile=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>{setImage(ev.target.result);setZones([]);histRef.current={stack:[[]],idx:0};setHistVer(0);setSaved(false);};reader.readAsDataURL(file);};
-  const handleSaveOcclusion=()=>{if(!image||zones.length===0)return;saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id}),back:"__occlusion__",groupId:form.groupId,num:form.num,chapterId:form.chapterId,packetId:form.packetId}));onSave(cards);setSaved(true);};
+  const handleSaveOcclusion=()=>{if(!image||zones.length===0)return;saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id}),back:"__occlusion__",groupId:form.groupId,num:form.num,chapterId:form.chapterId,packetId:form.packetId,card_type:"occlusion"}));onSave(cards);setSaved(true);};
   const selGroup=GROUPS.find(g=>g.id===form.groupId);
   const availNums=selGroup?.nums||[1];
   const availChapters=getChapters(form.groupId,form.num);
@@ -1027,11 +1027,12 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   // Reset pending when filters change
   useEffect(()=>{setPendingCards(null);},[sem,fg,fn,fc,fp,search]);
 
-  // Auto-load front/back for filtered cards — progressively in batches of 50
+  // Auto-load front/back for filtered cards — skip occlusion cards (heavy images, shown as icon)
   const [contentMap,setContentMap]=useState({});
   useEffect(()=>{
     if(filtered.length===0)return;
-    const missing=filtered.filter(c=>!contentMap[c.id]).map(c=>c.id);
+    // Only load text cards — occlusion cards are identified by card_type and show as 🖼
+    const missing=filtered.filter(c=>c.card_type!=='occlusion'&&!contentMap[c.id]).map(c=>c.id);
     if(missing.length===0)return;
     let cancelled=false;
     const BATCH=50;
@@ -1202,9 +1203,9 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
                   {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{card.chapterId} — {chName}</Tag>}
                 </div>
                 {(()=>{
+                  if(isOcclusion(card))return<div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>🖼</span><p style={{fontFamily:serif,fontSize:13,color:C.text,margin:0}}>Image Occlusion</p></div>;
                   const content=contentMap[card.id];
                   if(!content)return<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>⏳ Chargement…</p>;
-                  if(isOcclusion({front:content.front}))return<div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>🖼</span><p style={{fontFamily:serif,fontSize:13,color:C.text,margin:0}}>Image Occlusion</p></div>;
                   const fc=parseContent(content.front);
                   const bc=parseContent(content.back);
                   const ft=(fc?.text||"").slice(0,200),bt=(bc?.text||"").slice(0,150);
@@ -2000,10 +2001,36 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
 // ─── Study ────────────────────────────────────────────────────────────────────
 function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isAdmin,progress}){
   const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false);
+  // Load occlusion card content on-demand when card is shown
+  useEffect(()=>{
+    const card=localQ[idx];
+    if(card&&!card.front&&card.card_type==='occlusion'){
+      supa.getCardsContent([card.id]).then(content=>{
+        if(content[card.id]){
+          setLocalQ(q=>q.map((c,i)=>i===idx?{...c,...content[c.id]}:c));
+        }
+      }).catch(()=>{});
+    }
+    // Also preload next occlusion card
+    const next=localQ[idx+1];
+    if(next&&!next.front&&next.card_type==='occlusion'){
+      supa.getCardsContent([next.id]).then(content=>{
+        if(content[next.id]){
+          setLocalQ(q=>q.map(c=>c.id===next.id&&!c.front?{...c,...content[c.id]}:c));
+        }
+      }).catch(()=>{});
+    }
+  },[idx]);
   const cardStart=useRef(Date.now());
   const card=localQ[idx];
-
-  const handleRate=async rating=>{
+  // Show loading state if occlusion card content not yet fetched
+  if(card&&!card.front&&card.card_type==='occlusion'){
+    return<div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
+      <p style={{fontSize:32}}>🖼</p>
+      <p style={{fontFamily:serif,fontSize:18}}>Chargement de l'image…</p>
+      <p style={{fontSize:13,color:C.textLt}}>Image occlusion en cours de téléchargement</p>
+    </div>;
+  }
     // Reset card state IMMEDIATELY (before async) — prevents flashing next card's back during flip animation
     setShowBack(false);setShowOthers(false);setShowPktChange(false);
     const elapsed=Date.now()-cardStart.current;
@@ -2508,12 +2535,15 @@ function App(){
     return getStats(currentUser.username).days[dateKey()]?.newShown||0;
   },[currentUser]);
 
-  // Enrich queue cards with front/back content from Supabase (only cards that don't have it yet)
+  // Enrich queue: text cards loaded upfront, occlusion loaded one-at-a-time on demand
   const enrichCards=useCallback(async(queue)=>{
-    const needsContent=queue.filter(c=>!c.front);
-    if(needsContent.length===0)return queue;
-    const content=await supa.getCardsContent(needsContent.map(c=>c.id));
-    return queue.map(c=>c.front?c:{...c,...(content[c.id]||{front:"[contenu non disponible]",back:""})});
+    const textIds=queue.filter(c=>c.card_type!=='occlusion'&&!c.front).map(c=>c.id);
+    const textContent=textIds.length>0?await supa.getCardsContent(textIds):{};
+    // For occlusion: only preload first one to allow immediate session start
+    const firstOcc=queue.find(c=>c.card_type==='occlusion'&&!c.front);
+    const firstOccContent=firstOcc?await supa.getCardsContent([firstOcc.id]):{};
+    const allContent={...textContent,...firstOccContent};
+    return queue.map(c=>c.front?c:{...c,...(allContent[c.id]||{front:null,back:null})});
   },[]);
 
   const startStudy=useCallback(async(gid,num,chapterId,pkId)=>{
