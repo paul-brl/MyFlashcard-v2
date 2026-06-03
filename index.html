@@ -1002,53 +1002,26 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   const clearAll=()=>{setSem("all");setFg("all");setFn("all");setFc("all");setFp("all");setSearch("");};
   const hasFilters=sem!=="all"||fg!=="all"||fn!=="all"||fc!=="all"||fp!=="all"||search.trim();
 
-  // Server-side fetch: loads full card content based on current filters
-  useEffect(()=>{
-    let cancelled=false;
-    const fetchAdmin=async()=>{
-      setAdminLoading(true);
-      const filters={};
-      if(fg!=="all")filters.groupId=fg;
-      if(fn!=="all")filters.num=fn;
-      if(fc!=="all")filters.chapterId=fc;
-      if(fp!=="all")filters.packetId=fp;
-      const result=await supa.getCardsAdmin(filters);
-      if(!cancelled){setAdminCards(result);setPendingCards(null);}
-      setAdminLoading(false);
-    };
-    fetchAdmin();
-    return()=>{cancelled=true;};
-  },[fg,fn,fc,fp]);
-
+  // Admin list uses metadata-only cards prop (no front/back) — content loaded on demand per card
   const baseFiltered=useMemo(()=>{
     const q=search.toLowerCase().trim();
-    return adminCards.filter(c=>{
+    return cards.filter(c=>{
       const g=GROUPS.find(gr=>gr.id===c.groupId);
       if(sem!=="all"){const gSem=sem==="pr"?0:sem==="s1"?1:2;if(g?.sem!==gSem)return false;}
-      if(q){const chName=getChapters(c.groupId,c.num)[c.chapterId-1]||"";const text=`${c.front||""} ${c.back||""} ${g?.label||""} ${chName}`.toLowerCase();if(!text.includes(q))return false;}
+      if(fg!=="all"&&c.groupId!==fg)return false;
+      if(fn!=="all"&&c.num!==fn)return false;
+      if(fc!=="all"&&c.chapterId!==fc)return false;
+      if(fp!=="all"&&c.packetId!==fp)return false;
+      // text search skips front/back (not loaded) — searches metadata only
+      if(q){const chName=getChapters(c.groupId,c.num)[c.chapterId-1]||"";const text=`${g?.label||""} ${chName} ${c.packetId}`.toLowerCase();if(!text.includes(q))return false;}
       return true;
     });
-  },[adminCards,sem,search]);
+  },[cards,sem,fg,fn,fc,fp,search]);
 
   // pendingCards tracks reordered state; falls back to baseFiltered
   const filtered=pendingCards||baseFiltered;
-
-  // Fetch front/back content for visible filtered cards that don't have it yet
-  useEffect(()=>{
-    const idsNeeded=filtered.filter(c=>!c.front&&!contentMap[c.id]).map(c=>c.id);
-    if(idsNeeded.length===0)return;
-    setContentLoading(true);
-    supa.getCardsContent(idsNeeded).then(content=>{
-      setContentMap(prev=>({...prev,...content}));
-      setContentLoading(false);
-    }).catch(()=>setContentLoading(false));
-  },[filtered.map(c=>c.id).join(',')]); // re-run when filtered card IDs change
-
-  // Get display content for a card (from state if available, else from contentMap)
-  const getCardContent=(card)=>({
-    front:card.front||contentMap[card.id]?.front||null,
-    back:card.back||contentMap[card.id]?.back||null,
-  });
+  // Reset pending when filters change
+  useEffect(()=>{setPendingCards(null);},[sem,fg,fn,fc,fp,search]);
 
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
   // Drag & drop — only active when a specific chapter is selected
@@ -1131,10 +1104,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
       <div style={{display:"flex",alignItems:"center",gap:12}}>
         <p style={{fontSize:13,color:C.textMed,margin:0}}>
-                {adminLoading
-                  ?<span style={{color:C.accent}}>⏳ Chargement…</span>
-                  :<><strong style={{color:C.text,fontSize:15}}>{stats.total}</strong> carte{stats.total!==1?"s":""} · {cards.length} total en base</>
-                }
+                <strong style={{color:C.text,fontSize:15}}>{stats.total}</strong> carte{stats.total!==1?"s":""} · {cards.length} total en base
               </p>
         {stats.total>0&&<div style={{display:"flex",gap:5}}><span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:C.prioBg,color:C.prio,fontWeight:600}}>{stats.prio} P</span><span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:C.impBg,color:C.imp,fontWeight:600}}>{stats.imp} I</span><span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:C.utilBg,color:C.util,fontWeight:600}}>{stats.utile} U</span></div>}
         {pendingCards&&<div style={{display:"flex",alignItems:"center",gap:8,background:"#fff7ed",border:"1px solid #f59e0b",borderRadius:8,padding:"4px 12px"}}>
@@ -1195,36 +1165,16 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               )}
               {/* Packet color stripe */}
               <div style={{width:4,background:col,flexShrink:0}}/>
-              {/* Content */}
+              {/* Content — metadata only (front/back loaded on demand in preview/edit) */}
               <div style={{flex:1,padding:"10px 14px",minWidth:0,overflow:"hidden"}}>
-                <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
+                <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:4}}>
                   <Tag color={col} bg={bg} small>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
                   <Tag color={semCol} bg={semBg} small>{semTag}</Tag>
                   <Tag color={C.textMed} bg={C.bg} small>{grp?.label}</Tag>
                   <Tag color={C.textMed} bg={C.bg} small>Cours {card.num}</Tag>
                   {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{card.chapterId} — {chName}</Tag>}
                 </div>
-                {isOcclusion(card)?(
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:18}}>🖼</span>
-                    <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:0}}>Image Occlusion</p>
-                  </div>
-                ):(()=>{
-                  const{front:cardFront,back:cardBack}=getCardContent(card);
-                  const fc=parseContent(cardFront),bc=parseContent(cardBack);
-                  const ft=(fc?.text||"").slice(0,200),bt=(bc?.text||"").slice(0,150);
-                  if(!cardFront&&contentLoading)return<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Chargement…</p>;
-                  return<>
-                    <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(ft)||<span style={{color:C.textLt,fontStyle:"italic"}}>—</span>}</p>
-                      {fc?.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
-                    </div>
-                    <div style={{display:"flex",alignItems:"center",gap:5}}>
-                      <p style={{fontSize:12,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(bt)||<span style={{fontStyle:"italic"}}>—</span>}</p>
-                      {bc?.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
-                    </div>
-                  </>;
-                })()}
+                <p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Cliquer 👁 pour voir le contenu</p>
               </div>
               {/* Actions */}
               <div style={{display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:6,padding:"10px 12px",paddingTop:12,flexShrink:0,alignSelf:"flex-start"}}>
@@ -1237,63 +1187,54 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
         })}
       </div>
     )}
-    {/* Preview modal */}
+    {/* Preview modal — loads front/back on demand for this specific card */}
     {previewIdx!==null&&filtered[previewIdx]&&(()=>{
       const card=filtered[previewIdx];
       const grp=GROUPS.find(g=>g.id===card.groupId);
       const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
       const col=pC(card.packetId);
-      const{front:cardFront,back:cardBack}=getCardContent(card);
-      const fc=isOcclusion(card)?null:parseContent(cardFront);
-      const bc=isOcclusion(card)?null:parseContent(cardBack);
+      function PreviewContent({cardId}){
+        const [content,setContent]=useState(null);
+        useEffect(()=>{supa.getCardsContent([cardId]).then(r=>setContent(r[cardId]||{front:"",back:""}));},[cardId]);
+        if(!content)return<div style={{padding:20,textAlign:"center",color:C.textLt}}>⏳ Chargement du contenu…</div>;
+        const fc=isOcclusion({front:content.front})?null:parseContent(content.front);
+        const bc=parseContent(content.back);
+        return<>
+          <div style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"18px 20px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Recto — Question</p>
+            {isOcclusion({front:content.front})?(<div><p style={{fontFamily:serif,fontSize:15,color:C.text,margin:"0 0 10px"}}>🖼 Image Occlusion</p><OcclusionCanvas cardFront={content.front} showBack={false} showOthers={false}/></div>):(<>{fc?.text&&<p style={{fontFamily:serif,fontSize:17,lineHeight:1.7,margin:"0 0 8px",color:C.text,whiteSpace:"pre-wrap"}}>{fc.text}</p>}{fc?.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}{!fc?.text&&!fc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}</>)}
+          </div>
+          {!isOcclusion({front:content.front})&&(<div style={{background:C.surface,border:`1.5px solid ${col}`,borderRadius:10,padding:"18px 20px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Verso — Réponse</p>
+            {bc?.text&&<p style={{fontSize:15,lineHeight:1.7,margin:"0 0 8px",color:C.textMed,whiteSpace:"pre-wrap"}}>{bc.text}</p>}
+            {bc?.img&&<img src={bc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}
+            {!bc?.text&&!bc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}
+          </div>)}
+        </>;
+      }
       return(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setPreviewIdx(null)}>
           <div style={{background:C.bg,borderRadius:14,width:"100%",maxWidth:640,maxHeight:"90vh",overflow:"auto",boxShadow:"0 24px 80px rgba(0,0,0,0.35)"}} onClick={e=>e.stopPropagation()}>
-            {/* Header */}
             <div style={{padding:"16px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,borderRadius:"14px 14px 0 0"}}>
               <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
                 <Tag color={col} bg={pB(card.packetId)}>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
                 {grp&&<Tag color={C.textMed} bg={C.bg} small>{grp.label}</Tag>}
                 <Tag color={C.textMed} bg={C.bg} small>Cours {card.num}</Tag>
                 {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{card.chapterId} — {chName}</Tag>}
-                <Tag color={C.textLt} bg={C.bg} small>#{card.sort_order||previewIdx+1}</Tag>
               </div>
               <button onClick={()=>setPreviewIdx(null)} style={{fontFamily:font,fontSize:18,background:"none",border:"none",cursor:"pointer",color:C.textLt,lineHeight:1,padding:"0 4px"}}>×</button>
             </div>
-            {/* Card content */}
             <div style={{padding:20,display:"flex",flexDirection:"column",gap:12}}>
-              {/* Recto */}
-              <div style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"18px 20px"}}>
-                <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Recto — Question</p>
-                {isOcclusion(card)?(
-                  <div><p style={{fontFamily:serif,fontSize:15,color:C.text,margin:"0 0 10px"}}>Image Occlusion</p><OcclusionCanvas cardFront={card.front} showBack={false} showOthers={false}/></div>
-                ):(
-                  <>
-                    {fc?.text&&<p style={{fontFamily:serif,fontSize:17,lineHeight:1.7,margin:"0 0 8px",color:C.text,whiteSpace:"pre-wrap"}}>{fc.text}</p>}
-                    {fc?.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}
-                    {!fc?.text&&!fc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}
-                  </>
-                )}
-              </div>
-              {/* Verso */}
-              {!isOcclusion(card)&&(
-                <div style={{background:C.surface,border:`1.5px solid ${col}`,borderRadius:10,padding:"18px 20px"}}>
-                  <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Verso — Réponse</p>
-                  {bc?.text&&<p style={{fontSize:15,lineHeight:1.7,margin:"0 0 8px",color:C.textMed,whiteSpace:"pre-wrap"}}>{bc.text}</p>}
-                  {bc?.img&&<img src={bc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}
-                  {!bc?.text&&!bc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}
-                </div>
-              )}
+              <PreviewContent key={card.id} cardId={card.id}/>
             </div>
-            {/* Navigation + actions */}
             <div style={{padding:"12px 20px",borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,borderRadius:"0 0 14px 14px"}}>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <button onClick={()=>setPreviewIdx(i=>Math.max(0,i-1))} disabled={previewIdx===0} style={{fontFamily:font,fontSize:13,padding:"6px 12px",cursor:previewIdx===0?"default":"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:previewIdx===0?C.textLt:C.text,opacity:previewIdx===0?0.4:1}}>← Préc.</button>
+                <button onClick={()=>setPreviewIdx(i=>Math.max(0,i-1))} disabled={previewIdx===0} style={{fontFamily:font,fontSize:13,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:previewIdx===0?C.textLt:C.text,opacity:previewIdx===0?0.4:1}}>← Préc.</button>
                 <span style={{fontFamily:mono,fontSize:11,color:C.textLt}}>{previewIdx+1} / {filtered.length}</span>
-                <button onClick={()=>setPreviewIdx(i=>Math.min(filtered.length-1,i+1))} disabled={previewIdx===filtered.length-1} style={{fontFamily:font,fontSize:13,padding:"6px 12px",cursor:previewIdx===filtered.length-1?"default":"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:previewIdx===filtered.length-1?C.textLt:C.text,opacity:previewIdx===filtered.length-1?0.4:1}}>Suiv. →</button>
+                <button onClick={()=>setPreviewIdx(i=>Math.min(filtered.length-1,i+1))} disabled={previewIdx===filtered.length-1} style={{fontFamily:font,fontSize:13,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:previewIdx===filtered.length-1?C.textLt:C.text,opacity:previewIdx===filtered.length-1?0.4:1}}>Suiv. →</button>
               </div>
               <div style={{display:"flex",gap:8}}>
-                <Btn small fill onClick={()=>{setPreviewIdx(null);onEdit(card);}}>✏ Modifier</Btn>
+                <Btn small fill onClick={async()=>{const c=await supa.getCardsContent([card.id]);setPreviewIdx(null);onEdit({...card,...(c[card.id]||{})});}}>✏ Modifier</Btn>
                 <Btn small danger onClick={()=>{setPreviewIdx(null);setDelId(card.id);}}>Supprimer</Btn>
               </div>
             </div>
