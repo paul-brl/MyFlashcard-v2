@@ -1023,6 +1023,17 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   // Reset pending when filters change
   useEffect(()=>{setPendingCards(null);},[sem,fg,fn,fc,fp,search]);
 
+  // Auto-load front/back for filtered cards using ID-based fetch (fast — uses primary key index)
+  const [contentMap,setContentMap]=useState({});
+  useEffect(()=>{
+    if(filtered.length===0)return;
+    const missing=filtered.filter(c=>!contentMap[c.id]).map(c=>c.id);
+    if(missing.length===0)return;
+    supa.getCardsContent(missing).then(data=>{
+      if(Object.keys(data).length>0)setContentMap(prev=>({...prev,...data}));
+    }).catch(()=>{});
+  },[filtered.map(c=>c.id).join(',')]);
+
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
   // Drag & drop — only active when a specific chapter is selected
   const canReorder=fc!=="all";
@@ -1165,7 +1176,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               )}
               {/* Packet color stripe */}
               <div style={{width:4,background:col,flexShrink:0}}/>
-              {/* Content — metadata only (front/back loaded on demand in preview/edit) */}
+              {/* Content — from contentMap loaded via ID-based fetch */}
               <div style={{flex:1,padding:"10px 14px",minWidth:0,overflow:"hidden"}}>
                 <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:4}}>
                   <Tag color={col} bg={bg} small>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
@@ -1174,7 +1185,24 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
                   <Tag color={C.textMed} bg={C.bg} small>Cours {card.num}</Tag>
                   {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{card.chapterId} — {chName}</Tag>}
                 </div>
-                <p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Cliquer 👁 pour voir le contenu</p>
+                {(()=>{
+                  const content=contentMap[card.id];
+                  if(!content)return<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>⏳ Chargement…</p>;
+                  if(isOcclusion({front:content.front}))return<div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>🖼</span><p style={{fontFamily:serif,fontSize:13,color:C.text,margin:0}}>Image Occlusion</p></div>;
+                  const fc=parseContent(content.front);
+                  const bc=parseContent(content.back);
+                  const ft=(fc?.text||"").slice(0,200),bt=(bc?.text||"").slice(0,150);
+                  return<>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(ft)||<span style={{color:C.textLt,fontStyle:"italic"}}>—</span>}</p>
+                      {fc?.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <p style={{fontSize:12,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,minWidth:0}}>{highlight(bt)||<span style={{fontStyle:"italic"}}>—</span>}</p>
+                      {bc?.img&&<span style={{fontSize:11,flexShrink:0,color:C.textLt}}>📷</span>}
+                    </div>
+                  </>;
+                })()}
               </div>
               {/* Actions */}
               <div style={{display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:6,padding:"10px 12px",paddingTop:12,flexShrink:0,alignSelf:"flex-start"}}>
