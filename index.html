@@ -87,11 +87,13 @@ const supa = {
       if(filters.num!==null&&filters.num!==undefined&&filters.num!=="all")url+=`&num=eq.${filters.num}`;
       if(filters.chapterId!==null&&filters.chapterId!==undefined&&filters.chapterId!=="all")url+=`&chapter_id=eq.${filters.chapterId}`;
       if(filters.packetId&&filters.packetId!=="all")url+=`&packet_id=eq.${encodeURIComponent(filters.packetId)}`;
-      url+=`&order=sort_order.asc,id.asc&limit=500`;
+      url+=`&limit=500`; // no ORDER BY — sorts in JS to avoid Supabase 500
       const r=await fetch(url,{headers:H});
       const d=await r.json();
       if(!r.ok||!Array.isArray(d))return[];
-      return d.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
+      const rows=d.map(c=>({id:c.id,front:c.front,back:c.back,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null}));
+      // Sort in JS: by chapter, then sort_order
+      return rows.sort((a,b)=>(a.chapterId-b.chapterId)||((a.sort_order||999)-(b.sort_order||999)));
     } catch(e){console.warn("getCardsAdmin error:",e);return[];}
   },
   upsertAccount: async (acc) => {
