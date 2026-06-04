@@ -2031,6 +2031,7 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
       <p style={{fontSize:13,color:C.textLt}}>Image occlusion en cours de téléchargement</p>
     </div>;
   }
+  const handleRate=async rating=>{
     // Reset card state IMMEDIATELY (before async) — prevents flashing next card's back during flip animation
     setShowBack(false);setShowOthers(false);setShowPktChange(false);
     const elapsed=Date.now()-cardStart.current;
