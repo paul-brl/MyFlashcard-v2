@@ -70,15 +70,18 @@ const supa = {
     } catch {}
   },
   batchUpdateSort: async (updates) => {
-    // Sequential chunks of 20 to avoid rate limiting
-    const CHUNK=20;
+    const CHUNK=10;
     for(let i=0;i<updates.length;i+=CHUNK){
       const chunk=updates.slice(i,i+CHUNK);
-      try {
-        await Promise.all(chunk.map(({id,sort_order})=>
-          fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"PATCH",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify({sort_order})})
-        ));
-      } catch(e){ console.warn("batchUpdateSort chunk failed:",e); }
+      await Promise.all(chunk.map(async({id,sort_order})=>{
+        try{
+          const r=await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${encodeURIComponent(id)}`,{
+            method:"PATCH",headers:{...H,"Prefer":"return=minimal"},
+            body:JSON.stringify({sort_order})
+          });
+          if(!r.ok){const t=await r.text();console.warn(`sort_order PATCH failed ${id}:`,t);}
+        }catch(e){console.warn(`sort_order PATCH error ${id}:`,e);}
+      }));
     }
   },
   deleteCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
@@ -276,13 +279,23 @@ const mergeIntegrated = (cards, username) => {
 const getUCache = u => { try { return JSON.parse(localStorage.getItem(`mx6-ucache-${u}`)||'[]'); } catch { return []; } };
 const setUCache = (u, cards) => { try { localStorage.setItem(`mx6-ucache-${u}`, JSON.stringify(cards)); } catch {} };
 
-// ─── Global study order: group index → num → chapterId → local sort_order ─────
+// Extract creation timestamp from card ID (card-1704067200000 or occ-1704067200000-N)
+const getCardTimestamp=id=>{const p=(id||'').split('-');return parseInt(p[1])||0;};
+
+// ─── Global study order: group index → num → chapterId → sort_order → creation time ─────
 const sortCardsGlobally = cards => [...cards].sort((a,b)=>{
   const gi=GROUPS.findIndex(g=>g.id===a.groupId)-GROUPS.findIndex(g=>g.id===b.groupId);
   if(gi)return gi;
   if(a.num!==b.num)return a.num-b.num;
   if(a.chapterId!==b.chapterId)return a.chapterId-b.chapterId;
-  return(a.sort_order||999)-(b.sort_order||999);
+  // sort_order > 0 means explicitly set by admin — use it
+  // sort_order = 0 or null = never set → fall back to creation timestamp (always correct)
+  const aOrd=a.sort_order>0?a.sort_order:null;
+  const bOrd=b.sort_order>0?b.sort_order:null;
+  if(aOrd!==null&&bOrd!==null)return aOrd-bOrd;
+  if(aOrd!==null)return -1;
+  if(bOrd!==null)return 1;
+  return getCardTimestamp(a.id)-getCardTimestamp(b.id);
 });
 
 const validateEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
@@ -2370,16 +2383,20 @@ function App(){
   const handleSaveCard=useCallback(async cd=>{
     const saved={...cd};
     if(!saved.id){
-      saved.id=`card-${Date.now()}`;
+      const ts=Date.now();
+      saved.id=`card-${ts}`;
+      // Use timestamp as sort_order: guarantees creation order without any SQL needed.
+      // If chapter already has cards with explicit sort_order, place after the last one.
       const chCards=cards.filter(c=>c.groupId===saved.groupId&&c.num===saved.num&&c.chapterId===saved.chapterId);
-      saved.sort_order=chCards.length>0?Math.max(...chCards.map(c=>c.sort_order||0))+1:1;
+      const maxOrd=chCards.reduce((m,c)=>c.sort_order>0?Math.max(m,c.sort_order):m,0);
+      saved.sort_order=maxOrd>0?maxOrd+1:ts;
     }
     try {
       await supa.upsertCard(saved);
     } catch(e){
       alert(`⚠️ ERREUR DE SAUVEGARDE\n\nLa carte n'a pas pu être enregistrée dans Supabase :\n${e.message||e}\n\nNote le contenu manuellement et réessaie.`);
       console.error("upsertCard failed:",e);
-      return; // Don't add to local state if DB save failed
+      return;
     }
     setCards(prev=>{
       const exists=prev.find(c=>c.id===saved.id);
