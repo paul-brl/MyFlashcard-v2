@@ -2083,6 +2083,15 @@ function Landing({onBack,onRegister}){
     </div>
 
     <div style={{padding:"10px 24px 20px",maxWidth:900,margin:"0 auto"}}>
+      {(()=>{
+        const a=LANDING_ARGS[0];
+        const reverse=a.reverse;
+        const numBlock=<div key="n" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
+        const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{a.text}</p></div>;
+        return <div key={a.num} style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
+          {reverse?[txtBlock,numBlock]:[numBlock,txtBlock]}
+        </div>;
+      })()}
       <div style={{padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
         <div style={{display:"flex",gap:28,alignItems:"flex-start"}}>
           <div style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>02</span></div>
@@ -2093,7 +2102,7 @@ function Landing({onBack,onRegister}){
         </div>
         <ForgettingCurve/>
       </div>
-      {LANDING_ARGS.map((a)=>{
+      {LANDING_ARGS.slice(1).map((a)=>{
         const reverse=a.reverse;
         const numBlock=<div key="n" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
         const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{a.text}</p>{a.img&&<img src={a.img} style={{maxWidth:220,width:"100%",height:"auto",display:"block",marginTop:12}} alt=""/>}</div>;
@@ -2203,7 +2212,7 @@ function App(){
           if(pendingApplied&&saved.username){
             supa.updateGroups(saved.username,restoredGroups,planId).catch(()=>{});
           }
-        }else{setView("login");}
+        }else{setView("landing");}
       }
     }
     init();
