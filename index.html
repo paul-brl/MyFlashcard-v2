@@ -60,12 +60,15 @@ const supa = {
   },
   getCards: async () => { return null; }, // deprecated — use getCardsMeta
   upsertCard: async (card) => {
-    try {
-      await fetch(`${SUPA_URL}/rest/v1/cards`, {
-        method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
-        body: JSON.stringify({ id:card.id, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, sort_order:card.sort_order??0, card_type:card.card_type||'text' }),
-      });
-    } catch {}
+    const r=await fetch(`${SUPA_URL}/rest/v1/cards`, {
+      method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
+      body: JSON.stringify({ id:card.id, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, sort_order:card.sort_order??0, card_type:card.card_type||'text' }),
+    });
+    if(!r.ok){
+      let msg=`HTTP ${r.status}`;
+      try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}
+      throw new Error(msg);
+    }
   },
   batchUpdateSort: async (updates) => {
     const CHUNK=10;
@@ -157,12 +160,15 @@ const supa = {
     } catch { return null; } // Network error
   },
   upsertUserCard: async (card) => {
-    try {
-      await fetch(`${SUPA_URL}/rest/v1/user_cards`, {
-        method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
-        body: JSON.stringify({ id:card.id, username:card.username, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, integrated:card.integrated||false }),
-      });
-    } catch {}
+    const r=await fetch(`${SUPA_URL}/rest/v1/user_cards`, {
+      method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
+      body: JSON.stringify({ id:card.id, username:card.username, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, integrated:card.integrated||false }),
+    });
+    if(!r.ok){
+      let msg=`HTTP ${r.status}`;
+      try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}
+      throw new Error(msg);
+    }
   },
   deleteUserCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/user_cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
 };
@@ -2221,7 +2227,7 @@ function App(){
     setUCache(currentUser.username,newCards);
     for(const card of list){
       const c=newCards.find(x=>x.id===card.id)||card;
-      supa.upsertUserCard(c).catch(()=>{});
+      supa.upsertUserCard(c).catch(e=>console.error("upsertUserCard failed:",e));
     }
     if(userCardEditor===false){
       setUserCardKey(k=>k+1);
@@ -2284,7 +2290,7 @@ function App(){
       setUCache(currentUser.username,newCards);
       return newCards;
     });
-    supa.upsertUserCard(updated).catch(()=>{});
+    supa.upsertUserCard(updated).catch(e=>console.error("upsertUserCard failed:",e));
   },[currentUser]);
   const startUserCardStudy=useCallback((gid,num,chapterId,pkId)=>{
     const filtered=userCards.filter(c=>
