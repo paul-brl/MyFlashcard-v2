@@ -10,6 +10,7 @@
     input[type=range] { accent-color: #2c4a7c; }
     @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @keyframes fadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes dotPulse { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
   </style>
 </head>
 <body>
@@ -210,7 +211,21 @@ const toSubscriptionPlan = pid => ["sem1","sem2","both","prerentree"].includes(p
 const computeGroups = (subscriptionPlanId, supaGroups, extraGroups) => {
   const basePlan = PLANS.find(p => p.id === subscriptionPlanId);
   const baseGroups = basePlan?.groups || [];
-  return [...new Set([...PRERENTREE_IDS, ...baseGroups, ...supaGroups, ...extraGroups])];
+  return [...new Set([...FREE_GROUP_IDS, ...baseGroups, ...supaGroups, ...extraGroups])];
+};
+// Groupes en accès COMPLET (tous les cours) : la base gratuite (plan "prerentree")
+// ne donne accès qu'au cours 1 des 5 matières offertes, donc on l'exclut ici.
+const computeFullGroups = (subscriptionPlanId, supaGroups, extraGroups) => {
+  const basePlan = PLANS.find(p => p.id === subscriptionPlanId);
+  const fullBase = subscriptionPlanId === "prerentree" ? [] : (basePlan?.groups || []);
+  return [...new Set([...fullBase, ...supaGroups, ...extraGroups])];
+};
+// Un cours est accessible si le groupe est en accès complet, ou si c'est le cours 1
+// d'une des 5 matières offertes gratuitement.
+const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
+  if (fullGroups.includes(groupId)) return true;
+  if (num === 1 && FREE_GROUP_IDS.includes(groupId) && userGroups.includes(groupId)) return true;
+  return false;
 };
 // ─── Statistics helpers ───────────────────────────────────────────────────────
 const dateKey = (d=new Date()) => d.toISOString().slice(0,10);
@@ -311,11 +326,6 @@ function redirectToStripe(planId, username) {
 }
 // ─── Constants ───────────────────────────────────────────────────────────────
 const GROUPS = [
-  { id:"pr-cell-bio", label:"Biologie cellulaire",                   sem:0, nums:[1] },
-  { id:"pr-histo",    label:"Histologie & Biologie du développement", sem:0, nums:[1] },
-  { id:"pr-biochem",  label:"Biochimie",                              sem:0, nums:[1] },
-  { id:"pr-biophys",  label:"Biophysique",                            sem:0, nums:[1] },
-  { id:"pr-biostat",  label:"Biostatistique",                         sem:0, nums:[1] },
   { id:"cell-bio", label:"Biologie cellulaire",                   sem:1, nums:[1,2,3,4] },
   { id:"histo",    label:"Histologie & Biologie du développement", sem:1, nums:[1,2,3]   },
   { id:"biochem",  label:"Biochimie",                              sem:1, nums:[1,2,3]   },
@@ -375,7 +385,7 @@ const PACKETS = [
   { id:"important",   label:"Important"   },
   { id:"utile",       label:"Utile"        },
 ];
-const PRERENTREE_IDS = GROUPS.filter(g=>g.sem===0).map(g=>g.id);
+const FREE_GROUP_IDS = ["cell-bio","histo","biochem","biomol","biophys"]; // accès gratuit : 5 matières du semestre 1
 const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
 const SEM2 = GROUPS.filter(g=>g.sem===2).map(g=>g.id);
 const ALL  = [...SEM1,...SEM2];
@@ -383,7 +393,7 @@ const PLANS = [
   { id:"sem1",       label:"Semestre 1",      price:"99 €",   groups:SEM1, desc:"Toutes les matières du semestre 1" },
   { id:"sem2",       label:"Semestre 2",      price:"149 €",  groups:SEM2, desc:"Toutes les matières du semestre 2" },
   { id:"both",       label:"Année complète",  price:"200 €",  groups:ALL,  desc:"Tous les semestres · Accès illimité" },
-  { id:"prerentree", label:"Pré-rentrée",     price:"Gratuit",groups:PRERENTREE_IDS, desc:"5 matières · Cours 1 offert" },
+  { id:"prerentree", label:"Accès gratuit",   price:"Gratuit",groups:FREE_GROUP_IDS, desc:"5 matières du semestre 1 offertes" },
   { id:"g-cell-bio", label:"Biologie cellulaire",    price:"49 €", groups:["cell-bio"], desc:"Cours 1, 2, 3 et 4" },
   { id:"g-histo",    label:"Histologie & Bio. dév.", price:"39 €", groups:["histo"],    desc:"Cours 1, 2 et 3" },
   { id:"g-biochem",  label:"Biochimie",              price:"39 €", groups:["biochem"],  desc:"Cours 1, 2 et 3" },
@@ -413,7 +423,7 @@ const ADMINS = [
 ];
 const DEFAULT_SETTINGS = { againMin:1, hardMin:5, goodMin:10, easyDays:4, newCardsPerDay:20, maxReviewsPerDay:100, dailyGroups:[], dailyPackets:[], newCardOrder:"first", newCardEvery:5 };
 const INITIAL_CARDS = [];
-const groupLabel = (g) => g.label + (g.sem===0?" — Pré-rentrée":g.sem===1?" — Sem. 1":" — Sem. 2");
+const groupLabel = (g) => g.label + (g.sem===1?" — Sem. 1":" — Sem. 2");
 // ─── SRS ─────────────────────────────────────────────────────────────────────
 function computeNext(prev,rating,s=DEFAULT_SETTINGS){
   const {againMin=1,hardMin=5,goodMin=10,easyDays=4}=s;
@@ -563,7 +573,7 @@ function Tag({color,bg,children,small}){return <span style={{display:"inline-blo
 function Btn({fill,danger,small,full,disabled,children,style,...rest}){return <button {...rest} disabled={disabled} style={{fontFamily:font,fontSize:small?12:13,fontWeight:500,padding:small?"6px 12px":"9px 18px",cursor:disabled?"not-allowed":"pointer",border:`1.5px solid ${fill?C.accent:danger?C.again:C.border}`,borderRadius:6,background:fill?C.accent:"transparent",color:fill?"#fff":danger?C.again:C.text,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,opacity:disabled?0.4:1,width:full?"100%":undefined,...style}}>{children}</button>;}
 function Modal({children,onClose,width=440}){return <div style={{position:"fixed",inset:0,background:"rgba(26,25,23,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,backdropFilter:"blur(2px)"}} onClick={e=>e.target===e.currentTarget&&onClose()}><div style={{background:C.surface,borderRadius:12,padding:"32px 28px",width,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,0.18)"}}><button onClick={onClose} style={{position:"absolute",top:14,right:16,background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textLt}}>×</button>{children}</div></div>;}
 function Lbl({children,color}){return <p style={{fontFamily:mono,fontSize:9,letterSpacing:2.5,textTransform:"uppercase",color:color||C.textLt,margin:"0 0 6px"}}>{children}</p>;}
-function Nav({left,center,right}){return <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10}}><div>{left}</div><div style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center"}}>{right}</div></div>;}
+function Nav({left,center,right}){return <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10}}><div style={{display:"flex",alignItems:"center",gap:10}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center"}}>{right}</div></div>;}
 function PasswordField({label,value,onChange,placeholder,onKeyDown,hint}){
   const [show,setShow]=useState(false);
   return <div><Lbl>{label}</Lbl><div style={{position:"relative"}}><input style={{...iLine,paddingRight:36}} type={show?"text":"password"} placeholder={placeholder||"••••••••"} value={value} onChange={onChange} onKeyDown={onKeyDown}/><button type="button" onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:16,padding:"2px 4px",lineHeight:1}}>{show?"🙈":"👁"}</button></div>{hint&&<p style={{fontSize:11,color:C.textLt,margin:"5px 0 0",lineHeight:1.5}}>{hint}</p>}</div>;
@@ -598,7 +608,7 @@ function Footer(){
   return (
     <footer style={{borderTop:`1px solid ${C.border}`,background:C.surface,marginTop:0}}>
       <div style={{maxWidth:760,margin:"0 auto",padding:"36px 32px 28px",display:"flex",flexWrap:"wrap",justifyContent:"space-between",alignItems:"flex-start",gap:32}}>
-        <div><p style={{fontFamily:serif,fontSize:20,letterSpacing:-0.5,margin:"0 0 4px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:0}}>Sciences du vivant</p></div>
+        <div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><img src={LANDING_LOGO} style={{height:20,width:"auto"}} alt="MyFlashCard"/><p style={{fontFamily:serif,fontSize:20,letterSpacing:-0.5,margin:0}}>MyFlashcard</p></div><p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:0}}>Sciences du vivant</p></div>
         <div>
           <p style={{fontFamily:mono,fontSize:9,letterSpacing:2.5,textTransform:"uppercase",color:C.textLt,margin:"0 0 12px"}}>Contact</p>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -644,7 +654,7 @@ function LoginView({onLogin,onShowLanding,onRegister,accounts,onPasswordReset}){
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column"}}>
     <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
       <div style={{width:"100%",maxWidth:380}}>
-        <div style={{textAlign:"center",marginBottom:40}}><p style={{fontFamily:serif,fontSize:34,letterSpacing:-1,margin:"0 0 6px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:3,textTransform:"uppercase",color:C.textLt,margin:0}}>Sciences du vivant</p></div>
+        <div style={{textAlign:"center",marginBottom:40}}><img src={LANDING_LOGO} style={{height:40,width:"auto",marginBottom:8}} alt="MyFlashCard"/><p style={{fontFamily:serif,fontSize:34,letterSpacing:-1,margin:"0 0 6px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:3,textTransform:"uppercase",color:C.textLt,margin:0}}>Sciences du vivant</p></div>
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"32px 28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
           <p style={{fontFamily:serif,fontSize:22,margin:"0 0 24px"}}>Connexion</p>
           <div style={{display:"flex",flexDirection:"column",gap:20}}>
@@ -669,15 +679,15 @@ function RegisterView({onRegister,onBack,accounts}){
   const pwdState=validatePassword(form.password);
   const handleSendCode=async()=>{setError("");if(!validateEmail(form.email)){setError("Adresse email invalide.");return;}if(!pwdState.ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(form.password!==form.confirm){setError("Les mots de passe ne correspondent pas.");return;}if(accounts.find(a=>a.username===form.email.trim().toLowerCase())){setError("Cette adresse email est déjà utilisée.");return;}setSending(true);try{const r=await fetch(`${EDGE_URL}/send-verification`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`},body:JSON.stringify({email:form.email.trim().toLowerCase()})});if(!r.ok){const d=await r.json();throw new Error(d.error||"Erreur envoi");}setStep(2);startCooldown();}catch(e){setError(`Impossible d'envoyer le code : ${e.message}`);}finally{setSending(false);}};
   const startCooldown=()=>{setResendCooldown(60);clearInterval(cooldownRef.current);cooldownRef.current=setInterval(()=>{setResendCooldown(v=>{if(v<=1){clearInterval(cooldownRef.current);return 0;}return v-1;});},1000);};
-  const handleVerify=async()=>{if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}setError("");setVerifying(true);try{const valid=await supa.checkVerification(form.email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré.");return;}const newAcc={username:form.email.trim().toLowerCase(),password:form.password,email:form.email.trim().toLowerCase(),planId:"prerentree",groups:PRERENTREE_IDS};onRegister(newAcc);}catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}};
+  const handleVerify=async()=>{if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}setError("");setVerifying(true);try{const valid=await supa.checkVerification(form.email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré.");return;}const newAcc={username:form.email.trim().toLowerCase(),password:form.password,email:form.email.trim().toLowerCase(),planId:"prerentree",groups:FREE_GROUP_IDS};onRegister(newAcc);}catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}};
   useEffect(()=>()=>clearInterval(cooldownRef.current),[]);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
     <div style={{width:"100%",maxWidth:420}}>
-      <div style={{textAlign:"center",marginBottom:32}}><p style={{fontFamily:serif,fontSize:30,letterSpacing:-1,margin:"0 0 4px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:3,textTransform:"uppercase",color:C.textLt,margin:0}}>Créer un compte</p></div>
+      <div style={{textAlign:"center",marginBottom:32}}><img src={LANDING_LOGO} style={{height:36,width:"auto",marginBottom:8}} alt="MyFlashCard"/><p style={{fontFamily:serif,fontSize:30,letterSpacing:-1,margin:"0 0 4px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:3,textTransform:"uppercase",color:C.textLt,margin:0}}>Créer un compte</p></div>
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:24}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"#fff":C.textLt,fontSize:12,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:40,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
       <p style={{textAlign:"center",fontSize:12,color:C.textLt,margin:"0 0 20px"}}>{step===1?"Étape 1 — Informations":"Étape 2 — Confirmation email"}</p>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
-        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid ${C.util}30`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit à l'offre <strong>Pré-rentrée</strong> — paiement possible depuis ton espace.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
+        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid ${C.util}30`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
         {step===2&&<div><div style={{textAlign:"center",marginBottom:24}}><p style={{fontSize:40,margin:"0 0 12px"}}>📬</p><p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Vérifie ta boîte mail</p><p style={{fontSize:13,color:C.textMed,lineHeight:1.6}}>Code envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong></p></div><div style={{marginBottom:20}}><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:32,fontWeight:700,letterSpacing:14,textAlign:"center",padding:"12px 0",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&handleVerify()} autoFocus/></div>{error&&<p style={{fontSize:12,color:C.again,margin:"0 0 14px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px",marginBottom:12}} onClick={handleVerify} disabled={verifying||code.length!==6}>{verifying?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Vérification…</>:"Créer mon compte →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16,marginTop:8}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(resendCooldown>0)return;handleSendCode();}} disabled={resendCooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:resendCooldown>0?"not-allowed":"pointer",color:resendCooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:resendCooldown>0?0.6:1}}>{resendCooldown>0?`Renvoyer (${resendCooldown}s)`:"Renvoyer un code"}</button></div><p style={{fontSize:11,color:C.textLt,textAlign:"center",marginTop:12}}>Le code expire dans 10 minutes. Vérifie tes spams.</p></div>}
       </div>
       <button onClick={onBack} style={{display:"block",margin:"20px auto 0",fontFamily:font,fontSize:13,background:"none",border:"none",color:C.textLt,cursor:"pointer",textDecoration:"underline"}}>Déjà un compte ? Se connecter</button>
@@ -1085,7 +1095,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     <div style={{background:C.surface,border:`1px solid ${showFilters?C.accent:C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",transition:"border-color 0.2s"}}>
       <div style={{padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:showFilters?`1px solid ${C.border}`:"none",cursor:"pointer",background:C.bg,userSelect:"none"}} onClick={()=>setShowFilters(s=>!s)}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:13,fontWeight:500,color:C.textMed}}>🔍 Filtres</span>{hasFilters&&<span style={{fontFamily:mono,fontSize:8,letterSpacing:1,padding:"2px 8px",borderRadius:10,background:C.accent,color:"#fff",fontWeight:700}}>ACTIFS</span>}</div><div style={{display:"flex",alignItems:"center",gap:12}}>{hasFilters&&<button onClick={e=>{e.stopPropagation();clearAll();}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.again,textDecoration:"underline"}}>✕ Tout effacer</button>}<span style={{color:C.textLt,fontSize:11,fontFamily:mono}}>{showFilters?"▲":"▼"}</span></div></div>
       {showFilters&&<div style={{padding:"16px",display:"flex",flexDirection:"column",gap:16}}>
-        <div><Lbl>Semestre</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={sem==="all"} onClick={()=>handleSemChange("all")}>Tous</Pill><Pill active={sem==="pr"} onClick={()=>handleSemChange("pr")} color={C.util} bg={C.utilBg}>Pré-rentrée</Pill><Pill active={sem==="s1"} onClick={()=>handleSemChange("s1")} color={C.accent} bg={C.accentBg}>Semestre 1</Pill><Pill active={sem==="s2"} onClick={()=>handleSemChange("s2")} color={C.imp} bg={C.impBg}>Semestre 2</Pill></div></div>
+        <div><Lbl>Semestre</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={sem==="all"} onClick={()=>handleSemChange("all")}>Tous</Pill><Pill active={sem==="s1"} onClick={()=>handleSemChange("s1")} color={C.accent} bg={C.accentBg}>Semestre 1</Pill><Pill active={sem==="s2"} onClick={()=>handleSemChange("s2")} color={C.imp} bg={C.impBg}>Semestre 2</Pill></div></div>
         <div><Lbl>Matière {fg!=="all"&&<span style={{color:C.accent}}>· {selGroup?groupLabel(selGroup):""}</span>}</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={fg==="all"} onClick={()=>handleGroupChange("all")}>Toutes</Pill>{semGroups.map(g=>{const col=g.sem===0?C.util:g.sem===1?C.accent:C.imp;const bg=g.sem===0?C.utilBg:g.sem===1?C.accentBg:C.impBg;return<Pill key={g.id} active={fg===g.id} onClick={()=>handleGroupChange(g.id)} color={col} bg={bg}>{groupLabel(g)}</Pill>;})}</div></div>
         {fg!=="all"&&availNums.length>0&&<div><Lbl>Cours</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={fn==="all"} onClick={()=>handleNumChange("all")}>Tous</Pill>{availNums.map(n=><Pill key={n} active={fn===n} onClick={()=>handleNumChange(n)}>Cours {n}</Pill>)}</div></div>}
         {availChapters.length>0&&<div><Lbl>Chapitre</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={fc==="all"} onClick={()=>setFc("all")}>Tous</Pill>{availChapters.map((ch,i)=>(<Pill key={i+1} active={fc===i+1} onClick={()=>setFc(i+1)}>{i+1}. {ch}</Pill>))}</div></div>}
@@ -1293,7 +1303,7 @@ function UpgradeModal({currentPlanId,username,onClose}){
   const PlanRow=({plan})=>{const isCurrent=plan.id===currentPlanId,isRedirect=redirectingTo===plan.id;return<div style={{border:`1.5px solid ${isCurrent?C.accent:C.border}`,borderRadius:10,padding:"14px 18px",background:isCurrent?C.accentBg:C.surface,display:"flex",justifyContent:"space-between",alignItems:"center",opacity:redirectingTo&&!isRedirect?0.4:1,transition:"opacity 0.2s",marginBottom:8}}><div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><p style={{fontFamily:serif,fontSize:14,margin:0,color:isCurrent?C.accent:C.text}}>{plan.label}</p>{isCurrent&&<Tag color={C.accent} bg={C.accentBg} small>Actuel</Tag>}</div><p style={{fontSize:11,color:C.textMed,margin:0}}>{plan.desc}</p></div><div style={{textAlign:"right",flexShrink:0,marginLeft:16}}><p style={{fontSize:18,fontWeight:300,margin:"0 0 6px",color:C.text}}>{plan.price}</p>{!isCurrent&&<button onClick={()=>handlePay(plan)} disabled={!!redirectingTo} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",cursor:redirectingTo?"wait":"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:isRedirect?C.accent:C.accentBg,color:isRedirect?"#fff":C.accent,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}>{isRedirect?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Redirection...</>:<>Payer {plan.price} &rarr;</>}</button>}{isCurrent&&<span style={{fontSize:11,color:C.accent,fontWeight:500}}>Actif</span>}</div></div>;};
   return <Modal onClose={onClose} width={520}>
     <p style={{fontFamily:serif,fontSize:22,margin:"0 0 4px"}}>Changer d'abonnement</p>
-    <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px"}}>Abonnement actuel : <strong>{PLANS.find(p=>p.id===currentPlanId)?.label||"Pré-rentrée"}</strong></p>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px"}}>Abonnement actuel : <strong>{PLANS.find(p=>p.id===currentPlanId)?.label||"Accès gratuit"}</strong></p>
     <div style={{display:"flex",gap:0,marginBottom:18,borderBottom:`1px solid ${C.border}`}}>{[["packs","Par semestre"],["subjects","Par matière"]].map(([id,label])=><button key={id} onClick={()=>setTab(id)} style={{fontFamily:font,fontSize:13,fontWeight:tab===id?600:400,padding:"8px 18px",cursor:"pointer",border:"none",borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,background:"transparent",color:tab===id?C.accent:C.textMed,marginBottom:-1}}>{label}</button>)}</div>
     <div style={{maxHeight:360,overflowY:"auto"}}>
       {tab==="packs"&&packPlans.map(plan=><PlanRow key={plan.id} plan={plan}/>)}
@@ -1304,7 +1314,8 @@ function UpgradeModal({currentPlanId,username,onClose}){
   </Modal>;
 }
 // ─── ShopTab ──────────────────────────────────────────────────────────────────
-function ShopTab({userGroups,planId,username,cards,progress,settings,onStudy,onShowPacks}){
+function ShopTab({userGroups,fullGroups,planId,username,cards,progress,settings,onStudy,onShowPacks}){
+  const fg=fullGroups||[];
   const subjectPlans=PLANS.filter(p=>p.id.startsWith("g-"));
   const sem1Plans=subjectPlans.filter(p=>["g-cell-bio","g-histo","g-biochem","g-biomol","g-biophys","g-biostat"].includes(p.id));
   const sem2Plans=subjectPlans.filter(p=>["g-anatomie","g-physio","g-medic","g-ssh"].includes(p.id));
@@ -1312,7 +1323,7 @@ function ShopTab({userGroups,planId,username,cards,progress,settings,onStudy,onS
     if(planId==="both")return true;
     if(planId==="sem1"&&["g-cell-bio","g-histo","g-biochem","g-biomol","g-biophys","g-biostat"].includes(plan.id))return true;
     if(planId==="sem2"&&["g-anatomie","g-physio","g-medic","g-ssh"].includes(plan.id))return true;
-    return plan.groups.every(gid=>userGroups.includes(gid));
+    return plan.groups.every(gid=>fg.includes(gid));
   };
   function PurchasedBlock({plan}){
     const [open,setOpen]=useState(false);
@@ -1604,7 +1615,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <p style={{fontFamily:serif,fontSize:15,margin:0}}>{group.label}</p>
-          <Tag color={group.sem===1?C.accent:group.sem===2?C.imp:C.util} bg={group.sem===1?C.accentBg:group.sem===2?C.impBg:C.utilBg} small>{group.sem===0?"Pré-rentrée":group.sem===1?"Sem. 1":"Sem. 2"}</Tag>
+          <Tag color={group.sem===1?C.accent:C.imp} bg={group.sem===1?C.accentBg:C.impBg} small>{group.sem===1?"Sem. 1":"Sem. 2"}</Tag>
           <Tag color={C.textMed} bg={C.bg} small>{groupCards.length} carte{groupCards.length>1?"s":""}</Tag>
         </div>
       </div>
@@ -1696,26 +1707,31 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
 function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner}){
   const isAdmin=currentUser.role==="admin";
   const userGroups=currentUser.plan?.groups||[];
+  const fullGroups=currentUser.plan?.fullGroups||[];
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
   const displayName=currentUser.username.includes("@")?currentUser.username.split("@")[0]:currentUser.username;
   const [showUpgrade,setShowUpgrade]=useState(false);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
   const TABS=[
-    {id:"prerentree",label:"Pré-rentrée",sem:0,planIds:["prerentree","sem1","sem2","both"],price:"Gratuit"},
-    {id:"sem1",label:"Semestre 1",sem:1,planIds:["sem1","both"],price:"99 €"},
-    {id:"sem2",label:"Semestre 2",sem:2,planIds:["sem2","both"],price:"149 €"},
+    {id:"sem1",label:"Semestre 1",sem:1,price:"99 €"},
+    {id:"sem2",label:"Semestre 2",sem:2,price:"149 €"},
   ];
   const planId=currentUser.plan?.planId||"prerentree";
-  const defaultTab=planId==="sem2"?"sem2":planId==="both"?"sem1":planId==="sem1"?"sem1":"prerentree";
+  const defaultTab=planId==="sem2"?"sem2":"sem1";
   const [activeTab,setActiveTab]=useState(defaultTab);
   const allCards=useMemo(()=>[...cards,...(userCards||[]).filter(c=>c.integrated)],[cards,userCards]);
+  const accessibleCards=useMemo(()=>isAdmin?allCards:allCards.filter(c=>isCourseAccessible(c.groupId,c.num,userGroups,fullGroups)),[allCards,isAdmin,userGroups,fullGroups]);
+  const groupsForTab=useCallback(tabId=>{
+    const sem=TABS.find(t=>t.id===tabId)?.sem;
+    const gs=GROUPS.filter(g=>g.sem===sem);
+    return isAdmin?gs:gs.filter(g=>userGroups.includes(g.id));
+  },[isAdmin,userGroups]);
   const hasTabAccess=useCallback(tab=>{
     if(!tab)return false;
-    if(isAdmin)return true;
-    return tab.planIds.includes(planId);
-  },[isAdmin,planId]);
-  const tabGroups=useMemo(()=>{const t=TABS.find(t=>t.id===activeTab);return GROUPS.filter(g=>g.sem===t?.sem);},[activeTab]);
-  const visibleIds=isAdmin?[...PRERENTREE_IDS,...ALL]:userGroups;
+    return groupsForTab(tab.id).length>0;
+  },[groupsForTab]);
+  const tabGroups=useMemo(()=>groupsForTab(activeTab),[activeTab,groupsForTab]);
+  const visibleIds=isAdmin?ALL:userGroups;
   function GroupBlock({group}){
     const [activeCours,setActiveCours]=useState(null);
     const chapters=activeCours?getDisplayChapters(group.id,activeCours,allCards):[];
@@ -1728,7 +1744,12 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
     return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12}}>
       <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg}}><p style={{fontFamily:serif,fontSize:15,margin:0}}>{group.label}</p></div>
       <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",borderBottom:activeCours?`1px solid ${C.border}`:"none",background:C.surface}}>
-        {group.nums.map(n=>{const active=activeCours===n;const due=courseDueCount(allCards,progress,group.id,n);return <button key={n} onClick={()=>setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?C.accent:due>0?C.good:C.border}`,background:active?C.accentBg:due>0?C.goodBg:"transparent",color:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s"}}><span>Cours {n}</span>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"#fff"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></button>;})}
+        {group.nums.map(n=>{
+          const locked=!isAdmin&&!isCourseAccessible(group.id,n,userGroups,fullGroups);
+          const active=activeCours===n;
+          const due=locked?0:courseDueCount(allCards,progress,group.id,n);
+          return <button key={n} onClick={()=>locked?setShowUpgrade(true):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${locked?C.border:active?C.accent:due>0?C.good:C.border}`,background:locked?"transparent":active?C.accentBg:due>0?C.goodBg:"transparent",color:locked?C.textLt:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s",opacity:locked?0.7:1}}><span>Cours {n}</span>{locked?<span style={{fontSize:10}}>🔒</span>:<>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"#fff"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></>}</button>;
+        })}
       </div>
       {activeCours&&(
         <div style={{animation:"fadeIn 0.18s ease"}}>
@@ -1808,7 +1829,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         <div>
           <p style={{fontSize:12,color:C.textLt,margin:"0 0 2px",fontFamily:mono,letterSpacing:1,textTransform:"uppercase"}}>Bonjour {displayName}</p>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <p style={{fontSize:15,margin:0,color:C.text}}>{currentPlan?.label||"Pré-rentrée"}</p>
+            <p style={{fontSize:15,margin:0,color:C.text}}>{currentPlan?.label||"Accès gratuit"}</p>
             <Tag color={currentPlan?.price==="Gratuit"?C.util:C.accent} bg={currentPlan?.price==="Gratuit"?C.utilBg:C.accentBg} small>{currentPlan?.price||"Gratuit"}</Tag>
           </div>
         </div>
@@ -1818,7 +1839,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         <p style={{fontFamily:serif,fontSize:18,margin:"0 0 3px"}}>Révision globale</p>
         <p style={{fontSize:12,color:C.textMed,margin:"0 0 16px"}}>Toutes vos matières en une session</p>
         <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-          {gModes.map(mode=>{const count=globalDue(allCards,progress,visibleIds,settings,mode.id),hasCards=count>0;return<button key={String(mode.id)} onClick={()=>hasCards&&onGlobalStudy(mode.id)} style={{fontFamily:font,padding:"14px 10px",cursor:hasCards?"pointer":"default",borderRadius:8,border:`1.5px solid ${hasCards?mode.col:C.border}`,background:hasCards?mode.bg:"transparent",color:hasCards?mode.col:C.textLt,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{if(hasCards)e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:11,fontWeight:600,textAlign:"center",lineHeight:1.3}}>{mode.label}</span><span style={{fontSize:18,fontWeight:300}}>{count}</span><span style={{fontSize:10,opacity:0.7}}>carte{count!==1?"s":""}</span></button>;})}
+          {gModes.map(mode=>{const count=globalDue(accessibleCards,progress,visibleIds,settings,mode.id),hasCards=count>0;return<button key={String(mode.id)} onClick={()=>hasCards&&onGlobalStudy(mode.id)} style={{fontFamily:font,padding:"14px 10px",cursor:hasCards?"pointer":"default",borderRadius:8,border:`1.5px solid ${hasCards?mode.col:C.border}`,background:hasCards?mode.bg:"transparent",color:hasCards?mode.col:C.textLt,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{if(hasCards)e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:11,fontWeight:600,textAlign:"center",lineHeight:1.3}}>{mode.label}</span><span style={{fontSize:18,fontWeight:300}}>{count}</span><span style={{fontSize:10,opacity:0.7}}>carte{count!==1?"s":""}</span></button>;})}
         </div>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
@@ -1838,7 +1859,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
       ):activeTab==="mes-cartes"&&!isAdmin?(
         <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser}/>
       ):activeTab==="shop"&&!isAdmin?(
-        <ShopTab userGroups={userGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)}/>
+        <ShopTab userGroups={userGroups} fullGroups={fullGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)}/>
       ):tabHasAccess?(
         <div>
           <p style={{fontFamily:serif,fontSize:18,margin:"0 0 14px"}}>Par matière · Cours · Chapitre</p>
@@ -2230,7 +2251,9 @@ function App(){
           }catch{}
           const extra=getExtraGroups(saved.username);
           const restoredGroups=computeGroups(planId,groups,extra);
-          const restored={...saved,plan:{planId,groups:restoredGroups}};
+          const priorFull=Array.isArray(saved.plan?.fullGroups)?saved.plan.fullGroups:[];
+          const restoredFullGroups=computeFullGroups(planId,priorFull,extra);
+          const restored={...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}};
           setProg(storage.get(`mx6-prog-${saved.username}`)||{});
           refreshProgressFromCloud(saved.username);
           if(saved.role!=="admin"){
@@ -2270,7 +2293,8 @@ function App(){
           const extra=getExtraGroups(currentUser.username);
           saveExtraGroups(currentUser.username,[...extra,...pp.groups]);
           const newGroups=computeGroups(subPlanId,currentUser.plan?.groups||[],pp.groups);
-          const immediateUser={...currentUser,plan:{planId:subPlanId,groups:newGroups}};
+          const newFullGroups=computeFullGroups(subPlanId,currentUser.plan?.fullGroups||[],pp.groups);
+          const immediateUser={...currentUser,plan:{planId:subPlanId,groups:newGroups,fullGroups:newFullGroups}};
           setCurrentUser(immediateUser);
           storage.set("mx6-session",immediateUser);
           supa.updateGroups(currentUser.username,newGroups,isFullPlan?subPlanId:undefined).catch(()=>{});
@@ -2288,7 +2312,8 @@ function App(){
           const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
           const extra=getExtraGroups(currentUser.username);
           const mergedGroups=computeGroups(subPlanId,supaGroups,extra);
-          const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups}};
+          const mergedFullGroups=computeFullGroups(subPlanId,supaGroups,extra);
+          const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}};
           setCurrentUser(newUser);
           storage.set("mx6-session",newUser);
         }catch{}
@@ -2307,7 +2332,8 @@ function App(){
       const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
       const extra=getExtraGroups(lc);
       const groups=computeGroups(subPlanId,supaGroups,extra);
-      const u={username:acc.username,role:"student",plan:{planId:subPlanId,groups}};
+      const fullGroups=computeFullGroups(subPlanId,supaGroups,extra);
+      const u={username:acc.username,role:"student",plan:{planId:subPlanId,groups,fullGroups}};
       setProg(storage.get(`mx6-prog-${lc}`)||{});refreshProgressFromCloud(lc);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
     }
     return false;
@@ -2391,7 +2417,7 @@ function App(){
   const handleDeleteCard=useCallback(async id=>{await supa.deleteCard(id);setCards(p=>p.filter(c=>c.id!==id));},[]);
   const handleSaveUser=useCallback(async acc=>{await supa.upsertAccount(acc);setAccounts(p=>p.find(a=>a.username===acc.username)?p.map(a=>a.username===acc.username?{...a,...acc,plan_id:acc.planId}:a):[...p,{...acc,plan_id:acc.planId}]);},[]);
   const handleDeleteUser=useCallback(async username=>{await supa.deleteAccount(username);setAccounts(p=>p.filter(a=>a.username!==username));},[]);
-  const handleRegister=useCallback(async newAcc=>{await supa.upsertAccount(newAcc);setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups}};setProg({});setCurrentUser(u);storage.set("mx6-session",u);},[]);
+  const handleRegister=useCallback(async newAcc=>{await supa.upsertAccount(newAcc);setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};setProg({});setCurrentUser(u);storage.set("mx6-session",u);},[]);
   useEffect(()=>{
     if(!currentUser||currentUser.role==="admin"){setUserCards([]);return;}
     const cached=mergeIntegrated(getUCache(currentUser.username),currentUser.username);
@@ -2460,6 +2486,7 @@ function App(){
         const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
         const extra=getExtraGroups(currentUser.username);
         const mergedGroups=computeGroups(subPlanId,supaGroups,extra);
+        const mergedFullGroups=computeFullGroups(subPlanId,supaGroups,extra);
         const extraNotInSupa=extra.filter(g=>!supaGroups.includes(g));
         if(extraNotInSupa.length>0){
           supa.updateGroups(currentUser.username,mergedGroups,isFullPlan?subPlanId:undefined).catch(()=>{});
@@ -2467,7 +2494,7 @@ function App(){
         const curStr=JSON.stringify([...(currentUser.plan?.groups||[])].sort());
         const newStr=JSON.stringify([...mergedGroups].sort());
         if(subPlanId!==currentUser.plan?.planId||curStr!==newStr){
-          const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups}};
+          const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}};
           setCurrentUser(newUser);
           storage.set("mx6-session",newUser);
         }
@@ -2545,7 +2572,9 @@ function App(){
   },[allCards,userCards,prog,settings,getNewShownToday,enrichCards]);
   const startGlobalStudy=useCallback(async pkId=>{
     const ids=currentUser?.plan?.groups||[];
-    const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId));
+    const fGroups=currentUser?.plan?.fullGroups||[];
+    const isAdminUser=currentUser?.role==="admin";
+    const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)&&(isAdminUser||isCourseAccessible(c.groupId,c.num,ids,fGroups)));
     const queue=buildQueue(globalFiltered,prog,settings,getNewShownToday(),false);
     if(!queue.length){alert(getEmptyQueueMsg(globalFiltered,prog,settings,getNewShownToday()));return;}
     const fullQueue=await enrichCards(queue);
@@ -2584,8 +2613,9 @@ function App(){
     }
   },[prog,saveProg]);
   if(view==="loading") return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
+    <img src={LANDING_LOGO} style={{height:44,width:"auto"}} alt="MyFlashCard"/>
     <p style={{fontFamily:serif,fontSize:28,letterSpacing:-0.5}}>MyFlashcard</p>
-    <p style={{color:C.textLt,fontSize:13}}>Connexion à Supabase…</p>
+    <p style={{color:C.textLt,fontSize:13,display:"flex",alignItems:"center",gap:3}}>Chargement<span style={{animation:"dotPulse 1.4s infinite",animationDelay:"0s"}}>.</span><span style={{animation:"dotPulse 1.4s infinite",animationDelay:"0.2s"}}>.</span><span style={{animation:"dotPulse 1.4s infinite",animationDelay:"0.4s"}}>.</span></p>
     {supaError&&<div style={{marginTop:12,maxWidth:400,background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:10,padding:"16px 20px",textAlign:"center"}}>
       <p style={{fontSize:14,fontWeight:600,color:"#dc2626",margin:"0 0 8px"}}>⚠️ Supabase ne répond pas</p>
       <p style={{fontSize:12,color:"#7f1d1d",margin:"0 0 12px",lineHeight:1.6}}>Erreur : <code>{supaError}</code><br/>Ton projet Supabase est peut-être <strong>en pause</strong> (plan gratuit).</p>
