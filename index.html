@@ -171,6 +171,32 @@ const supa = {
     }
   },
   deleteUserCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/user_cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
+  getProgress: async (username) => {
+    try {
+      const all=[]; let offset=0; const BATCH=1000;
+      while(true){
+        const r=await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&select=card_id,data&limit=${BATCH}&offset=${offset}`,{headers:H});
+        if(!r.ok)throw new Error(`HTTP ${r.status}`);
+        const rows=await r.json();
+        if(!Array.isArray(rows)||!rows.length)break;
+        all.push(...rows);
+        if(rows.length<BATCH)break;
+        offset+=BATCH;
+      }
+      const prog={};
+      all.forEach(row=>{ try{ prog[row.card_id]=typeof row.data==="string"?JSON.parse(row.data):row.data; }catch{} });
+      return prog;
+    } catch(e){ console.error("getProgress failed:",e); return null; }
+  },
+  upsertProgress: async (username, cardId, data) => {
+    try {
+      await fetch(`${SUPA_URL}/rest/v1/progress?on_conflict=username,card_id`, {
+        method:"POST",
+        headers:{...H,"Prefer":"resolution=merge-duplicates"},
+        body:JSON.stringify([{username,card_id:cardId,data,updated_at:new Date().toISOString()}])
+      });
+    } catch(e){ console.error("upsertProgress failed:",e); }
+  },
 };
 const storage = {
   get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
@@ -2202,6 +2228,7 @@ function App(){
           const restoredGroups=computeGroups(planId,groups,extra);
           const restored={...saved,plan:{planId,groups:restoredGroups}};
           setProg(storage.get(`mx6-prog-${saved.username}`)||{});
+          refreshProgressFromCloud(saved.username);
           if(saved.role!=="admin"){
             const cached=mergeIntegrated(getUCache(saved.username),saved.username);
             if(cached.length>0)setUserCards(cached);
@@ -2268,7 +2295,7 @@ function App(){
   const handleLogin=(email,password)=>{
     const lc=email.toLowerCase();
     const adminMatch=ADMINS.find(a=>a.username===lc&&a.password===password);
-    if(adminMatch){const u={username:adminMatch.username,role:"admin",plan:{planId:"both",groups:ALL}};setProg(storage.get(`mx6-prog-${adminMatch.username}`)||{});setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;}
+    if(adminMatch){const u={username:adminMatch.username,role:"admin",plan:{planId:"both",groups:ALL}};setProg(storage.get(`mx6-prog-${adminMatch.username}`)||{});refreshProgressFromCloud(adminMatch.username);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;}
     const acc=accounts.find(a=>a.username===lc&&a.password===password);
     if(acc){
       const rawPlanId=acc.plan_id||acc.planId;
@@ -2277,12 +2304,30 @@ function App(){
       const extra=getExtraGroups(lc);
       const groups=computeGroups(subPlanId,supaGroups,extra);
       const u={username:acc.username,role:"student",plan:{planId:subPlanId,groups}};
-      setProg(storage.get(`mx6-prog-${lc}`)||{});setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
+      setProg(storage.get(`mx6-prog-${lc}`)||{});refreshProgressFromCloud(lc);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
     }
     return false;
   };
   const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setView("login");};
-  const saveProg=useCallback(p=>{setProg(p);if(currentUser)storage.set(`mx6-prog-${currentUser.username}`,p);},[currentUser]);
+  const refreshProgressFromCloud=useCallback(async username=>{
+    const remote=await supa.getProgress(username);
+    if(remote===null)return;
+    const local=storage.get(`mx6-prog-${username}`)||{};
+    if(Object.keys(remote).length===0&&Object.keys(local).length>0){
+      Object.keys(local).forEach(cardId=>{supa.upsertProgress(username,cardId,local[cardId]);});
+      return;
+    }
+    const merged={...local,...remote};
+    storage.set(`mx6-prog-${username}`,merged);
+    setProg(merged);
+  },[]);
+  const saveProg=useCallback((p,changedId)=>{
+    setProg(p);
+    if(currentUser){
+      storage.set(`mx6-prog-${currentUser.username}`,p);
+      if(changedId){supa.upsertProgress(currentUser.username,changedId,p[changedId]);}
+    }
+  },[currentUser]);
   const saveSet=useCallback(s=>{setSettings(s);storage.set("mx6-settings",s);},[]);
   const handleSaveCard=useCallback(async cardOrCards=>{
     const isBatch=Array.isArray(cardOrCards);
@@ -2510,7 +2555,7 @@ function App(){
     const preserved={};
     if(existing.packetOverride)preserved.packetOverride=existing.packetOverride;
     if(existing.buried)preserved.buried=existing.buried;
-    saveProg({...prog,[card.id]:{...np,...preserved}});
+    saveProg({...prog,[card.id]:{...np,...preserved}},card.id);
     if(currentUser&&currentUser.role!=="admin"){
       recordStat(currentUser.username,rating>=3,elapsedMs,wasNew);
     }
@@ -2518,20 +2563,20 @@ function App(){
   },[prog,saveProg,settings,currentUser]);
   const handleBury=useCallback((card)=>{
     const existing=prog[card.id]||{};
-    saveProg({...prog,[card.id]:{...existing,buried:true}});
+    saveProg({...prog,[card.id]:{...existing,buried:true}},card.id);
   },[prog,saveProg]);
   const handleUnbury=useCallback((cardId)=>{
     const existing=prog[cardId]||{};
     const {buried:_,...rest}=existing;
-    saveProg({...prog,[cardId]:rest});
+    saveProg({...prog,[cardId]:rest},cardId);
   },[prog,saveProg]);
   const handleChangePacket=useCallback((card,newPktId)=>{
     const existing=prog[card.id]||{};
     if(newPktId===card.packetId){
       const {packetOverride:_,...rest}=existing;
-      saveProg({...prog,[card.id]:rest});
+      saveProg({...prog,[card.id]:rest},card.id);
     } else {
-      saveProg({...prog,[card.id]:{...existing,packetOverride:newPktId}});
+      saveProg({...prog,[card.id]:{...existing,packetOverride:newPktId}},card.id);
     }
   },[prog,saveProg]);
   if(view==="loading") return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16}}>
