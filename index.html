@@ -1235,8 +1235,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
   const [cardKey,setCardKey]=useState(0);
   const [saveFlash,setSaveFlash]=useState(false);
   const handleSave=async(cardOrCards)=>{
-    if(Array.isArray(cardOrCards)){for(const c of cardOrCards)await onSaveCard(c);}
-    else{await onSaveCard(cardOrCards);}
+    await onSaveCard(cardOrCards);
     if(editCard===null){
       setSaveFlash(true);
       setTimeout(()=>setSaveFlash(false),2000);
@@ -2285,30 +2284,59 @@ function App(){
   const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setView("login");};
   const saveProg=useCallback(p=>{setProg(p);if(currentUser)storage.set(`mx6-prog-${currentUser.username}`,p);},[currentUser]);
   const saveSet=useCallback(s=>{setSettings(s);storage.set("mx6-settings",s);},[]);
-  const handleSaveCard=useCallback(async cd=>{
-    const saved={...cd};
-    if(!saved.id){
-      saved.id=`card-${Date.now()}`;
-    }
-    if(!(saved.sort_order>0)){
-      const chCards=cards.filter(c=>c.groupId===saved.groupId&&c.num===saved.num&&c.chapterId===saved.chapterId&&c.id!==saved.id);
-      const maxOrd=chCards.reduce((m,c)=>c.sort_order>0?Math.max(m,c.sort_order):m,0);
-      if(maxOrd>0){
-        saved.sort_order=maxOrd+1;
-      } else {
-        delete saved.sort_order;
+  const handleSaveCard=useCallback(async cardOrCards=>{
+    const isBatch=Array.isArray(cardOrCards);
+    const list=isBatch?cardOrCards:[cardOrCards];
+    const savedList=list.map((cd,i)=>{
+      const saved={...cd};
+      if(!saved.id){
+        saved.id=`card-${Date.now()}-${i}-${Math.random().toString(36).slice(2,7)}`;
       }
+      return saved;
+    });
+    if(isBatch&&savedList.length>1){
+      const groups={};
+      savedList.forEach(saved=>{
+        if(saved.sort_order>0)return;
+        const key=`${saved.groupId}|${saved.num}|${saved.chapterId}`;
+        (groups[key]=groups[key]||[]).push(saved);
+      });
+      Object.keys(groups).forEach(key=>{
+        const [groupId,num,chapterId]=key.split("|");
+        const batchIds=new Set(groups[key].map(s=>s.id));
+        const chCards=cards.filter(c=>String(c.groupId)===groupId&&String(c.num)===num&&String(c.chapterId)===chapterId&&!batchIds.has(c.id));
+        let maxOrd=chCards.reduce((m,c)=>c.sort_order>0?Math.max(m,c.sort_order):m,0);
+        groups[key].forEach(saved=>{maxOrd+=1;saved.sort_order=maxOrd;});
+      });
+    } else {
+      savedList.forEach(saved=>{
+        if(!(saved.sort_order>0)){
+          const chCards=cards.filter(c=>c.groupId===saved.groupId&&c.num===saved.num&&c.chapterId===saved.chapterId&&c.id!==saved.id);
+          const maxOrd=chCards.reduce((m,c)=>c.sort_order>0?Math.max(m,c.sort_order):m,0);
+          if(maxOrd>0){
+            saved.sort_order=maxOrd+1;
+          } else {
+            delete saved.sort_order;
+          }
+        }
+      });
     }
     try {
-      await supa.upsertCard(saved);
+      for(const saved of savedList){
+        await supa.upsertCard(saved);
+      }
     } catch(e){
       alert(`⚠️ ERREUR DE SAUVEGARDE\n\nLa carte n'a pas pu être enregistrée dans Supabase :\n${e.message||e}\n\nNote le contenu manuellement et réessaie.`);
       console.error("upsertCard failed:",e);
       return;
     }
     setCards(prev=>{
-      const exists=prev.find(c=>c.id===saved.id);
-      return sortCardsGlobally(exists?prev.map(c=>c.id===saved.id?saved:c):[...prev,saved]);
+      let next=prev;
+      savedList.forEach(saved=>{
+        const exists=next.find(c=>c.id===saved.id);
+        next=exists?next.map(c=>c.id===saved.id?saved:c):[...next,saved];
+      });
+      return sortCardsGlobally(next);
     });
   },[cards]);
   const handleDeleteCard=useCallback(async id=>{await supa.deleteCard(id);setCards(p=>p.filter(c=>c.id!==id));},[]);
