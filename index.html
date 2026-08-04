@@ -2056,10 +2056,11 @@ function Landing({onBack,onRegister}){
     <div style={{padding:"8px 24px 20px",textAlign:"center"}}>
       <p style={{fontSize:36,fontWeight:700,color:C.text,margin:"0 0 16px",lineHeight:1.2}}>Le concours, servi sur un plateau.</p>
       <p style={{fontSize:16,color:C.textMed,maxWidth:600,margin:"0 auto 32px",lineHeight:1.7}}>Des milliers d'heures de travail, transformées en flashcards à partir du programme de la faculté de médecine de Grenoble, créées par des étudiants admis en MMOPK, pour que vous n'ayez plus qu'à les apprendre.</p>
-      <div style={{display:"flex",justifyContent:"center",gap:48,marginBottom:8,flexWrap:"wrap"}}>
-        <div><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>2019-2026</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Admis au concours de Grenoble</p></div>
-        <div><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>90%</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Une méthode qui convient à la grande majorité des étudiants</p></div>
-        <div><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>5</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Matières offertes pour tester</p></div>
+      <style>{`.mfc-hero-stats{flex-wrap:wrap}@media (min-width:640px){.mfc-hero-stats{flex-wrap:nowrap}}`}</style>
+      <div className="mfc-hero-stats" style={{display:"flex",justifyContent:"center",gap:32}}>
+        <div style={{minWidth:120}}><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>2019-2026</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Admis au concours de Grenoble</p></div>
+        <div style={{minWidth:120}}><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>90%</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Une méthode qui convient à la grande majorité des étudiants</p></div>
+        <div style={{minWidth:120}}><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>5</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Matières offertes pour tester</p></div>
       </div>
     </div>
 
