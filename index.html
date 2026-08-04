@@ -2179,7 +2179,7 @@ function App(){
     if(!(saved.sort_order>0)){
       const chCards=cards.filter(c=>c.groupId===saved.groupId&&c.num===saved.num&&c.chapterId===saved.chapterId&&c.id!==saved.id);
       const maxOrd=chCards.reduce((m,c)=>c.sort_order>0?Math.max(m,c.sort_order):m,0);
-      saved.sort_order=maxOrd>0?maxOrd+1:Date.now();
+      saved.sort_order=maxOrd+1;
     }
     try {
       await supa.upsertCard(saved);
