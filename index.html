@@ -767,6 +767,8 @@ function RegisterView({onRegister,onBack,accounts}){
 }
 // ─── Occlusion ────────────────────────────────────────────────────────────────
 const isOcclusion = (card) => { if(card.card_type==='occlusion')return true; try { return JSON.parse(card.front)?.type==="occlusion"; } catch { return false; } };
+// Titre optionnel affiché au-dessus de l'image (ex: le nom du tableau), stocké dans le JSON du recto
+const getOcclusionTitle = (front) => { try { return JSON.parse(front)?.title || ""; } catch { return ""; } };
 function OcclusionCanvas({cardFront,showBack,showOthers}){
   const canvasRef=useRef(null);
   useEffect(()=>{
@@ -825,6 +827,8 @@ function CardEditor({card,onSave,onCancel,userGroups}){
   const [formBack,setFormBack]=useState(existingBack.text||(card?.back?.startsWith("{")?"":(card?.back||"")));
   const [saved,setSaved]=useState(false),[errors,setErrors]=useState({});
   const COLORS=["#e74c3c","#3498db","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#e91e63","#00bcd4","#8bc34a"];
+  const existingOcclusionTitle=!isNew&&isOcclusion(card)?getOcclusionTitle(card.front):"";
+  const [occlusionTitle,setOcclusionTitle]=useState(existingOcclusionTitle);
   const [image,setImage]=useState(null),[imgW,setImgW]=useState(0),[imgH,setImgH]=useState(0);
   const [imgDrag,setImgDrag]=useState(false);
   const [zones,setZones]=useState([]),[drawing,setDrawing]=useState(false),[startPos,setStartPos]=useState(null),[currentRect,setCurrentRect]=useState(null);
@@ -913,7 +917,7 @@ function CardEditor({card,onSave,onCancel,userGroups}){
   const handleSaveOcclusion=()=>{
     if(!image||zones.length===0)return;
     saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);
-    const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id}),back:"__occlusion__",groupId:form.groupId,num:form.num,chapterId:form.chapterId,packetId:zone.packetId||form.packetId,card_type:"occlusion"}));
+    const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id,title:occlusionTitle}),back:"__occlusion__",groupId:form.groupId,num:form.num,chapterId:form.chapterId,packetId:zone.packetId||form.packetId,card_type:"occlusion"}));
     onSave(cards);setSaved(true);
   };
   // Change the packet (Prioritaire/Important/Utile) of a single zone — each masked
@@ -966,7 +970,13 @@ function CardEditor({card,onSave,onCancel,userGroups}){
         <ClassPanel/>
       </div>)}
       {cardType==="occlusion"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20,alignItems:"start"}}>
-        <div>{!image?(
+        <div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+            <Lbl>Titre au-dessus de l'image (optionnel)</Lbl>
+            <input style={iLine} placeholder="Ex : Tableau des cytokines pro-inflammatoires" value={occlusionTitle} onChange={e=>setOcclusionTitle(e.target.value)}/>
+            <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>Affiché au-dessus de l'image sur toutes les cartes générées à partir de celle-ci — pratique pour indiquer le nom du tableau.</p>
+          </div>
+          {!image?(
           <div
             onDragOver={e=>{e.preventDefault();e.stopPropagation();setImgDrag(true);}}
             onDragLeave={e=>{e.preventDefault();e.stopPropagation();setImgDrag(false);}}
@@ -1279,7 +1289,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
         return<>
           <div style={{background:C.surface,border:`1.5px solid ${C.border}`,borderRadius:10,padding:"18px 20px"}}>
             <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Recto — Question</p>
-            {isOcclusion({front:content.front})?(<div><p style={{fontFamily:serif,fontSize:15,color:C.text,margin:"0 0 10px"}}>🖼 Image Occlusion</p><OcclusionCanvas cardFront={content.front} showBack={false} showOthers={false}/></div>):(<>{fc?.text&&<MathText text={fc.text} style={{fontFamily:serif,fontSize:17,lineHeight:1.7,margin:"0 0 8px",color:C.text,whiteSpace:"pre-wrap"}}/>}{fc?.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}{!fc?.text&&!fc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}</>)}
+            {isOcclusion({front:content.front})?(<div><p style={{fontFamily:serif,fontSize:15,color:C.text,margin:"0 0 10px"}}>🖼 Image Occlusion</p>{getOcclusionTitle(content.front)&&<p style={{fontFamily:serif,fontSize:14,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{getOcclusionTitle(content.front)}</p>}<OcclusionCanvas cardFront={content.front} showBack={false} showOthers={false}/></div>):(<>{fc?.text&&<MathText text={fc.text} style={{fontFamily:serif,fontSize:17,lineHeight:1.7,margin:"0 0 8px",color:C.text,whiteSpace:"pre-wrap"}}/>}{fc?.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",objectFit:"contain"}}/>}{!fc?.text&&!fc?.img&&<p style={{color:C.textLt,fontSize:13,margin:0,fontStyle:"italic"}}>Aucun contenu</p>}</>)}
           </div>
           {!isOcclusion({front:content.front})&&(<div style={{background:C.surface,border:`1.5px solid ${col}`,borderRadius:10,padding:"18px 20px"}}>
             <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Verso — Réponse</p>
@@ -2037,6 +2047,7 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
       {isOcclusion(card)?(
         <div style={{marginBottom:22}}>
           <div style={{background:C.surface,border:`1.5px solid ${showBack?col:C.border}`,borderRadius:12,padding:"16px 20px",transition:"border-color 0.3s"}}>
+            {getOcclusionTitle(card.front)&&<p style={{fontFamily:serif,fontSize:17,fontWeight:600,color:C.text,margin:"0 0 12px",textAlign:"center"}}>{getOcclusionTitle(card.front)}</p>}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><Lbl>{showBack?"Réponse révélée":showOthers?"Indices visibles (image)":"Zone rouge = à deviner · Zones noires = masquées"}</Lbl>{showBack&&<Tag color={C.good} bg={C.goodBg} small>Révélé</Tag>}</div>
             <div onClick={()=>showBack?setShowBack(false):setShowBack(true)} style={{cursor:"pointer"}}><OcclusionCanvas cardFront={card.front} showBack={showBack} showOthers={showOthers}/></div>
             {!showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={e=>{e.stopPropagation();setShowOthers(s=>!s);}} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${showOthers?C.imp:C.border}`,background:showOthers?C.impBg:"transparent",color:showOthers?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>{showOthers?"🔲 Masquer les indices":"👁 Voir les indices (image)"}</button><button onClick={()=>setShowBack(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${col}`,background:pB(card.packetId),color:col}}>Révéler →</button></div>}
