@@ -198,6 +198,13 @@ const supa = {
       });
     } catch(e){ console.error("upsertProgress failed:",e); }
   },
+  deleteProgressBatch: async (username, cardIds) => {
+    if(!cardIds||!cardIds.length)return;
+    try {
+      const idList=cardIds.map(id=>encodeURIComponent(id)).join(",");
+      await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&card_id=in.(${idList})`,{method:"DELETE",headers:H});
+    } catch(e){ console.error("deleteProgressBatch failed:",e); }
+  },
 };
 const storage = {
   get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
@@ -519,6 +526,19 @@ function courseDueCount(cards,prog,gid,num){
 function globalDue(cards,prog,ids,settings,pkId=null){
   const el=cards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId));
   return buildQueue(el,prog,settings).length;
+}
+// Cartes passées à maturation (état "révision", plus en apprentissage initial) et actuellement dues,
+// toutes matières confondues — utilisé par la Révision globale.
+function globalReviewDueCards(cards,prog,ids,pkId=null){
+  return cards.filter(c=>{
+    if(!ids.includes(c.groupId))return false;
+    if(pkId&&effPkt(c,prog)!==pkId)return false;
+    const p=prog[c.id];
+    return p&&!p.buried&&p.state==="review"&&isDue(p);
+  });
+}
+function globalReviewDue(cards,prog,ids,pkId=null){
+  return globalReviewDueCards(cards,prog,ids,pkId).length;
 }
 // ─── Design ──────────────────────────────────────────────────────────────────
 const C={bg:"#f5f3ee",surface:"#ffffff",border:"#d0ccc4",text:"#1a1917",textMed:"#4e4a46",textLt:"#7a7672",accent:"#2c4a7c",accentBg:"#eef3fb",prio:"#9b2335",prioBg:"#fef2f4",imp:"#8b5e00",impBg:"#fef8e8",util:"#1e5a3a",utilBg:"#edf7f2",again:"#b91c1c",againBg:"#fff0f0",hard:"#b45309",hardBg:"#fff8ed",good:"#15803d",goodBg:"#edfdf3",easy:"#1d4ed8",easyBg:"#eff6ff"};
@@ -1731,18 +1751,30 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
   const accessibleCards=useMemo(()=>isAdmin?allCards:allCards.filter(c=>isCourseAccessible(c.groupId,c.num,userGroups,fullGroups)),[allCards,isAdmin,userGroups,fullGroups]);
   const groupsForTab=useCallback(tabId=>{
     const sem=TABS.find(t=>t.id===tabId)?.sem;
-    const gs=GROUPS.filter(g=>g.sem===sem);
+    return GROUPS.filter(g=>g.sem===sem);
+  },[]);
+  const accessibleGroupsForTab=useCallback(tabId=>{
+    const gs=groupsForTab(tabId);
     return isAdmin?gs:gs.filter(g=>userGroups.includes(g.id));
-  },[isAdmin,userGroups]);
+  },[groupsForTab,isAdmin,userGroups]);
   const hasTabAccess=useCallback(tab=>{
     if(!tab)return false;
-    return groupsForTab(tab.id).length>0;
-  },[groupsForTab]);
+    return accessibleGroupsForTab(tab.id).length>0;
+  },[accessibleGroupsForTab]);
   const tabGroups=useMemo(()=>groupsForTab(activeTab),[activeTab,groupsForTab]);
   const visibleIds=isAdmin?ALL:userGroups;
   function GroupBlock({group}){
     const [activeCours,setActiveCours]=useState(null);
     const chapters=activeCours?getDisplayChapters(group.id,activeCours,allCards):[];
+    const groupLocked=!isAdmin&&!group.nums.some(n=>isCourseAccessible(group.id,n,userGroups,fullGroups));
+    if(groupLocked){
+      return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12,opacity:0.75}}>
+        <div style={{padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+          <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.textMed}}>{group.label}</p>
+          <button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>🔒 Débloquer</button>
+        </div>
+      </div>;
+    }
     function PktBtn({chapterId,pk}){
       const col=pC(pk.id),bg=pB(pk.id);
       const {total,due}=chapterStats(allCards,progress,group.id,activeCours,chapterId,pk.id);
@@ -1844,11 +1876,18 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         {!isAdmin&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"flex",alignItems:"center",gap:7}}>💳 Changer d'abonnement</button>}
       </div>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"20px 22px",marginBottom:24}}>
-        <p style={{fontFamily:serif,fontSize:18,margin:"0 0 3px"}}>Révision globale</p>
-        <p style={{fontSize:12,color:C.textMed,margin:"0 0 16px"}}>Toutes vos matières en une session</p>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
-          {gModes.map(mode=>{const count=globalDue(accessibleCards,progress,visibleIds,settings,mode.id),hasCards=count>0;return<button key={String(mode.id)} onClick={()=>hasCards&&onGlobalStudy(mode.id)} style={{fontFamily:font,padding:"14px 10px",cursor:hasCards?"pointer":"default",borderRadius:8,border:`1.5px solid ${hasCards?mode.col:C.border}`,background:hasCards?mode.bg:"transparent",color:hasCards?mode.col:C.textLt,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{if(hasCards)e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:11,fontWeight:600,textAlign:"center",lineHeight:1.3}}>{mode.label}</span><span style={{fontSize:18,fontWeight:300}}>{count}</span><span style={{fontSize:10,opacity:0.7}}>carte{count!==1?"s":""}</span></button>;})}
-        </div>
+        <p style={{fontFamily:serif,fontSize:18,margin:"0 0 6px"}}>Révision globale</p>
+        <p style={{fontSize:12,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Les cartes déjà passées à maturation (au-delà de l'apprentissage initial) et arrivées à échéance, toutes matières confondues.</p>
+        {(()=>{
+          const totalReview=globalReviewDue(accessibleCards,progress,visibleIds);
+          if(totalReview===0)return <div style={{textAlign:"center",padding:"18px 12px",border:`1.5px dashed ${C.border}`,borderRadius:8}}>
+            <p style={{fontSize:20,margin:"0 0 6px"}}>✓</p>
+            <p style={{fontSize:13,color:C.textMed,margin:0}}>À jour — vous n'avez pas de flashcard en attente d'être révisée.</p>
+          </div>;
+          return <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+            {gModes.map(mode=>{const count=globalReviewDue(accessibleCards,progress,visibleIds,mode.id),hasCards=count>0;return<button key={String(mode.id)} onClick={()=>hasCards&&onGlobalStudy(mode.id)} style={{fontFamily:font,padding:"14px 10px",cursor:hasCards?"pointer":"default",borderRadius:8,border:`1.5px solid ${hasCards?mode.col:C.border}`,background:hasCards?mode.bg:"transparent",color:hasCards?mode.col:C.textLt,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{if(hasCards)e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:11,fontWeight:600,textAlign:"center",lineHeight:1.3}}>{mode.label}</span><span style={{fontSize:18,fontWeight:300}}>{count}</span><span style={{fontSize:10,opacity:0.7}}>carte{count!==1?"s":""}</span></button>;})}
+          </div>;
+        })()}
       </div>
       <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
         {TABS.map(tab=>{
@@ -2020,20 +2059,27 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
   </div>;
 }
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsView({settings,onSave,onBack}){
+function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onResetProgress}){
   const [s,setS]=useState(settings),[saved,setSaved]=useState(false);
+  const [rGroup,setRGroup]=useState(GROUPS[0]?.id||""),[rNum,setRNum]=useState(1),[rPkt,setRPkt]=useState("all");
+  const [confirmReset,setConfirmReset]=useState(false),[resetPwd,setResetPwd]=useState(""),[resetErr,setResetErr]=useState(""),[resetDone,setResetDone]=useState(false);
   const save=()=>{onSave(s);setSaved(true);setTimeout(()=>setSaved(false),2000);};
   const Sl=({k,label,desc,min,max,step,unit})=><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><p style={{fontSize:13,fontWeight:500,margin:0}}>{label}</p><p style={{fontSize:18,fontWeight:300,color:C.accent,margin:0}}>{s[k]}<span style={{fontSize:11}}> {unit}</span></p></div><p style={{fontSize:11,color:C.textMed,margin:"0 0 8px"}}>{desc}</p><input type="range" min={min} max={max} step={step} value={s[k]} onChange={e=>setS(p=>({...p,[k]:Number(e.target.value)}))} style={{width:"100%"}}/></div>;
   const Sec=({title,children})=><div style={{marginBottom:24}}><h2 style={{fontFamily:serif,fontSize:19,fontWeight:400,margin:"0 0 12px",paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>{title}</h2>{children}</div>;
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
     <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center="Paramètres" right={<Btn fill onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder"}</Btn>}/>
     <div style={{maxWidth:600,margin:"0 auto",padding:"28px 24px"}}>
-      <Sec title="🎯 Nouvelles cartes du jour"><div style={{display:"flex",flexDirection:"column",gap:10}}><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><MultiToggle label="Matières à découvrir" value={s.dailyGroups} onChange={v=>setS(p=>({...p,dailyGroups:v}))} options={GROUPS.map(g=>({value:g.id,label:groupLabel(g)}))} colorFn={()=>C.accent}/></div><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><MultiToggle label="Paquets à découvrir" value={s.dailyPackets} onChange={v=>setS(p=>({...p,dailyPackets:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label}))} colorFn={pC}/></div></div></Sec>
-      <Sec title="⏱ Intervalles d'apprentissage"><div style={{display:"flex",flexDirection:"column",gap:8}}><Sl k="againMin" label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><Sl k="hardMin" label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><Sl k="goodMin" label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><Sl k="easyDays" label="Facile" desc="Graduation immédiate." min={1} max={14} step={1} unit="jours"/></div></Sec>
+      <Sec title="⏱ Intervalles d'apprentissage">
+        <div style={{background:"#fef8e8",border:"1px solid #d9b23c50",borderRadius:8,padding:"10px 14px",marginBottom:10}}>
+          <p style={{fontSize:12,color:"#8b5e00",margin:0,lineHeight:1.6}}>⚠️ Il est déconseillé de modifier ces intervalles : ils sont optimisés au mieux par défaut pour la mémorisation à long terme.</p>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}><Sl k="againMin" label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><Sl k="hardMin" label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><Sl k="goodMin" label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><Sl k="easyDays" label="Facile" desc="Graduation immédiate." min={1} max={14} step={1} unit="jours"/></div>
+        <button onClick={()=>setS(p=>({...p,againMin:DEFAULT_SETTINGS.againMin,hardMin:DEFAULT_SETTINGS.hardMin,goodMin:DEFAULT_SETTINGS.goodMin,easyDays:DEFAULT_SETTINGS.easyDays}))} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",marginTop:10,cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>↺ Revenir aux valeurs par défaut</button>
+      </Sec>
       <Sec title="📚 Session d'étude">
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          <Sl k="newCardsPerDay" label="Nouvelles cartes / jour" desc="Limite quotidienne de nouvelles cartes à découvrir." min={5} max={100} step={5} unit=""/>
-          <Sl k="maxReviewsPerDay" label="Révisions max / session" desc="Plafond total de cartes par session (nouvelles + révisions)." min={20} max={500} step={10} unit=""/>
+          <Sl k="newCardsPerDay" label="Nouvelles cartes / jour" desc="Limite quotidienne de nouvelles cartes à découvrir." min={5} max={300} step={5} unit=""/>
+          <Sl k="maxReviewsPerDay" label="Révisions max / session" desc="Plafond total de cartes par session (nouvelles + révisions)." min={20} max={10000} step={10} unit=""/>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}>
             <p style={{fontSize:13,fontWeight:500,margin:"0 0 4px"}}>Position des nouvelles cartes dans la session</p>
             <p style={{fontSize:11,color:C.textMed,margin:"0 0 12px"}}>Quand réviser les cartes jamais vues ?</p>
@@ -2049,8 +2095,58 @@ function SettingsView({settings,onSave,onBack}){
           </div>
         </div>
       </Sec>
+      {onResetProgress&&<Sec title="🗑 Réinitialiser des révisions">
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.6}}>Remet à zéro la progression de révision (les cartes redeviennent "Nouveau"), pour un paquet précis ou pour tout un cours. Action irréversible, confirmation par mot de passe requise.</p>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <select value={rGroup} onChange={e=>{setRGroup(e.target.value);setRNum(1);}} style={{...iBox,flex:"1 1 200px",fontSize:12,padding:"8px 10px"}}>
+              {GROUPS.map(g=><option key={g.id} value={g.id}>{groupLabel(g)}</option>)}
+            </select>
+            <select value={rNum} onChange={e=>setRNum(Number(e.target.value))} style={{...iBox,flex:"0 1 110px",fontSize:12,padding:"8px 10px"}}>
+              {(GROUPS.find(g=>g.id===rGroup)?.nums||[1]).map(n=><option key={n} value={n}>Cours {n}</option>)}
+            </select>
+            <select value={rPkt} onChange={e=>setRPkt(e.target.value)} style={{...iBox,flex:"0 1 160px",fontSize:12,padding:"8px 10px"}}>
+              <option value="all">Tout le cours</option>
+              {PACKETS.map(pk=><option key={pk.id} value={pk.id}>{pk.label} seulement</option>)}
+            </select>
+          </div>
+          <button onClick={()=>{setConfirmReset(true);setResetPwd("");setResetErr("");setResetDone(false);}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:C.againBg,color:C.again,alignSelf:"flex-start"}}>🗑 Réinitialiser</button>
+        </div>
+      </Sec>}
       <Btn fill full style={{fontSize:14}} onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder tous les paramètres"}</Btn>
     </div>
+    {confirmReset&&(()=>{
+      const targetCards=(cards||[]).filter(cd=>cd.groupId===rGroup&&cd.num===rNum&&(rPkt==="all"||cd.packetId===rPkt));
+      const grp=GROUPS.find(g=>g.id===rGroup);
+      const pktLabel=rPkt==="all"?"tout le cours":PACKETS.find(pk=>pk.id===rPkt)?.label;
+      const doConfirm=()=>{
+        const acc=(accounts||[]).find(a=>a.username===currentUser?.username);
+        const validPwd=acc?acc.password===resetPwd:false;
+        if(!validPwd){setResetErr("Mot de passe incorrect.");return;}
+        onResetProgress(targetCards.map(cd=>cd.id));
+        setResetErr("");setResetDone(true);
+        setTimeout(()=>{setConfirmReset(false);setResetDone(false);},1400);
+      };
+      return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>!resetDone&&setConfirmReset(false)}>
+        <div style={{background:C.surface,borderRadius:12,padding:"24px 22px",maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
+          {resetDone?(
+            <div style={{textAlign:"center",padding:"12px 0"}}><p style={{fontSize:32,margin:"0 0 8px"}}>✓</p><p style={{fontFamily:serif,fontSize:16,margin:0}}>Réinitialisé</p></div>
+          ):(
+            <>
+              <p style={{fontFamily:serif,fontSize:17,margin:"0 0 8px"}}>⚠️ Confirmer la réinitialisation</p>
+              <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Tu es sur le point de remettre à zéro <strong>{targetCards.length} carte{targetCards.length>1?"s":""}</strong> — {grp?.label} · Cours {rNum} · {pktLabel}. Cette action est <strong>irréversible</strong>.</p>
+              <Lbl>Mot de passe</Lbl>
+              <input type="password" style={{...iBox,marginTop:4}} value={resetPwd} onChange={e=>{setResetPwd(e.target.value);setResetErr("");}} onKeyDown={e=>e.key==="Enter"&&doConfirm()} autoFocus/>
+              {resetErr&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{resetErr}</p>}
+              <div style={{display:"flex",gap:10,marginTop:18}}>
+                <button onClick={()=>setConfirmReset(false)} style={{flex:1,fontFamily:font,fontSize:13,padding:"10px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>Annuler</button>
+                <button onClick={doConfirm} disabled={!resetPwd||targetCards.length===0} style={{flex:1,fontFamily:font,fontSize:13,fontWeight:600,padding:"10px",cursor:resetPwd&&targetCards.length>0?"pointer":"default",borderRadius:7,border:"none",background:C.again,color:"#fff",opacity:resetPwd&&targetCards.length>0?1:0.5}}>Confirmer</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>;
+    })()}
   </div>;
 }
 // ─── Landing ──────────────────────────────────────────────────────────────────
@@ -2436,6 +2532,17 @@ function App(){
   const handleDeleteCard=useCallback(async id=>{await supa.deleteCard(id);setCards(p=>p.filter(c=>c.id!==id));},[]);
   const handleSaveUser=useCallback(async acc=>{await supa.upsertAccount(acc);setAccounts(p=>p.find(a=>a.username===acc.username)?p.map(a=>a.username===acc.username?{...a,...acc,plan_id:acc.planId}:a):[...p,{...acc,plan_id:acc.planId}]);},[]);
   const handleDeleteUser=useCallback(async username=>{await supa.deleteAccount(username);setAccounts(p=>p.filter(a=>a.username!==username));},[]);
+  const handleResetProgress=useCallback(async cardIds=>{
+    if(!currentUser||!cardIds||!cardIds.length)return;
+    const idSet=new Set(cardIds);
+    setProg(prev=>{
+      const next={...prev};
+      idSet.forEach(id=>{delete next[id];});
+      storage.set(`mx6-prog-${currentUser.username}`,next);
+      return next;
+    });
+    try{ await supa.deleteProgressBatch(currentUser.username,cardIds); }catch(e){ console.error("deleteProgressBatch failed:",e); }
+  },[currentUser]);
   const handleRegister=useCallback(async newAcc=>{await supa.upsertAccount(newAcc);setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};setProg({});setCurrentUser(u);storage.set("mx6-session",u);},[]);
   useEffect(()=>{
     if(!currentUser||currentUser.role==="admin"){setUserCards([]);return;}
@@ -2594,12 +2701,15 @@ function App(){
     const fGroups=currentUser?.plan?.fullGroups||[];
     const isAdminUser=currentUser?.role==="admin";
     const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)&&(isAdminUser||isCourseAccessible(c.groupId,c.num,ids,fGroups)));
-    const queue=buildQueue(globalFiltered,prog,settings,getNewShownToday(),false);
-    if(!queue.length){alert(getEmptyQueueMsg(globalFiltered,prog,settings,getNewShownToday()));return;}
+    // Révision globale : uniquement les cartes déjà passées à maturation (état "révision") et dues, pas de nouvelles cartes.
+    const dueReview=globalFiltered.filter(c=>{const p=prog[c.id];return p&&!p.buried&&p.state==="review"&&isDue(p);});
+    if(!dueReview.length){alert("Aucune flashcard en attente d'être révisée pour le moment.");return;}
+    const sorted=[...dueReview].sort((a,b)=>new Date(prog[a.id].next)-new Date(prog[b.id].next));
+    const queue=sorted.slice(0,settings?.maxReviewsPerDay||100);
     const fullQueue=await enrichCards(queue);
     setStudyCtx({label:pkId?`Révision globale · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Révision globale · Toutes",queue:fullQueue});
     setView("study");
-  },[allCards,prog,currentUser,settings,getNewShownToday,enrichCards]);
+  },[allCards,prog,currentUser,settings,enrichCards]);
   const handleRate=useCallback(async(card,rating,elapsedMs=0)=>{
     const existing=prog[card.id]||{};
     const wasNew=isNew(existing);
@@ -2649,7 +2759,7 @@ function App(){
   if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)}/>;
   if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")}/>;
-  if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")}/>;
+  if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress}/>;
   return null;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
