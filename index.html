@@ -12,6 +12,77 @@
     @keyframes fadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
     @keyframes dotPulse { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
     @keyframes pointsPop { 0% { opacity:0; transform:translateY(-10px) scale(0.9); } 60% { transform:translateY(0) scale(1.04); } 100% { opacity:1; transform:translateY(0) scale(1); } }
+
+    /* ─── Système responsive ───────────────────────────────────────────────
+       L'application est stylée en inline-styles ; ces classes utilitaires
+       apportent les points de rupture que les styles inline ne peuvent pas
+       exprimer. Breakpoints : mobile < 640px · tablette 640-1024px · desktop.
+       Le mobile est traité en priorité (les règles desktop sont les valeurs
+       inline par défaut, surchargées ici vers le bas).                      */
+
+    html { -webkit-text-size-adjust: 100%; }
+    body { overflow-x: hidden; }
+    /* Rien ne doit jamais déborder horizontalement */
+    img, svg, canvas, video { max-width: 100%; }
+
+    /* Conteneur principal : marges qui se resserrent sur petit écran */
+    .mfc-page { padding-left: 24px; padding-right: 24px; }
+    @media (max-width: 640px) { .mfc-page { padding-left: 14px; padding-right: 14px; } }
+
+    /* Barre de navigation : passe en colonne centrée sur mobile */
+    @media (max-width: 640px) {
+      .mfc-nav { flex-wrap: wrap; gap: 8px; padding: 10px 14px !important; }
+      .mfc-nav > * { min-width: 0; }
+      .mfc-nav-center { display: none; }
+    }
+
+    /* Grilles de 4 colonnes (révision globale, boutons de notation) */
+    @media (max-width: 640px) { .mfc-grid-4 { grid-template-columns: repeat(2, 1fr) !important; } }
+
+    /* Grilles à 2 colonnes de l'éditeur de carte : empilées sous 900px */
+    @media (max-width: 900px) {
+      .mfc-editor-grid { grid-template-columns: 1fr !important; }
+      .mfc-occlusion-grid { grid-template-columns: 1fr !important; }
+    }
+
+    /* Barres d'onglets : défilement horizontal plutôt que chevauchement */
+    .mfc-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    @media (max-width: 640px) {
+      .mfc-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+      .mfc-tabs::-webkit-scrollbar { display: none; }
+      .mfc-tabs > button { flex: 0 0 auto; padding-left: 14px !important; padding-right: 14px !important; }
+    }
+
+    /* Cartes de statistiques : minimum plus petit sur mobile */
+    @media (max-width: 640px) {
+      .mfc-autofill { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)) !important; }
+    }
+
+    /* Zone de révision : la carte occupe toute la largeur utile sur mobile */
+    @media (max-width: 640px) {
+      .mfc-study { padding: 16px 14px !important; }
+      .mfc-rate-grid { gap: 6px !important; }
+      .mfc-rate-grid button { padding: 12px 4px !important; }
+    }
+
+    /* Page d'accueil : titres et statistiques adaptés */
+    @media (max-width: 640px) {
+      .mfc-hero-title { font-size: 27px !important; }
+      .mfc-hero-sub { font-size: 14.5px !important; }
+      .mfc-hero-stats { gap: 18px !important; }
+      .mfc-arg-row { flex-direction: column !important; gap: 10px !important; }
+      .mfc-arg-num { flex: 0 0 auto !important; justify-content: flex-start !important; }
+    }
+
+    /* Modales : plein écran utile sur mobile, jamais de débordement */
+    @media (max-width: 640px) {
+      .mfc-modal { width: 100% !important; padding: 22px 16px !important; max-height: 88vh; }
+    }
+
+    /* Éléments tactiles : cible minimale confortable */
+    @media (hover: none) and (pointer: coarse) {
+      button, .mfc-tabs > button { touch-action: manipulation; }
+    }
   </style>
   <!-- MathJax: renders \( ... \) and \[ ... \] formulas inside flashcards, exactly
        like Anki's card templates. Loaded before React so it's ready when the first
@@ -328,9 +399,13 @@ const storage = {
 // Utilisé partout où un nom doit être affiché (forum, classement, tableau de
 // bord). Par défaut, dérivé du nom d'utilisateur — comme avant — tant que
 // personne n'a choisi de pseudo personnalisé dans les Réglages.
-const defaultPseudo = username => !username ? "" : (String(username).includes("@") ? String(username).split("@")[0] : String(username));
-const getPseudo = username => { if(!username)return ""; try{ return localStorage.getItem(`mx6-pseudo-${username}`) || defaultPseudo(username); }catch{ return defaultPseudo(username); } };
-const savePseudoLocal = (username,name) => { try{ localStorage.setItem(`mx6-pseudo-${username}`,name); }catch{} };
+const PSEUDO_MAX=10;
+// Le pseudo par défaut est lui aussi tronqué à 10 caractères, pour que l'affichage
+// reste cohérent partout, y compris pour les comptes qui n'en ont jamais choisi.
+const defaultPseudo = username => !username ? "" : (String(username).includes("@") ? String(username).split("@")[0] : String(username)).slice(0,PSEUDO_MAX);
+const getPseudo = username => { if(!username)return ""; try{ return (localStorage.getItem(`mx6-pseudo-${username}`)||"").slice(0,PSEUDO_MAX) || defaultPseudo(username); }catch{ return defaultPseudo(username); } };
+const savePseudoLocal = (username,name) => { try{ localStorage.setItem(`mx6-pseudo-${username}`,String(name).slice(0,PSEUDO_MAX)); }catch{} };
+const PSEUDO_WARNING="Choisis un pseudonyme correct : tout pseudonyme vulgaire, insultant ou inapproprié entraîne la suppression du compte sans remboursement.";
 // ─── Individual purchase persistence ─────────────────────────────────────────
 const getExtraGroups = u => { try { return JSON.parse(localStorage.getItem(`mx6-extra-${u}`) || "[]"); } catch { return []; } };
 const saveExtraGroups = (u, gs) => { try { localStorage.setItem(`mx6-extra-${u}`, JSON.stringify([...new Set(gs)])); } catch {} };
@@ -358,11 +433,16 @@ const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
 const dateKey = (d=new Date()) => d.toISOString().slice(0,10);
 const getStats = u => { try { return JSON.parse(localStorage.getItem(`mx6-stats-${u}`)||"null")||{days:{},total:{cards:0,correct:0,seconds:0}}; } catch { return {days:{},total:{cards:0,correct:0,seconds:0}}; } };
 const saveStats = (u,st) => { try { localStorage.setItem(`mx6-stats-${u}`,JSON.stringify(st)); } catch {} };
+// Plafond du temps comptabilisé pour une carte. Si l'étudiant laisse une carte
+// ouverte sans travailler (pause, onglet en arrière-plan…), le chrono ne gonfle
+// plus les statistiques : ni le temps total, ni le temps moyen par carte.
+const MAX_CARD_SECONDS = 60;
+const cappedCardSeconds = elapsedMs => Math.min(Math.max(0,Math.round((elapsedMs||0)/1000)), MAX_CARD_SECONDS);
 const recordStat = (username, correct, elapsedMs, isNewCard=false) => {
   if(!username)return;
   const st = getStats(username);
   const key = dateKey();
-  const secs = Math.min(Math.round(elapsedMs/1000), 120);
+  const secs = cappedCardSeconds(elapsedMs);
   if(!st.days[key]) st.days[key] = {cards:0,correct:0,seconds:0,newShown:0};
   st.days[key].cards++;
   if(correct) st.days[key].correct++;
@@ -490,7 +570,9 @@ function awardPoints(username,cardId,prev,np,packetId){
 // ─── Préférences de classement public ────────────────────────────────────────
 const getRankPrefs  = u => ({share:false,anon:false,...(storage.get(`mx6-rankprefs-${u}`)||{})});
 const saveRankPrefs = (u,p) => storage.set(`mx6-rankprefs-${u}`,p);
-const rankDisplayName = (username,anon) => anon?"Anonyme":(String(username).includes("@")?String(username).split("@")[0]:String(username));
+// Le classement utilise le pseudonyme choisi par l'utilisateur (et retombe sur le
+// pseudo par défaut dérivé du nom d'utilisateur si aucun n'a été défini).
+const rankDisplayName = (username,anon) => anon?"Anonyme":getPseudo(username);
 const formatNextDue = date => {
   const diff=date-Date.now();
   if(diff<=0)return"maintenant";
@@ -984,9 +1066,9 @@ function MathText({ text, tag = "p", ...props }) {
 }
 function Tag({color,bg,children,small}){return <span style={{display:"inline-block",fontFamily:mono,fontSize:small?8:9,letterSpacing:2,textTransform:"uppercase",padding:small?"2px 6px":"3px 8px",borderRadius:3,background:bg||C.accentBg,color:color||C.accent,whiteSpace:"nowrap"}}>{children}</span>;}
 function Btn({fill,danger,small,full,disabled,children,style,...rest}){return <button {...rest} disabled={disabled} style={{fontFamily:font,fontSize:small?12:13,fontWeight:500,padding:small?"6px 12px":"9px 18px",cursor:disabled?"not-allowed":"pointer",border:`1.5px solid ${fill?C.accent:danger?C.again:C.border}`,borderRadius:6,background:fill?C.accent:"transparent",color:fill?"#fff":danger?C.again:C.text,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,opacity:disabled?0.4:1,width:full?"100%":undefined,...style}}>{children}</button>;}
-function Modal({children,onClose,width=440}){return <div style={{position:"fixed",inset:0,background:"rgba(26,25,23,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,backdropFilter:"blur(2px)"}} onClick={e=>e.target===e.currentTarget&&onClose()}><div style={{background:C.surface,borderRadius:12,padding:"32px 28px",width,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,0.18)"}}><button onClick={onClose} style={{position:"absolute",top:14,right:16,background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textLt}}>×</button>{children}</div></div>;}
+function Modal({children,onClose,width=440}){return <div style={{position:"fixed",inset:0,background:"rgba(26,25,23,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,backdropFilter:"blur(2px)"}} onClick={e=>e.target===e.currentTarget&&onClose()}><div className="mfc-modal" style={{background:C.surface,borderRadius:12,padding:"32px 28px",width,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,0.18)"}}><button onClick={onClose} style={{position:"absolute",top:14,right:16,background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textLt}}>×</button>{children}</div></div>;}
 function Lbl({children,color}){return <p style={{fontFamily:mono,fontSize:9,letterSpacing:2.5,textTransform:"uppercase",color:color||C.textLt,margin:"0 0 6px"}}>{children}</p>;}
-function Nav({left,center,right}){return <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10}}><div style={{display:"flex",alignItems:"center",gap:10}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center"}}>{right}</div></div>;}
+function Nav({left,center,right}){return <div className="mfc-nav" style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,gap:12}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div className="mfc-nav-center" style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,textAlign:"center"}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{right}</div></div>;}
 function PasswordField({label,value,onChange,placeholder,onKeyDown,hint}){
   const [show,setShow]=useState(false);
   return <div><Lbl>{label}</Lbl><div style={{position:"relative"}}><input style={{...iLine,paddingRight:36}} type={show?"text":"password"} placeholder={placeholder||"••••••••"} value={value} onChange={onChange} onKeyDown={onKeyDown}/><button type="button" onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:16,padding:"2px 4px",lineHeight:1}}>{show?"🙈":"👁"}</button></div>{hint&&<p style={{fontSize:11,color:C.textLt,margin:"5px 0 0",lineHeight:1.5}}>{hint}</p>}</div>;
@@ -1084,12 +1166,12 @@ function LoginView({onLogin,onShowLanding,onRegister,accounts,onPasswordReset}){
 }
 // ─── Register ─────────────────────────────────────────────────────────────────
 function RegisterView({onRegister,onBack,accounts}){
-  const [step,setStep]=useState(1),[form,setForm]=useState({email:"",password:"",confirm:""}),[code,setCode]=useState(""),[error,setError]=useState(""),[sending,setSending]=useState(false),[verifying,setVerifying]=useState(false),[resendCooldown,setResendCooldown]=useState(0);
+  const [step,setStep]=useState(1),[form,setForm]=useState({email:"",password:"",confirm:"",pseudo:""}),[code,setCode]=useState(""),[error,setError]=useState(""),[sending,setSending]=useState(false),[verifying,setVerifying]=useState(false),[resendCooldown,setResendCooldown]=useState(0);
   const cooldownRef=useRef(null);
   const pwdState=validatePassword(form.password);
-  const handleSendCode=async()=>{setError("");if(!validateEmail(form.email)){setError("Adresse email invalide.");return;}if(!pwdState.ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(form.password!==form.confirm){setError("Les mots de passe ne correspondent pas.");return;}if(accounts.find(a=>a.username===form.email.trim().toLowerCase())){setError("Cette adresse email est déjà utilisée.");return;}setSending(true);try{const r=await fetch(`${EDGE_URL}/send-verification`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`},body:JSON.stringify({email:form.email.trim().toLowerCase()})});if(!r.ok){const d=await r.json();throw new Error(d.error||"Erreur envoi");}setStep(2);startCooldown();}catch(e){setError(`Impossible d'envoyer le code : ${e.message}`);}finally{setSending(false);}};
+  const handleSendCode=async()=>{setError("");if(!validateEmail(form.email)){setError("Adresse email invalide.");return;}if(!form.pseudo.trim()){setError("Choisis un pseudonyme.");return;}if(!pwdState.ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(form.password!==form.confirm){setError("Les mots de passe ne correspondent pas.");return;}if(accounts.find(a=>a.username===form.email.trim().toLowerCase())){setError("Cette adresse email est déjà utilisée.");return;}setSending(true);try{const r=await fetch(`${EDGE_URL}/send-verification`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`},body:JSON.stringify({email:form.email.trim().toLowerCase()})});if(!r.ok){const d=await r.json();throw new Error(d.error||"Erreur envoi");}setStep(2);startCooldown();}catch(e){setError(`Impossible d'envoyer le code : ${e.message}`);}finally{setSending(false);}};
   const startCooldown=()=>{setResendCooldown(60);clearInterval(cooldownRef.current);cooldownRef.current=setInterval(()=>{setResendCooldown(v=>{if(v<=1){clearInterval(cooldownRef.current);return 0;}return v-1;});},1000);};
-  const handleVerify=async()=>{if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}setError("");setVerifying(true);try{const valid=await supa.checkVerification(form.email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré.");return;}const newAcc={username:form.email.trim().toLowerCase(),password:form.password,email:form.email.trim().toLowerCase(),planId:"prerentree",groups:FREE_GROUP_IDS};onRegister(newAcc);}catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}};
+  const handleVerify=async()=>{if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}setError("");setVerifying(true);try{const valid=await supa.checkVerification(form.email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré.");return;}const newAcc={username:form.email.trim().toLowerCase(),password:form.password,email:form.email.trim().toLowerCase(),planId:"prerentree",groups:FREE_GROUP_IDS,pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX)};onRegister(newAcc);}catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}};
   useEffect(()=>()=>clearInterval(cooldownRef.current),[]);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
     <div style={{width:"100%",maxWidth:420}}>
@@ -1097,7 +1179,7 @@ function RegisterView({onRegister,onBack,accounts}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:24}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"#fff":C.textLt,fontSize:12,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:40,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
       <p style={{textAlign:"center",fontSize:12,color:C.textLt,margin:"0 0 20px"}}>{step===1?"Étape 1 — Informations":"Étape 2 — Confirmation email"}</p>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
-        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid ${C.util}30`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
+        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid ${C.util}30`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p><p style={{fontSize:11,color:C.again,margin:"6px 0 0",lineHeight:1.5}}>⚠️ {PSEUDO_WARNING}</p></div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
         {step===2&&<div><div style={{textAlign:"center",marginBottom:24}}><p style={{fontSize:40,margin:"0 0 12px"}}>📬</p><p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Vérifie ta boîte mail</p><p style={{fontSize:13,color:C.textMed,lineHeight:1.6}}>Code envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong></p></div><div style={{marginBottom:20}}><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:32,fontWeight:700,letterSpacing:14,textAlign:"center",padding:"12px 0",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&handleVerify()} autoFocus/></div>{error&&<p style={{fontSize:12,color:C.again,margin:"0 0 14px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px",marginBottom:12}} onClick={handleVerify} disabled={verifying||code.length!==6}>{verifying?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Vérification…</>:"Créer mon compte →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16,marginTop:8}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(resendCooldown>0)return;handleSendCode();}} disabled={resendCooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:resendCooldown>0?"not-allowed":"pointer",color:resendCooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:resendCooldown>0?0.6:1}}>{resendCooldown>0?`Renvoyer (${resendCooldown}s)`:"Renvoyer un code"}</button></div><p style={{fontSize:11,color:C.textLt,textAlign:"center",marginTop:12}}>Le code expire dans 10 minutes. Vérifie tes spams.</p></div>}
       </div>
       <button onClick={onBack} style={{display:"block",margin:"20px auto 0",fontFamily:font,fontSize:13,background:"none",border:"none",color:C.textLt,cursor:"pointer",textDecoration:"underline"}}>Déjà un compte ? Se connecter</button>
@@ -1314,7 +1396,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
     onSave({...form,num:pcName?null:form.num,chapterId:pcName?1:form.chapterId,personalCourseName:pcName,front:serializeContent(formFront,frontImg),back:serializeContent(formBack,backImg),id:card?.id||`card-${Date.now()}`,sort_order:card?.sort_order,card_type:card?.card_type||'text'});
     setSaved(true);
   };
-  const ModeToggle=()=>!isStudentMode?null:(
+  const renderModeToggle=()=>!isStudentMode?null:(
     <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
       <Lbl>Type de cours</Lbl>
       <div style={{display:"flex",gap:8,marginTop:8}}>
@@ -1324,7 +1406,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
       <p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>{personalMode?"Ce cours n'est visible que par toi — donne-lui le nom que tu veux (ex. \"Bio Cell perso\").":"Uniquement les cours déjà créés par un administrateur."}</p>
     </div>
   );
-  const PersonalCoursePicker=()=>(
+  const renderPersonalCoursePicker=()=>(
     <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
       <Lbl color={personalErr?C.again:undefined}>Nom du cours personnel{personalErr?" (requis)":""}</Lbl>
       {availPersonalNames.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
@@ -1334,12 +1416,12 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
       <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>{availPersonalNames.length>0?"Choisis un cours existant ci-dessus ou tape un nouveau nom pour en créer un autre.":"Tape le nom que tu veux — ce sera ton propre cours, personnel."}</p>
     </div>
   );
-  const ClassPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)}))} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={availableGroups.map(g=>({value:g.id,label:groupLabel(g)}))}/></div><ModeToggle/>{personalMode?<PersonalCoursePicker/>:<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={availNums.map(n=>({value:n,label:`Cours ${n}`}))} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`}))} columns={1}/></div>)}</>}</div></div>);
+  const renderClassPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)}))} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={availableGroups.map(g=>({value:g.id,label:groupLabel(g)}))}/></div>{renderModeToggle()}{personalMode?renderPersonalCoursePicker():<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={availNums.map(n=>({value:n,label:`Cours ${n}`}))} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`}))} columns={1}/></div>)}</>}</div></div>);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
-    <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
+    <div className="mfc-page" style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
       {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid ${C.accent}20`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
       {isNew&&(<div style={{marginBottom:24}}><Lbl>Type de carte</Lbl><div style={{display:"flex",gap:8,marginTop:8}}>{[["text","📝 Texte","Recto / Verso classique"],["occlusion","🖼 Image Occlusion","Masquer des zones sur une image"]].map(([t,lbl,desc])=>(<button key={t} onClick={()=>setCardType(t)} style={{fontFamily:font,fontSize:13,fontWeight:cardType===t?600:400,padding:"12px 20px",cursor:"pointer",borderRadius:8,border:`2px solid ${cardType===t?C.accent:C.border}`,background:cardType===t?C.accentBg:C.surface,color:cardType===t?C.accent:C.textMed,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:3}}><span>{cardType===t&&"✓ "}{lbl}</span><span style={{fontSize:11,fontWeight:400,color:cardType===t?C.accent:C.textLt}}>{desc}</span></button>))}</div></div>)}
-      {cardType==="text"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+      {cardType==="text"&&(<div className="mfc-editor-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px"}}>
             <p style={{fontFamily:serif,fontSize:16,margin:"0 0 16px"}}>Contenu</p>
@@ -1366,9 +1448,9 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
           </div>
           <div style={{display:"flex",gap:10}}><Btn fill full onClick={handleSaveText}>{saved?"✓":isNew?"Créer la carte":"Mettre à jour"}</Btn><Btn full onClick={onCancel}>Annuler</Btn></div>
         </div>
-        <ClassPanel/>
+        {renderClassPanel()}
       </div>)}
-      {cardType==="occlusion"&&(<div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20,alignItems:"start"}}>
+      {cardType==="occlusion"&&(<div className="mfc-occlusion-grid" style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20,alignItems:"start"}}>
         <div>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
             <Lbl>Titre au-dessus de l'image (optionnel)</Lbl>
@@ -1461,7 +1543,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
               <p style={{fontSize:11,color:C.textMed,margin:"6px 0 0"}}>{zones.length} zone{zones.length>1?"s":""} → {zones.length} flashcard{zones.length>1?"s":""} · chaque zone garde son propre paquet</p>
             </div>}
           </div>
-          <ClassPanel/>
+          {renderClassPanel()}
           {zones.length>0&&<Btn fill full onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>}
         </div>
       </div>)}
@@ -1974,7 +2056,7 @@ function StatsTab({username,progress,allCards,onUnbury}){
         </div>
       ):(
         <>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:28}}>
+          <div className="mfc-autofill" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:28}}>
             <StatCard label="Streak" value={`${streak} ${streak>0?"🔥":""}`} sub={`${streak===0?"Pas encore actif":streak===1?"1 jour d'affilée":streak+" jours d'affilée"}`} accent={streak>0?"#ea580c":C.text}/>
             <StatCard label="Aujourd'hui" value={todayCards} sub={todayCards>0?`${Math.round(todayCorrect/todayCards*100)}% de réussite`:"Pas encore révisé"} accent={todayCards>0?C.accent:C.text}/>
             <StatCard label="Total révisées" value={totalCards.toLocaleString("fr-FR")} sub="cartes au total"/>
@@ -2388,7 +2470,7 @@ function RankTab({username,tick}){
       </div>}
 
       {sub==="history"&&<div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+        <div className="mfc-autofill" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px"}}>
             <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 8px"}}>Meilleur jour</p>
             <p style={{fontFamily:serif,fontSize:26,margin:"0 0 2px"}}>{best}</p>
@@ -2524,7 +2606,7 @@ function ForumTab({currentUser,pseudo}){
     if(Array.isArray(posts))posts.filter(p=>p.parent_id).forEach(p=>{(m[p.parent_id]=m[p.parent_id]||[]).push(p);});
     return m;
   },[posts]);
-  const PostRow=({p,isReply})=><div style={{padding:isReply?"10px 0 0 28px":"14px 0",borderTop:isReply?"none":`1px solid ${C.border}`}}>
+  const renderPost=(p,isReply)=><div style={{padding:isReply?"10px 0 0 28px":"14px 0",borderTop:isReply?"none":`1px solid ${C.border}`}}>
     <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:4}}>
       <strong style={{fontSize:13,color:nameColor(p.role)}}>{p.display_name||defaultPseudo(p.username)}</strong>
       {p.role==="admin"&&<Tag color={C.again} bg={C.againBg} small>Admin</Tag>}
@@ -2536,11 +2618,11 @@ function ForumTab({currentUser,pseudo}){
       <input style={{...iLine,flex:1}} placeholder={isAdmin?"Ta réponse (pseudo en rouge)…":"Ta réponse…"} value={replyBody} onChange={e=>setReplyBody(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit(replyBody,p.id)} autoFocus/>
       <Btn small fill onClick={()=>submit(replyBody,p.id)} disabled={!replyBody.trim()||posting}>Envoyer</Btn>
     </div>}
-    {!isReply&&(repliesOf[p.id]||[]).map(r=><PostRow key={r.id} p={r} isReply/>)}
+    {!isReply&&(repliesOf[p.id]||[]).map(r=><React.Fragment key={r.id}>{renderPost(r,true)}</React.Fragment>)}
   </div>;
   return <div style={{animation:"fadeIn 0.18s ease"}}>
     <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Forum</p>
-    <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px"}}>Espace d'échange commun à tous les utilisateurs · pseudo <strong style={{color:C.again}}>administrateur en rouge</strong>, <strong style={{color:C.easy}}>étudiant en bleu</strong></p>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px"}}>Espace d'échange commun à tous les utilisateurs de MyFlashCard.</p>
     <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:20}}>
       <p style={{fontSize:12,color:C.textLt,margin:"0 0 8px"}}>Tu postes sous le pseudo : <strong style={{color:nameColor(isAdmin?"admin":"student")}}>{pseudo||defaultPseudo(currentUser.username)}</strong> {isAdmin&&<span style={{color:C.textLt}}>(modifiable dans Réglages → Profil)</span>}</p>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -2560,7 +2642,7 @@ function ForumTab({currentUser,pseudo}){
       <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Aucun message pour l'instant — sois le premier à écrire !</p>
     ):(
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"0 18px"}}>
-        {[...topLevel].reverse().map(p=><PostRow key={p.id} p={p}/>)}
+        {[...topLevel].reverse().map(p=><React.Fragment key={p.id}>{renderPost(p,false)}</React.Fragment>)}
       </div>
     )}
   </div>;
@@ -2699,7 +2781,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text,paddingTop:paymentStatus?56:0}}>
     <PaymentBanner status={paymentStatus} onClose={onClosePaymentBanner}/>
     <Nav left={<span style={{fontFamily:serif,fontSize:20}}>MyFlashcard</span>} center="Tableau de bord" right={<><Btn small onClick={onSettings}>Paramètres</Btn>{isAdmin&&<Btn small onClick={onAdmin}>Admin</Btn>}<button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",color:C.textLt,cursor:"pointer"}}>Déconnexion</button></>}/>
-    <div style={{maxWidth:760,margin:"0 auto",padding:"28px 24px"}}>
+    <div className="mfc-page" style={{maxWidth:760,margin:"0 auto",padding:"28px 24px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 18px",marginBottom:20}}>
         <div>
           <p style={{fontSize:12,color:C.textLt,margin:"0 0 2px",fontFamily:mono,letterSpacing:1,textTransform:"uppercase"}}>Bonjour {displayName}</p>
@@ -2719,12 +2801,12 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
             <p style={{fontSize:20,margin:"0 0 6px"}}>✓</p>
             <p style={{fontSize:13,color:C.textMed,margin:0}}>À jour — vous n'avez pas de flashcard en attente d'être révisée.</p>
           </div>;
-          return <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+          return <div className="mfc-grid-4" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
             {gModes.map(mode=>{const count=globalReviewDue(accessibleCards,progress,visibleIds,mode.id),hasCards=count>0;return<button key={String(mode.id)} onClick={()=>hasCards&&onGlobalStudy(mode.id)} style={{fontFamily:font,padding:"14px 10px",cursor:hasCards?"pointer":"default",borderRadius:8,border:`1.5px solid ${hasCards?mode.col:C.border}`,background:hasCards?mode.bg:"transparent",color:hasCards?mode.col:C.textLt,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{if(hasCards)e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:11,fontWeight:600,textAlign:"center",lineHeight:1.3}}>{mode.label}</span><span style={{fontSize:18,fontWeight:300}}>{count}</span><span style={{fontSize:10,opacity:0.7}}>carte{count!==1?"s":""}</span></button>;})}
           </div>;
         })()}
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+      <div className="mfc-tabs" style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
         {TABS.map(tab=>{
           const active=activeTab===tab.id;
           const access=hasTabAccess(tab);
@@ -2798,7 +2880,9 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
   }
   const handleRate=async rating=>{
     setShowBack(false);setShowOthers(false);setShowPktChange(false);
-    const elapsed=Date.now()-cardStart.current;
+    // Chrono plafonné à MAX_CARD_SECONDS dès la source : une carte laissée
+    // ouverte pendant une pause ne fausse plus aucune statistique.
+    const elapsed=Math.min(Date.now()-cardStart.current, MAX_CARD_SECONDS*1000);
     setStats(s=>({total:s.total+1,correct:s.correct+(rating>=3?1:0)}));
     const np=await onRate(card,rating,elapsed);
     if(np&&np.__gain){
@@ -2832,7 +2916,7 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
       <div style={{fontFamily:serif,fontSize:22,fontWeight:600,lineHeight:1}}>+{gainFlash.points} pts</div>
       <div style={{fontSize:10,color:"#a97c2a",marginTop:3}}>{AGE_LABELS[gainFlash.age]} {gainFlash.base} {gainFlash.bonus?`+ ${IMP_LABELS[gainFlash.packetId]||""} ${gainFlash.bonus}`:""} · {gainFlash.total} pts aujourd'hui</div>
     </div>}
-    <div style={{maxWidth:560,margin:"0 auto",padding:"28px 24px 0"}}>
+    <div className="mfc-page mfc-study" style={{maxWidth:560,margin:"0 auto",padding:"28px 24px 0"}}>
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18,alignItems:"center"}}>
         {isNewCard&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",padding:"3px 8px",borderRadius:3,background:"#fef2f2",color:"#dc2626",border:"1px solid #fca5a5",fontWeight:700}}>Nouveau</span>}
         <Tag color={col} bg={pB(card.packetId)}>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
@@ -2878,7 +2962,7 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
       )}
       {showBack&&<div>
         <Lbl>Comment était-ce ?</Lbl>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginTop:10}}>
+        <div className="mfc-grid-4 mfc-rate-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginTop:10}}>
           {[[1,"À revoir",C.again,C.againBg],[2,"Difficile",C.hard,C.hardBg],[3,"Bien",C.good,C.goodBg],[4,"Facile",C.easy,C.easyBg]].map(([r,lbl,btnCol,btnBg])=><button key={r} onClick={()=>handleRate(r)} style={{fontFamily:font,padding:"14px 8px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${btnCol}`,background:btnBg,color:btnCol,display:"flex",flexDirection:"column",alignItems:"center",gap:6,transition:"transform 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";}} onMouseLeave={e=>{e.currentTarget.style.transform="none";}}><span style={{fontSize:12,fontWeight:600}}>{lbl}</span><span style={{fontSize:14,fontWeight:700}}>{getIntervalLabel(cardProg,r,settings)}</span></button>)}
         </div>
         {(()=>{
@@ -2911,13 +2995,23 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
   </div>;
 }
 // ─── Settings ─────────────────────────────────────────────────────────────────
+// Définis au niveau module (et NON dans SettingsView) : un composant recréé à
+// chaque rendu a une nouvelle identité, ce qui force React à démonter/remonter
+// tout son sous-arbre — c'est ce qui faisait perdre le focus de l'input à chaque
+// lettre tapée dans le champ pseudonyme.
+function SettingsSection({title,children}){
+  return <div style={{marginBottom:24}}><h2 style={{fontFamily:serif,fontSize:19,fontWeight:400,margin:"0 0 12px",paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>{title}</h2>{children}</div>;
+}
+function SettingsSlider({k,label,desc,min,max,step,unit,s,setS}){
+  return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4,gap:10}}><p style={{fontSize:13,fontWeight:500,margin:0}}>{label}</p><p style={{fontSize:18,fontWeight:300,color:C.accent,margin:0,whiteSpace:"nowrap"}}>{s[k]}<span style={{fontSize:11}}> {unit}</span></p></div><p style={{fontSize:11,color:C.textMed,margin:"0 0 8px"}}>{desc}</p><input type="range" min={min} max={max} step={step} value={s[k]} onChange={e=>setS(p=>({...p,[k]:Number(e.target.value)}))} style={{width:"100%"}}/></div>;
+}
 function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onResetProgress,onDeleteAccount,pseudo,onSavePseudo}){
   const [s,setS]=useState(settings),[saved,setSaved]=useState(false);
   const [pseudoInput,setPseudoInput]=useState(pseudo||"");
   const [pseudoSaved,setPseudoSaved]=useState(false);
   useEffect(()=>{setPseudoInput(pseudo||"");},[pseudo]);
   const savePseudoClick=()=>{
-    const trimmed=pseudoInput.trim();
+    const trimmed=pseudoInput.trim().slice(0,PSEUDO_MAX);
     if(!trimmed)return;
     onSavePseudo(trimmed);
     setPseudoSaved(true);
@@ -2928,31 +3022,31 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
   const [confirmReset,setConfirmReset]=useState(false),[resetPwd,setResetPwd]=useState(""),[resetErr,setResetErr]=useState(""),[resetDone,setResetDone]=useState(false);
   const [confirmDelAcc,setConfirmDelAcc]=useState(false),[delAccPwd,setDelAccPwd]=useState(""),[delAccErr,setDelAccErr]=useState(""),[delAccBusy,setDelAccBusy]=useState(false);
   const save=()=>{onSave(s);setSaved(true);setTimeout(()=>setSaved(false),2000);};
-  const Sl=({k,label,desc,min,max,step,unit})=><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><p style={{fontSize:13,fontWeight:500,margin:0}}>{label}</p><p style={{fontSize:18,fontWeight:300,color:C.accent,margin:0}}>{s[k]}<span style={{fontSize:11}}> {unit}</span></p></div><p style={{fontSize:11,color:C.textMed,margin:"0 0 8px"}}>{desc}</p><input type="range" min={min} max={max} step={step} value={s[k]} onChange={e=>setS(p=>({...p,[k]:Number(e.target.value)}))} style={{width:"100%"}}/></div>;
-  const Sec=({title,children})=><div style={{marginBottom:24}}><h2 style={{fontFamily:serif,fontSize:19,fontWeight:400,margin:"0 0 12px",paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>{title}</h2>{children}</div>;
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
     <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center="Paramètres" right={<Btn fill onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder"}</Btn>}/>
-    <div style={{maxWidth:600,margin:"0 auto",padding:"28px 24px"}}>
-      <Sec title="👤 Profil">
+    <div className="mfc-page" style={{maxWidth:600,margin:"0 auto",padding:"28px 24px"}}>
+      <SettingsSection title="👤 Profil">
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-          <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.6}}>Ton pseudonyme est le nom sous lequel tu es reconnu·e sur le Forum et dans les autres outils communs à tous les utilisateurs de MyFlashCard.</p>
+          <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.6}}>Ton pseudonyme est le nom sous lequel tu es reconnu·e sur le Forum et dans le classement, à la place de ton adresse e-mail.</p>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <input style={{...iBox,flex:"1 1 220px"}} maxLength={40} placeholder="Ton pseudonyme" value={pseudoInput} onChange={e=>setPseudoInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&savePseudoClick()}/>
-            <Btn fill onClick={savePseudoClick} disabled={!pseudoInput.trim()}>{pseudoSaved?"✓ Enregistré":"Enregistrer"}</Btn>
+            <input style={{...iBox,flex:"1 1 200px",minWidth:0}} maxLength={PSEUDO_MAX} placeholder="Ton pseudonyme" value={pseudoInput} onChange={e=>setPseudoInput(e.target.value.slice(0,PSEUDO_MAX))} onKeyDown={e=>e.key==="Enter"&&savePseudoClick()}/>
+            <Btn fill onClick={savePseudoClick} disabled={!pseudoInput.trim()} style={{flexShrink:0}}>{pseudoSaved?"✓ Enregistré":"Enregistrer"}</Btn>
           </div>
+          <p style={{fontFamily:mono,fontSize:10,color:pseudoInput.length>=PSEUDO_MAX?C.imp:C.textLt,margin:0}}>{pseudoInput.length}/{PSEUDO_MAX} caractères</p>
+          <p style={{fontSize:11,color:C.again,margin:0,lineHeight:1.6,background:C.againBg,border:`1px solid ${C.again}30`,borderRadius:6,padding:"8px 10px"}}>⚠️ {PSEUDO_WARNING}</p>
         </div>
-      </Sec>
-      <Sec title="⏱ Intervalles d'apprentissage">
+      </SettingsSection>
+      <SettingsSection title="⏱ Intervalles d'apprentissage">
         <div style={{background:"#fef8e8",border:"1px solid #d9b23c50",borderRadius:8,padding:"10px 14px",marginBottom:10}}>
           <p style={{fontSize:12,color:"#8b5e00",margin:0,lineHeight:1.6}}>⚠️ Il est déconseillé de modifier ces intervalles : ils sont optimisés au mieux par défaut pour la mémorisation à long terme.</p>
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}><Sl k="againMin" label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><Sl k="hardMin" label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><Sl k="goodMin" label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><Sl k="easyDays" label="Facile" desc="Graduation immédiate." min={1} max={14} step={1} unit="jours"/></div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}><SettingsSlider k="againMin" s={s} setS={setS} label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><SettingsSlider k="hardMin" s={s} setS={setS} label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><SettingsSlider k="goodMin" s={s} setS={setS} label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><SettingsSlider k="easyDays" s={s} setS={setS} label="Facile" desc="Graduation immédiate." min={1} max={14} step={1} unit="jours"/></div>
         <button onClick={()=>setS(p=>({...p,againMin:DEFAULT_SETTINGS.againMin,hardMin:DEFAULT_SETTINGS.hardMin,goodMin:DEFAULT_SETTINGS.goodMin,easyDays:DEFAULT_SETTINGS.easyDays}))} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",marginTop:10,cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>↺ Revenir aux valeurs par défaut</button>
-      </Sec>
-      <Sec title="📚 Session d'étude">
+      </SettingsSection>
+      <SettingsSection title="📚 Session d'étude">
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          <Sl k="newCardsPerDay" label="Nouvelles cartes / jour" desc="Limite quotidienne de nouvelles cartes à découvrir." min={5} max={300} step={5} unit=""/>
-          <Sl k="maxReviewsPerDay" label="Révisions max / session" desc="Plafond total de cartes par session (nouvelles + révisions)." min={20} max={10000} step={10} unit=""/>
+          <SettingsSlider k="newCardsPerDay" s={s} setS={setS} label="Nouvelles cartes / jour" desc="Limite quotidienne de nouvelles cartes à découvrir." min={5} max={300} step={5} unit=""/>
+          <SettingsSlider k="maxReviewsPerDay" s={s} setS={setS} label="Révisions max / session" desc="Plafond total de cartes par session (nouvelles + révisions)." min={20} max={10000} step={10} unit=""/>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}>
             <p style={{fontSize:13,fontWeight:500,margin:"0 0 4px"}}>Position des nouvelles cartes dans la session</p>
             <p style={{fontSize:11,color:C.textMed,margin:"0 0 12px"}}>Quand réviser les cartes jamais vues ?</p>
@@ -2963,12 +3057,12 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
                   <div><p style={{fontSize:13,fontWeight:s.newCardOrder===val?600:400,margin:"0 0 2px",color:s.newCardOrder===val?C.accent:C.text}}>{lbl}</p><p style={{fontSize:11,color:C.textMed,margin:0}}>{desc}</p></div>
                 </label>
               ))}
-              {s.newCardOrder==="every"&&<div style={{marginLeft:8}}><Sl k="newCardEvery" label="Fréquence d'intercalage" desc="Une nouvelle carte toutes les X révisions." min={2} max={20} step={1} unit="révisions"/></div>}
+              {s.newCardOrder==="every"&&<div style={{marginLeft:8}}><SettingsSlider k="newCardEvery" s={s} setS={setS} label="Fréquence d'intercalage" desc="Une nouvelle carte toutes les X révisions." min={2} max={20} step={1} unit="révisions"/></div>}
             </div>
           </div>
         </div>
-      </Sec>
-      {onResetProgress&&<Sec title="🗑 Réinitialiser des révisions">
+      </SettingsSection>
+      {onResetProgress&&<SettingsSection title="🗑 Réinitialiser des révisions">
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
           <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.6}}>Remet à zéro la progression de révision (les cartes redeviennent "Nouveau"), pour un paquet précis ou pour tout un cours. Action irréversible, confirmation par mot de passe requise.</p>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -2989,14 +3083,14 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
           </label>
           <button onClick={()=>{setConfirmReset(true);setResetPwd("");setResetErr("");setResetDone(false);}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:C.againBg,color:C.again,alignSelf:"flex-start"}}>🗑 Réinitialiser</button>
         </div>
-      </Sec>}
+      </SettingsSection>}
       <Btn fill full style={{fontSize:14}} onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder tous les paramètres"}</Btn>
-      {onDeleteAccount&&currentUser?.role!=="admin"&&<Sec title="⚠️ Zone de danger">
+      {onDeleteAccount&&currentUser?.role!=="admin"&&<SettingsSection title="⚠️ Zone de danger">
         <div style={{background:C.againBg,border:`1.5px solid ${C.again}40`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
           <p style={{fontSize:12,color:C.again,margin:0,lineHeight:1.6}}><strong>Supprimer définitivement mon compte.</strong> Ton compte, tes flashcards personnelles, ta progression de révision et tes points sont effacés sans possibilité de retour en arrière. Ton abonnement n'est pas remboursé automatiquement.</p>
           <button onClick={()=>{setConfirmDelAcc(true);setDelAccPwd("");setDelAccErr("");}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:"#fff",color:C.again,alignSelf:"flex-start"}}>🗑 Supprimer mon compte</button>
         </div>
-      </Sec>}
+      </SettingsSection>}
     </div>
     {confirmReset&&(()=>{
       const targetCards=(cards||[]).filter(cd=>cd.groupId===rGroup&&cd.num===rNum&&(rPkt==="all"||cd.packetId===rPkt));
@@ -3063,15 +3157,37 @@ const LANDING_SUBJECTS=[
   {name:"Biologie moléculaire",total:803,prio:330,imp:298,util:175},
   {name:"Biophysique",total:458,prio:190,imp:160,util:108},
 ];
-const LANDING_BADGES_IMG="data:image/png;base64,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";
 
 const renderBold=s=>{
   const parts=s.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((p,i)=>p.startsWith("**")&&p.endsWith("**")?<b key={i} style={{fontWeight:700}}>{p.slice(2,-2)}</b>:p);
 };
+function PriorityBadges(){
+  const items=[
+    {label:"PRIORITAIRE",col:C.prio,bg:C.prioBg},
+    {label:"IMPORTANTE", col:C.imp, bg:C.impBg},
+    {label:"UTILE",      col:C.util,bg:C.utilBg},
+  ];
+  const CH=6.35,LS=1.1,padL=11,dot=8,gapDot=9,padR=13,gap=11;
+  let x=1;const groups=[];
+  items.forEach((it,i)=>{
+    const tw=it.label.length*(CH+LS);
+    const w=padL+dot+gapDot+tw+padR;
+    groups.push(
+      <g key={it.label}>
+        <rect x={x} y="9" width={w} height="28" rx="14" fill={it.bg} stroke={it.col} strokeWidth="1.5"/>
+        <circle cx={x+padL+dot/2} cy="23" r="4" fill={it.col}/>
+        <text x={x+padL+dot+gapDot} y="27.3" fontFamily="Courier New, monospace" fontSize="10.5" fontWeight="700" letterSpacing={LS} fill={it.col}>{it.label}</text>
+      </g>
+    );
+    x+=w+gap;
+  });
+  const total=Math.round(x-gap+1);
+  return <svg viewBox={`0 0 ${total} 46`} role="img" aria-label="Trois niveaux de priorité : Prioritaire, Importante, Utile" style={{width:"100%",maxWidth:340,height:"auto",display:"block",marginTop:12}}>{groups}</svg>;
+}
 const LANDING_ARGS=[
   {num:"01",reverse:true,title:"Une véritable méthode d'apprentissage",text:"Une **préparatoire** classique vous donne des **fiches de cours et des QCM**, mais il manque le pont entre les deux, celui de l'apprentissage. À la sortie du lycée, vous ne savez pas encore vraiment comment **apprendre**. Notre méthode fonctionne pour la **grande majorité** des étudiants. C'est pour cela que nous offrons cinq matières à tester **gratuitement**, pour celles et ceux à qui elle ne conviendrait pas."},
-  {num:"03",reverse:true,title:"Trié par ce qui tombe vraiment",text:"D'une année sur l'autre, **les mêmes notions reviennent**. Et à force de nuits entières passées à éplucher les annales des concours précédents, voici notre constat : comme partout, la règle des 20/80 s'applique, **20% du travail concentre 80% des points le jour du concours**. Faut-il encore savoir quoi travailler... Nous avons donc classé chaque carte en **Prioritaire, Importante ou Utile**, selon sa **probabilité réelle** de tomber à l'épreuve. Vous consolidez d'abord ce qui rapporte le plus, puis vous élargissez avec le reste.",img:LANDING_BADGES_IMG},
+  {num:"03",reverse:true,title:"Trié par ce qui tombe vraiment",text:"D'une année sur l'autre, **les mêmes notions reviennent**. Et à force de nuits entières passées à éplucher les annales des concours précédents, voici notre constat : comme partout, la règle des 20/80 s'applique, **20% du travail concentre 80% des points le jour du concours**. Faut-il encore savoir quoi travailler... Nous avons donc classé chaque carte en **Prioritaire, Importante ou Utile**, selon sa **probabilité réelle** de tomber à l'épreuve. Vous consolidez d'abord ce qui rapporte le plus, puis vous élargissez avec le reste.",img:"badges"},
   {num:"04",reverse:false,title:"Créé par ceux qui viennent de le vivre",text:"Nous sommes une grande équipe d'**étudiants** admis en MMOPK à Grenoble. Sur les concours de **2019 à 2026**, pour certains **major de leur promotion**. Nous n'avons délégué la création de ces cartes à personne, nous avons repris le programme nous-mêmes, matière par matière, en gardant en tête ce qui est réellement tombé le jour J."},
   {num:"05",reverse:true,title:"Le vrai gain de temps",text:"Le problème ici, ce n'est pas la méthode, c'est le **temps** de fabrication des cartes. Créer des flashcards de **qualité**, matière par matière, prend des **centaines** d'heures. Une année de médecine ne laisse pas tout ce temps, chaque **heure perdue** se transforme en **place** le jour du concours. Nous avons passé l'été à faire ce travail à votre place, pour que **chaque minute** passée sur le site soit une minute de **révision**, pas de mise en page."},
   {num:"06",reverse:false,title:"Actif dès le premier jour",text:"Le lycée entraîne à **relire, souligner, recopier,** un apprentissage **passif** qui ne prépare pas au concours. Ici, chaque carte vous demande de retrouver la réponse par vous-même avant de la voir, exactement **comme un QCM le jour de l'épreuve**. Cette bascule est difficile à faire seul en sortant du lycée. Avec les flashcards, elle devient **automatique dès la première session**."},
@@ -3130,8 +3246,8 @@ function Landing({onBack,onRegister}){
     </div>
 
     <div style={{padding:"8px 24px 20px",textAlign:"center"}}>
-      <p style={{fontSize:36,fontWeight:700,color:C.text,margin:"0 0 16px",lineHeight:1.2}}>Le concours, servi sur un plateau.</p>
-      <p style={{fontSize:16,color:C.textMed,maxWidth:600,margin:"0 auto 32px",lineHeight:1.7}}>{renderBold("Des **milliers** d'heures de travail, transformées en **flashcards** à partir du programme de la faculté de médecine de **Grenoble**, créées par des étudiants admis en **MMOPK**, pour que vous n'ayez plus qu'à les apprendre.")}</p>
+      <p className="mfc-hero-title" style={{fontSize:36,fontWeight:700,color:C.text,margin:"0 0 16px",lineHeight:1.2}}>Le concours, servi sur un plateau.</p>
+      <p className="mfc-hero-sub" style={{fontSize:16,color:C.textMed,maxWidth:600,margin:"0 auto 32px",lineHeight:1.7}}>{renderBold("Des **milliers** d'heures de travail, transformées en **flashcards** à partir du programme de la faculté de médecine de **Grenoble**, créées par des étudiants admis en **MMOPK**, pour que vous n'ayez plus qu'à les apprendre.")}</p>
       <style>{`.mfc-hero-stats{flex-wrap:wrap}@media (min-width:640px){.mfc-hero-stats{flex-wrap:nowrap}}`}</style>
       <div className="mfc-hero-stats" style={{display:"flex",justifyContent:"center",gap:32}}>
         <div style={{minWidth:120}}><p style={{fontSize:24,fontWeight:700,color:C.accent,margin:0}}>2019-2026</p><p style={{fontSize:12,color:C.textMed,margin:"4px 0 0"}}>Admis au concours de Grenoble</p></div>
@@ -3163,15 +3279,15 @@ function Landing({onBack,onRegister}){
       {(()=>{
         const a=LANDING_ARGS[0];
         const reverse=a.reverse;
-        const numBlock=<div key="n" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
+        const numBlock=<div key="n" className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
         const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold(a.text)}</p></div>;
-        return <div key={a.num} style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
+        return <div key={a.num} className="mfc-arg-row" style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
           {reverse?[txtBlock,numBlock]:[numBlock,txtBlock]}
         </div>;
       })()}
       <div style={{padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
-        <div style={{display:"flex",gap:28,alignItems:"flex-start"}}>
-          <div style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>02</span></div>
+        <div className="mfc-arg-row" style={{display:"flex",gap:28,alignItems:"flex-start"}}>
+          <div className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>02</span></div>
           <div style={{flex:1}}>
             <p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>La courbe de l'oubli</p>
             <p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold("Sans révision, la mémoire d'une information neuve chute très vite, jusqu'à **70% d'oubli dès le lendemain**. Chaque fois qu'elle est retravaillée au **bon moment**, la chute suivante est plus lente. C'est ce mécanisme, connu **depuis plus d'un siècle**, que suit chaque carte, pour rester **gravée** jusqu'au jour du concours.")}</p>
@@ -3181,9 +3297,9 @@ function Landing({onBack,onRegister}){
       </div>
       {LANDING_ARGS.slice(1).map((a)=>{
         const reverse=a.reverse;
-        const numBlock=<div key="n" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
-        const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold(a.text)}</p>{a.img&&<img src={a.img} style={{maxWidth:220,width:"100%",height:"auto",display:"block",marginTop:12}} alt=""/>}</div>;
-        return <div key={a.num} style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
+        const numBlock=<div key="n" className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
+        const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold(a.text)}</p>{a.img==="badges"&&<PriorityBadges/>}</div>;
+        return <div key={a.num} className="mfc-arg-row" style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
           {reverse?[txtBlock,numBlock]:[numBlock,txtBlock]}
         </div>;
       })}
@@ -3567,7 +3683,19 @@ function App(){
     storage.del("mx6-session");
     setCurrentUser(null);setProg({});setUserCards([]);setPseudo("");setView("login");
   },[currentUser]);
-  const handleRegister=useCallback(async newAcc=>{await supa.upsertAccount(newAcc);setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};setProg({});setPseudo(getPseudo(newAcc.username));setCurrentUser(u);storage.set("mx6-session",u);},[]);
+  const handleRegister=useCallback(async newAcc=>{
+    await supa.upsertAccount(newAcc);
+    setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);
+    const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};
+    setProg({});
+    // Pseudonyme choisi à l'inscription : enregistré en local puis poussé vers
+    // la table "profiles" (best-effort — si elle n'existe pas, le local suffit).
+    const chosen=(newAcc.pseudo||"").trim().slice(0,PSEUDO_MAX)||defaultPseudo(newAcc.username);
+    savePseudoLocal(newAcc.username,chosen);
+    setPseudo(chosen);
+    supa.upsertProfile(newAcc.username,chosen).catch(()=>{});
+    setCurrentUser(u);storage.set("mx6-session",u);
+  },[]);
   useEffect(()=>{
     if(!currentUser||currentUser.role==="admin"){setUserCards([]);return;}
     const cached=mergeIntegrated(getUCache(currentUser.username),currentUser.username);
