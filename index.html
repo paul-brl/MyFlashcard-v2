@@ -182,13 +182,13 @@ const supa = {
       if (!r.ok) return null; // HTTP error: table might not exist, auth error, etc.
       const d = await r.json();
       if (!Array.isArray(d)) return null; // Supabase returned an error object
-      return d.map(c => ({ id:c.id, front:c.front, back:c.back, groupId:c.group_id, num:c.num, chapterId:c.chapter_id||1, packetId:c.packet_id, username:c.username, isUserCard:true, integrated:c.integrated||false }));
+      return d.map(c => ({ id:c.id, front:c.front, back:c.back, groupId:c.group_id, num:c.personal_course_name?null:c.num, chapterId:c.chapter_id||1, packetId:c.packet_id, username:c.username, isUserCard:true, integrated:c.integrated||false, personalCourseName:c.personal_course_name||null }));
     } catch { return null; } // Network error
   },
   upsertUserCard: async (card) => {
     const r=await fetch(`${SUPA_URL}/rest/v1/user_cards`, {
       method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
-      body: JSON.stringify({ id:card.id, username:card.username, front:card.front, back:card.back, group_id:card.groupId, num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, integrated:card.integrated||false }),
+      body: JSON.stringify({ id:card.id, username:card.username, front:card.front, back:card.back, group_id:card.groupId, num:card.personalCourseName?null:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, integrated:card.integrated||false, personal_course_name:card.personalCourseName||null }),
     });
     if(!r.ok){
       let msg=`HTTP ${r.status}`;
@@ -197,6 +197,9 @@ const supa = {
     }
   },
   deleteUserCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/user_cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
+  // Suppression totale (utilisée uniquement quand un étudiant supprime son compte).
+  deleteAllUserCards: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {} },
+  deleteAllProgress: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {} },
   getProgress: async (username) => {
     // Same pattern as getCardsMeta: first page gives the total count, then every
     // remaining page is fetched in parallel.
@@ -264,12 +267,70 @@ const supa = {
       await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&card_id=in.(${idList})`,{method:"DELETE",headers:H});
     } catch(e){ console.error("deleteProgressBatch failed:",e); }
   },
+  // ─── Profils / pseudonymes (table optionnelle « profiles ») ────────────────
+  // Commun aux étudiants ET aux administrateurs (les admins n'ont pas de ligne
+  // dans "accounts"). Comme pour daily_points, si la table n'existe pas, tout
+  // échoue silencieusement et l'app retombe sur le pseudo par défaut local.
+  getProfile: async (username) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&select=username,display_name`,{headers:H});
+      if(!r.ok) return null;
+      const d=await r.json();
+      return Array.isArray(d)&&d.length>0?d[0]:null;
+    } catch(e){ return null; }
+  },
+  upsertProfile: async (username, displayName) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/profiles?on_conflict=username`, {
+        method:"POST",
+        headers:{...H,"Prefer":"resolution=merge-duplicates"},
+        body:JSON.stringify([{username,display_name:displayName,updated_at:new Date().toISOString()}])
+      });
+      return r.ok;
+    } catch(e){ return false; }
+  },
+  deleteProfile: async (username) => {
+    try { await fetch(`${SUPA_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {}
+  },
+  // ─── Forum (table optionnelle « forum_posts ») ──────────────────────────────
+  // Commun à tous les utilisateurs (étudiants et administrateurs). Le pseudo et
+  // le rôle sont dénormalisés sur chaque message au moment de sa création, pour
+  // qu'un changement de pseudo ultérieur ne réécrive pas l'historique.
+  getForumPosts: async () => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts?select=id,username,display_name,role,body,parent_id,created_at&order=created_at.asc&limit=1000`,{headers:H});
+      if(!r.ok) return null;
+      const d=await r.json();
+      return Array.isArray(d)?d:null;
+    } catch(e){ return null; }
+  },
+  createForumPost: async (post) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts`, {
+        method:"POST",
+        headers:{...H,"Prefer":"return=representation"},
+        body:JSON.stringify([{...post,created_at:new Date().toISOString()}])
+      });
+      if(!r.ok){ let msg=`HTTP ${r.status}`; try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}; throw new Error(msg); }
+      const d=await r.json();
+      return Array.isArray(d)&&d.length>0?d[0]:null;
+    } catch(e){ console.error("createForumPost failed:",e); throw e; }
+  },
+  deleteForumPost: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/forum_posts?id=eq.${encodeURIComponent(id)}`,{method:"DELETE",headers:H}); } catch {} },
 };
 const storage = {
   get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
   set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
   del: k => { try { localStorage.removeItem(k); } catch {} },
 };
+// ─── Pseudonymes ──────────────────────────────────────────────────────────────
+// Disponible pour TOUS les utilisateurs (étudiants comme administrateurs).
+// Utilisé partout où un nom doit être affiché (forum, classement, tableau de
+// bord). Par défaut, dérivé du nom d'utilisateur — comme avant — tant que
+// personne n'a choisi de pseudo personnalisé dans les Réglages.
+const defaultPseudo = username => !username ? "" : (String(username).includes("@") ? String(username).split("@")[0] : String(username));
+const getPseudo = username => { if(!username)return ""; try{ return localStorage.getItem(`mx6-pseudo-${username}`) || defaultPseudo(username); }catch{ return defaultPseudo(username); } };
+const savePseudoLocal = (username,name) => { try{ localStorage.setItem(`mx6-pseudo-${username}`,name); }catch{} };
 // ─── Individual purchase persistence ─────────────────────────────────────────
 const getExtraGroups = u => { try { return JSON.parse(localStorage.getItem(`mx6-extra-${u}`) || "[]"); } catch { return []; } };
 const saveExtraGroups = (u, gs) => { try { localStorage.setItem(`mx6-extra-${u}`, JSON.stringify([...new Set(gs)])); } catch {} };
@@ -1082,18 +1143,32 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
   return <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>;
 }
 // ─── Card Editor ──────────────────────────────────────────────────────────────
-function CardEditor({card,onSave,onCancel,userGroups}){
+function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
   const availableGroups=userGroups?GROUPS.filter(g=>g.sem>0&&userGroups.includes(g.id)):GROUPS;
   const isNew=!card?.id;
   const initType=!isNew&&isOcclusion(card)?"occlusion":"text";
   const [cardType,setCardType]=useState(initType);
+  // ─── Cours officiel vs cours personnel (étudiants uniquement) ────────────────
+  // Un étudiant ne peut ajouter de flashcards que sur un cours déjà créé par un
+  // administrateur, OU créer son propre cours personnel librement nommé,
+  // uniquement visible par lui. Les administrateurs ne sont pas concernés
+  // (userGroups n'est jamais fourni pour eux) : comportement inchangé.
+  const isStudentMode=!!userGroups;
+  const [personalMode,setPersonalMode]=useState(isStudentMode&&!isNew&&!!card?.personalCourseName);
+  const [personalCourseName,setPersonalCourseName]=useState(card?.personalCourseName||"");
+  const [personalErr,setPersonalErr]=useState(false);
+  // Numéros de cours qui ont déjà au moins une carte créée par un administrateur.
+  const existingNumsForGroup=useCallback(gid=>new Set((officialCards||[]).filter(c=>c.groupId===gid).map(c=>c.num)),[officialCards]);
+  // Noms de cours personnels déjà utilisés par cet étudiant pour la matière choisie.
+  const personalCourseNamesForGroup=useCallback(gid=>[...new Set((userCards||[]).filter(c=>c.groupId===gid&&c.personalCourseName).map(c=>c.personalCourseName))],[userCards]);
   const LAST_CLASS_KEY="mx6-last-class";
   const getLastClass=()=>{try{return JSON.parse(localStorage.getItem(LAST_CLASS_KEY)||"null");}catch{return null;}};
   const saveLastClass=(groupId,num,chapterId,packetId)=>{try{localStorage.setItem(LAST_CLASS_KEY,JSON.stringify({groupId,num,chapterId,packetId}));}catch{}};
   const lastClass=isNew?getLastClass():null;
   const defaultGroup=card?.groupId||(lastClass?.groupId)||(availableGroups[0]?.id||GROUPS[0].id);
   const defaultGroupObj=GROUPS.find(g=>g.id===defaultGroup);
-  const defaultNum=card?.num||(lastClass?.num&&defaultGroupObj?.nums.includes(lastClass.num)?lastClass.num:defaultGroupObj?.nums[0]||1);
+  const defaultAvailNums=isStudentMode?defaultGroupObj?.nums.filter(n=>existingNumsForGroup(defaultGroup).has(n)):defaultGroupObj?.nums;
+  const defaultNum=card?.num||(lastClass?.num&&defaultAvailNums?.includes(lastClass.num)?lastClass.num:defaultAvailNums?.[0]||defaultGroupObj?.nums?.[0]||1);
   const defaultChapter=card?.chapterId||(lastClass?.chapterId)||1;
   const defaultPacket=card?.packetId||(lastClass?.packetId)||"prioritaire";
   const [form,setForm]=useState({front:card?.front||"",back:card?.back||"",groupId:defaultGroup,num:defaultNum,chapterId:defaultChapter,packetId:defaultPacket});
@@ -1194,8 +1269,10 @@ function CardEditor({card,onSave,onCancel,userGroups}){
   const handleFile=e=>{loadImageFile(e.target.files[0]);};
   const handleSaveOcclusion=()=>{
     if(!image||zones.length===0)return;
+    if(personalMode&&!personalCourseName.trim()){setPersonalErr(true);return;}
     saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);
-    const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id,title:occlusionTitle}),back:"__occlusion__",groupId:form.groupId,num:form.num,chapterId:form.chapterId,packetId:zone.packetId||form.packetId,card_type:"occlusion"}));
+    const pcName=personalMode?personalCourseName.trim():null;
+    const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id,title:occlusionTitle}),back:"__occlusion__",groupId:form.groupId,num:pcName?null:form.num,chapterId:pcName?1:form.chapterId,packetId:zone.packetId||form.packetId,card_type:"occlusion",personalCourseName:pcName}));
     onSave(cards);setSaved(true);
   };
   // Change the packet (Prioritaire/Important/Utile) of a single zone — each masked
@@ -1205,14 +1282,59 @@ function CardEditor({card,onSave,onCancel,userGroups}){
     setZones(nz);pushHist(nz);
   };
   const selGroup=GROUPS.find(g=>g.id===form.groupId);
-  const availNums=selGroup?.nums||[1];
+  // En mode étudiant, on ne propose que les cours ayant déjà au moins une carte
+  // créée par un administrateur (+ le cours actuellement sélectionné, pour ne
+  // jamais casser l'édition d'une carte existante).
+  const availNums=isStudentMode
+    ?(selGroup?.nums||[]).filter(n=>existingNumsForGroup(form.groupId).has(n)||n===form.num)
+    :(selGroup?.nums||[1]);
   const availChapters=getChapters(form.groupId,form.num);
   const selPacket=PACKETS.find(p=>p.id===form.packetId);
-  const handleGroupChange=v=>{const g=GROUPS.find(g=>g.id===v);const newNum=g?.nums.includes(form.num)?form.num:g?.nums[0]||1;setForm(p=>({...p,groupId:v,num:newNum,chapterId:1}));};
+  const availPersonalNames=isStudentMode?personalCourseNamesForGroup(form.groupId):[];
+  const handleGroupChange=v=>{
+    const g=GROUPS.find(g=>g.id===v);
+    const newAvail=isStudentMode?g?.nums.filter(n=>existingNumsForGroup(v).has(n)):g?.nums;
+    const newNum=newAvail?.includes(form.num)?form.num:newAvail?.[0]||g?.nums?.[0]||1;
+    setForm(p=>({...p,groupId:v,num:newNum,chapterId:1}));
+    setPersonalCourseName("");setPersonalErr(false);
+  };
   const handleNumChange=v=>setForm(p=>({...p,num:v,chapterId:1}));
-  const validate=()=>{const e={};if(!formFront.trim()&&!frontImg)e.front=true;if(!formBack.trim()&&!backImg)e.back=true;setErrors(e);return!Object.keys(e).length;};
-  const handleSaveText=()=>{if(!validate())return;saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);onSave({...form,front:serializeContent(formFront,frontImg),back:serializeContent(formBack,backImg),id:card?.id||`card-${Date.now()}`,sort_order:card?.sort_order,card_type:card?.card_type||'text'});setSaved(true);};
-  const ClassPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)}))} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={availableGroups.map(g=>({value:g.id,label:groupLabel(g)}))}/></div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={availNums.map(n=>({value:n,label:`Cours ${n}`}))} columns={Math.min(availNums.length,4)}/></div>{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`}))} columns={1}/></div>)}</div></div>);
+  const validate=()=>{
+    const e={};
+    if(!formFront.trim()&&!frontImg)e.front=true;
+    if(!formBack.trim()&&!backImg)e.back=true;
+    setErrors(e);
+    if(personalMode&&!personalCourseName.trim()){setPersonalErr(true);return false;}
+    return!Object.keys(e).length;
+  };
+  const handleSaveText=()=>{
+    if(!validate())return;
+    saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);
+    const pcName=personalMode?personalCourseName.trim():null;
+    onSave({...form,num:pcName?null:form.num,chapterId:pcName?1:form.chapterId,personalCourseName:pcName,front:serializeContent(formFront,frontImg),back:serializeContent(formBack,backImg),id:card?.id||`card-${Date.now()}`,sort_order:card?.sort_order,card_type:card?.card_type||'text'});
+    setSaved(true);
+  };
+  const ModeToggle=()=>!isStudentMode?null:(
+    <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
+      <Lbl>Type de cours</Lbl>
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <button onClick={()=>{setPersonalMode(false);setPersonalErr(false);}} style={{flex:1,fontFamily:font,fontSize:12,fontWeight:!personalMode?600:400,padding:"9px 10px",cursor:"pointer",borderRadius:7,border:`2px solid ${!personalMode?C.accent:C.border}`,background:!personalMode?C.accentBg:C.surface,color:!personalMode?C.accent:C.textMed}}>{!personalMode&&"✓ "}📚 Cours officiel</button>
+        <button onClick={()=>setPersonalMode(true)} style={{flex:1,fontFamily:font,fontSize:12,fontWeight:personalMode?600:400,padding:"9px 10px",cursor:"pointer",borderRadius:7,border:`2px solid ${personalMode?"#7c3aed":C.border}`,background:personalMode?"#f5f3ff":C.surface,color:personalMode?"#7c3aed":C.textMed}}>{personalMode&&"✓ "}✏️ Mon cours personnel</button>
+      </div>
+      <p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>{personalMode?"Ce cours n'est visible que par toi — donne-lui le nom que tu veux (ex. \"Bio Cell perso\").":"Uniquement les cours déjà créés par un administrateur."}</p>
+    </div>
+  );
+  const PersonalCoursePicker=()=>(
+    <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
+      <Lbl color={personalErr?C.again:undefined}>Nom du cours personnel{personalErr?" (requis)":""}</Lbl>
+      {availPersonalNames.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+        {availPersonalNames.map(n=><button key={n} onClick={()=>{setPersonalCourseName(n);setPersonalErr(false);}} style={{fontFamily:font,fontSize:11,fontWeight:personalCourseName===n?600:400,padding:"5px 10px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${personalCourseName===n?"#7c3aed":C.border}`,background:personalCourseName===n?"#ede9fe":"transparent",color:personalCourseName===n?"#7c3aed":C.textMed}}>{personalCourseName===n&&"✓ "}{n}</button>)}
+      </div>}
+      <input style={{...iLine,borderColor:personalErr?C.again:C.border}} placeholder="Ex. Bio Cell perso" value={personalCourseName} onChange={e=>{setPersonalCourseName(e.target.value);setPersonalErr(false);}}/>
+      <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>{availPersonalNames.length>0?"Choisis un cours existant ci-dessus ou tape un nouveau nom pour en créer un autre.":"Tape le nom que tu veux — ce sera ton propre cours, personnel."}</p>
+    </div>
+  );
+  const ClassPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)}))} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={availableGroups.map(g=>({value:g.id,label:groupLabel(g)}))}/></div><ModeToggle/>{personalMode?<PersonalCoursePicker/>:<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={availNums.map(n=>({value:n,label:`Cours ${n}`}))} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`}))} columns={1}/></div>)}</>}</div></div>);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
     <div style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
       {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid ${C.accent}20`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
@@ -1237,8 +1359,7 @@ function CardEditor({card,onSave,onCancel,userGroups}){
             <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"8px 0 0"}}>
               <Tag color={pC(form.packetId)} bg={pB(form.packetId)}>{selPacket?.label}</Tag>
               <Tag color={C.accent} bg={C.accentBg}>{selGroup?.label}</Tag>
-              <Tag color={C.textMed} bg={C.bg}>Cours {form.num}</Tag>
-              {availChapters[form.chapterId-1]&&<Tag color={C.textMed} bg={C.bg}>Ch. {form.chapterId} — {availChapters[form.chapterId-1]}</Tag>}
+              {personalMode?<Tag color="#7c3aed" bg="#f5f3ff">✏️ {personalCourseName.trim()||"Cours personnel"}</Tag>:<><Tag color={C.textMed} bg={C.bg}>Cours {form.num}</Tag>{availChapters[form.chapterId-1]&&<Tag color={C.textMed} bg={C.bg}>Ch. {form.chapterId} — {availChapters[form.chapterId-1]}</Tag>}</>}
             </div>
             {formFront&&<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.5}}>{formFront.slice(0,100)}{formFront.length>100?"…":""}</p>}
             {frontImg&&<img src={frontImg} style={{maxWidth:"100%",maxHeight:80,borderRadius:6,marginTop:8,display:"block"}}/>}
@@ -1937,17 +2058,25 @@ function StatsTab({username,progress,allCards,onUnbury}){
   );
 }
 // ─── MyCardsTab ──────────────────────────────────────────────────────────────
-function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progress,onStudyUser}){
+function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progress,onStudyUser,onStudyPersonal}){
   const [delId,setDelId]=useState(null);
+  // Cartes sur un cours officiel (numéroté, créé par un administrateur) vs
+  // cartes sur un cours personnel (nommé librement, visible uniquement par
+  // l'étudiant qui l'a créé). Les deux sont strictement séparées à l'affichage.
+  const officialUserCards=useMemo(()=>userCards.filter(c=>!c.personalCourseName),[userCards]);
+  const personalUserCards=useMemo(()=>userCards.filter(c=>c.personalCourseName),[userCards]);
   const activeGroups=useMemo(()=>
-    GROUPS.filter(g=>userCards.some(c=>c.groupId===g.id))
-  ,[userCards]);
+    GROUPS.filter(g=>officialUserCards.some(c=>c.groupId===g.id))
+  ,[officialUserCards]);
+  const personalCourseNames=useMemo(()=>
+    [...new Set(personalUserCards.map(c=>c.personalCourseName))].sort((a,b)=>a.localeCompare(b,"fr"))
+  ,[personalUserCards]);
   const totalDue=userCards.filter(c=>isDue(progress[c.id])).length;
-  const integratedCount=userCards.filter(c=>c.integrated).length;
+  const integratedCount=officialUserCards.filter(c=>c.integrated).length;
   function GroupPanel({group}){
     const [activeCours,setActiveCours]=useState(null);
     const [expandedCh,setExpandedCh]=useState(null);
-    const groupCards=userCards.filter(c=>c.groupId===group.id);
+    const groupCards=officialUserCards.filter(c=>c.groupId===group.id);
     const availNums=[...new Set(groupCards.map(c=>c.num))].sort((a,b)=>a-b);
     const courseCards=activeCours?groupCards.filter(c=>c.num===activeCours):[];
     const chapterIds=[...new Set(courseCards.map(c=>c.chapterId))].sort((a,b)=>a-b);
@@ -2034,6 +2163,62 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       </div>}
     </div>;
   }
+  // ─── Cours personnel (nom libre, flat — pas de chapitres) ──────────────────
+  function PersonalCoursePanel({courseName}){
+    const [expanded,setExpanded]=useState(false);
+    const courseCards=personalUserCards.filter(c=>c.personalCourseName===courseName);
+    const subjectIds=[...new Set(courseCards.map(c=>c.groupId))];
+    const subjectLabels=subjectIds.map(gid=>GROUPS.find(g=>g.id===gid)?.label).filter(Boolean);
+    function PersonalPktBtn({pk}){
+      const pkCards=courseCards.filter(c=>c.packetId===pk.id);
+      const due=pkCards.filter(c=>isDue(progress[c.id])).length;
+      const total=pkCards.length;
+      const col=pC(pk.id),bg=pB(pk.id);
+      const hasDue=due>0,upToDate=total>0&&!hasDue;
+      return<button onClick={()=>hasDue&&onStudyPersonal(courseName,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"#e8e5e0"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"#c0bbb5",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
+        <span style={{fontSize:9}}>{pk.label}</span>
+        <span style={{fontSize:9,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}`:upToDate?"✓ à jour":"vide"}</span>
+      </button>;
+    }
+    const courseDue=courseCards.filter(c=>isDue(progress[c.id])).length;
+    return<div style={{background:C.surface,border:"1px solid #7c3aed40",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+      <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:"#f5f3ff",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <p style={{fontFamily:serif,fontSize:15,margin:0,color:"#7c3aed"}}>✏️ {courseName}</p>
+          <Tag color="#7c3aed" bg="#ede9fe" small>Personnel</Tag>
+          {subjectLabels.map(l=><Tag key={l} color={C.textMed} bg={C.bg} small>{l}</Tag>)}
+          <Tag color={C.textMed} bg={C.bg} small>{courseCards.length} carte{courseCards.length>1?"s":""}</Tag>
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+          {PACKETS.map(pk=><PersonalPktBtn key={pk.id} pk={pk}/>)}
+          <button onClick={()=>setExpanded(e=>!e)} style={{fontFamily:font,fontSize:10,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:expanded?C.bg:"transparent",color:C.textMed}}>{expanded?"▲ Masquer":`▼ Voir (${courseCards.length})`}</button>
+        </div>
+      </div>
+      {expanded&&<div style={{background:"#fafaf9"}}>
+        {courseCards.map(card=>{
+          const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
+          const dueCard=isDue(progress[card.id]);
+          return<div key={card.id} style={{borderTop:`1px solid ${C.border}`,padding:"10px 18px",display:"flex",alignItems:"flex-start",gap:12}}>
+            <div style={{width:3,height:"100%",background:pC(card.packetId),borderRadius:2,flexShrink:0,marginTop:2}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:5}}>
+                <Tag color={pC(card.packetId)} bg={pB(card.packetId)} small>{pkLabel}</Tag>
+                {dueCard&&<Tag color={C.accent} bg={C.accentBg} small>À réviser</Tag>}
+              </div>
+              {isOcclusion(card)?<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<>
+                <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",lineHeight:1.4}}>{card.front}</p>
+                <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{card.back}</p>
+              </>}
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              <button onClick={()=>onEdit(card)} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
+              <button onClick={()=>setDelId(card.id)} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again}}>×</button>
+            </div>
+          </div>;
+        })}
+      </div>}
+    </div>;
+  }
   return<div style={{animation:"fadeIn 0.18s ease"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
       <div>
@@ -2046,10 +2231,14 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
     {userCards.length===0?<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
       <p style={{fontSize:36,margin:"0 0 12px"}}>✏️</p>
       <p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Aucune carte personnelle</p>
-      <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Crée tes propres flashcards pour compléter les cours officiels.</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Crée tes propres flashcards pour compléter les cours officiels, ou lance-toi un cours personnel rien qu'à toi.</p>
       <Btn fill onClick={onNew}>Créer ma première carte →</Btn>
     </div>:<div>
       {activeGroups.map(g=><GroupPanel key={g.id} group={g}/>)}
+      {personalCourseNames.length>0&&<>
+        <p style={{fontFamily:serif,fontSize:16,margin:"20px 0 10px"}}>Mes cours personnels</p>
+        {personalCourseNames.map(name=><PersonalCoursePanel key={name} courseName={name}/>)}
+      </>}
     </div>}
     {delId&&<Modal onClose={()=>setDelId(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer cette carte ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>Action irréversible.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delId);setDelId(null);}}>Supprimer</Btn><Btn onClick={()=>setDelId(null)}>Annuler</Btn></div></Modal>}
   </div>;
@@ -2282,13 +2471,107 @@ function RankTab({username,tick}){
     </div>
   );
 }
+// ─── Forum ────────────────────────────────────────────────────────────────────
+// Commun à tous les utilisateurs de MyFlashCard (étudiants ET administrateurs).
+// Pseudo des administrateurs en rouge, pseudo des étudiants en bleu. Nécessite
+// la table optionnelle "forum_posts" — voir supabase_forum_posts.sql. Sans elle,
+// l'onglet affiche un message explicatif au lieu de planter.
+function ForumTab({currentUser,pseudo}){
+  const isAdmin=currentUser.role==="admin";
+  const [posts,setPosts]=useState(undefined); // undefined = chargement · null = table indisponible
+  const [body,setBody]=useState("");
+  const [replyTo,setReplyTo]=useState(null);
+  const [replyBody,setReplyBody]=useState("");
+  const [posting,setPosting]=useState(false);
+  const [err,setErr]=useState("");
+  const load=useCallback(async()=>{
+    const rows=await supa.getForumPosts();
+    setPosts(rows);
+  },[]);
+  useEffect(()=>{load();},[load]);
+  const nameColor=role=>role==="admin"?C.again:C.easy;
+  const submit=async(text,parentId)=>{
+    const trimmed=(text||"").trim();
+    if(!trimmed||posting)return;
+    setPosting(true);setErr("");
+    try{
+      const created=await supa.createForumPost({
+        username:currentUser.username,
+        display_name:pseudo||defaultPseudo(currentUser.username),
+        role:isAdmin?"admin":"student",
+        body:trimmed,
+        parent_id:parentId||null,
+      });
+      if(created)setPosts(p=>Array.isArray(p)?[...p,created]:[created]);
+      else await load();
+      if(parentId){setReplyBody("");setReplyTo(null);} else {setBody("");}
+    }catch(e){
+      setErr("Impossible d'envoyer le message. Réessaie dans un instant.");
+    }finally{setPosting(false);}
+  };
+  const fmtDate=iso=>{
+    try{
+      const d=new Date(iso);
+      const now=Date.now();
+      const diffH=(now-d.getTime())/3600000;
+      if(diffH<24)return d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+      return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"})+" à "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+    }catch{return"";}
+  };
+  const topLevel=useMemo(()=>Array.isArray(posts)?posts.filter(p=>!p.parent_id):[],[posts]);
+  const repliesOf=useMemo(()=>{
+    const m={};
+    if(Array.isArray(posts))posts.filter(p=>p.parent_id).forEach(p=>{(m[p.parent_id]=m[p.parent_id]||[]).push(p);});
+    return m;
+  },[posts]);
+  const PostRow=({p,isReply})=><div style={{padding:isReply?"10px 0 0 28px":"14px 0",borderTop:isReply?"none":`1px solid ${C.border}`}}>
+    <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:4}}>
+      <strong style={{fontSize:13,color:nameColor(p.role)}}>{p.display_name||defaultPseudo(p.username)}</strong>
+      {p.role==="admin"&&<Tag color={C.again} bg={C.againBg} small>Admin</Tag>}
+      <span style={{fontSize:11,color:C.textLt}}>{fmtDate(p.created_at)}</span>
+    </div>
+    <p style={{fontSize:13.5,color:C.text,margin:"0 0 6px",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{p.body}</p>
+    {!isReply&&<button onClick={()=>{setReplyTo(replyTo===p.id?null:p.id);setReplyBody("");}} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",padding:0}}>{replyTo===p.id?"Annuler":"↩ Répondre"}</button>}
+    {!isReply&&replyTo===p.id&&<div style={{marginTop:8,display:"flex",gap:8}}>
+      <input style={{...iLine,flex:1}} placeholder={isAdmin?"Ta réponse (pseudo en rouge)…":"Ta réponse…"} value={replyBody} onChange={e=>setReplyBody(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit(replyBody,p.id)} autoFocus/>
+      <Btn small fill onClick={()=>submit(replyBody,p.id)} disabled={!replyBody.trim()||posting}>Envoyer</Btn>
+    </div>}
+    {!isReply&&(repliesOf[p.id]||[]).map(r=><PostRow key={r.id} p={r} isReply/>)}
+  </div>;
+  return <div style={{animation:"fadeIn 0.18s ease"}}>
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Forum</p>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px"}}>Espace d'échange commun à tous les utilisateurs · pseudo <strong style={{color:C.again}}>administrateur en rouge</strong>, <strong style={{color:C.easy}}>étudiant en bleu</strong></p>
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:20}}>
+      <p style={{fontSize:12,color:C.textLt,margin:"0 0 8px"}}>Tu postes sous le pseudo : <strong style={{color:nameColor(isAdmin?"admin":"student")}}>{pseudo||defaultPseudo(currentUser.username)}</strong> {isAdmin&&<span style={{color:C.textLt}}>(modifiable dans Réglages → Profil)</span>}</p>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <textarea style={{...iBox,flex:"1 1 260px",minHeight:60}} placeholder="Pose ta question ou partage quelque chose avec la communauté…" value={body} onChange={e=>setBody(e.target.value)} rows={2}/>
+        <Btn fill onClick={()=>submit(body,null)} disabled={!body.trim()||posting} style={{alignSelf:"flex-end"}}>{posting?"Envoi…":"Publier"}</Btn>
+      </div>
+      {err&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{err}</p>}
+    </div>
+    {posts===undefined?(
+      <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Chargement du forum…</p>
+    ):posts===null?(
+      <div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"22px",background:C.surface}}>
+        <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le forum n'est pas encore disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"#f0ece6",padding:"1px 5px",borderRadius:4}}>forum_posts</code> n'existe pas encore dans Supabase.</p>
+        <p style={{fontSize:11,color:C.textLt,margin:0,lineHeight:1.6}}>À créer une fois dans l'éditeur SQL Supabase — voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_forum_posts.sql</code>.</p>
+      </div>
+    ):topLevel.length===0?(
+      <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Aucun message pour l'instant — sois le premier à écrire !</p>
+    ):(
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"0 18px"}}>
+        {[...topLevel].reverse().map(p=><PostRow key={p.id} p={p}/>)}
+      </div>
+    )}
+  </div>;
+}
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner,pointsTick}){
+function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onStudyPersonal,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner,pointsTick,pseudo}){
   const isAdmin=currentUser.role==="admin";
   const userGroups=currentUser.plan?.groups||[];
   const fullGroups=currentUser.plan?.fullGroups||[];
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
-  const displayName=currentUser.username.includes("@")?currentUser.username.split("@")[0]:currentUser.username;
+  const displayName=pseudo||defaultPseudo(currentUser.username);
   const [showUpgrade,setShowUpgrade]=useState(false);
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
@@ -2453,13 +2736,16 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         {!isAdmin&&<button onClick={()=>setActiveTab("mes-cartes")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="mes-cartes"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="mes-cartes"?"#7c3aed":C.border}`,background:activeTab==="mes-cartes"?"#f5f3ff":"transparent",color:activeTab==="mes-cartes"?"#7c3aed":C.textMed,display:"flex",alignItems:"center",gap:6}}>✏️ Mes flashcards{(userCards||[]).length>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#7c3aed",color:"#fff"}}>{(userCards||[]).length}</span>}</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("stats")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="stats"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="stats"?C.accent:C.border}`,background:activeTab==="stats"?C.accentBg:"transparent",color:activeTab==="stats"?C.accent:C.textMed,display:"flex",alignItems:"center",gap:6}}>📊 Statistiques</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("rank")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="rank"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="rank"?"#b7791f":C.border}`,background:activeTab==="rank"?"#fdf6e3":"transparent",color:activeTab==="rank"?"#b7791f":C.textMed,display:"flex",alignItems:"center",gap:6}}>🏆 Rang{todayPts>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#b7791f",color:"#fff"}}>{todayPts}</span>}</button>}
+        <button onClick={()=>setActiveTab("forum")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="forum"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="forum"?C.util:C.border}`,background:activeTab==="forum"?C.utilBg:"transparent",color:activeTab==="forum"?C.util:C.textMed,display:"flex",alignItems:"center",gap:6}}>💬 Forum</button>
       </div>
-      {activeTab==="rank"&&!isAdmin?(
+      {activeTab==="forum"?(
+        <ForumTab currentUser={currentUser} pseudo={displayName}/>
+      ):activeTab==="rank"&&!isAdmin?(
         <RankTab username={currentUser.username} tick={pointsTick}/>
       ):activeTab==="stats"&&!isAdmin?(
         <StatsTab username={currentUser.username} progress={progress} allCards={allCardsProp||[...cards,...(userCards||[]).filter(c=>c.integrated)]} onUnbury={onUnbury}/>
       ):activeTab==="mes-cartes"&&!isAdmin?(
-        <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser}/>
+        <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal}/>
       ):activeTab==="shop"&&!isAdmin?(
         <ShopTab userGroups={userGroups} fullGroups={fullGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)}/>
       ):tabHasAccess?(
@@ -2625,16 +2911,37 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
   </div>;
 }
 // ─── Settings ─────────────────────────────────────────────────────────────────
-function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onResetProgress}){
+function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onResetProgress,onDeleteAccount,pseudo,onSavePseudo}){
   const [s,setS]=useState(settings),[saved,setSaved]=useState(false);
+  const [pseudoInput,setPseudoInput]=useState(pseudo||"");
+  const [pseudoSaved,setPseudoSaved]=useState(false);
+  useEffect(()=>{setPseudoInput(pseudo||"");},[pseudo]);
+  const savePseudoClick=()=>{
+    const trimmed=pseudoInput.trim();
+    if(!trimmed)return;
+    onSavePseudo(trimmed);
+    setPseudoSaved(true);
+    setTimeout(()=>setPseudoSaved(false),2000);
+  };
   const [rGroup,setRGroup]=useState(GROUPS[0]?.id||""),[rNum,setRNum]=useState(1),[rPkt,setRPkt]=useState("all");
+  const [rResetOrder,setRResetOrder]=useState(false);
   const [confirmReset,setConfirmReset]=useState(false),[resetPwd,setResetPwd]=useState(""),[resetErr,setResetErr]=useState(""),[resetDone,setResetDone]=useState(false);
+  const [confirmDelAcc,setConfirmDelAcc]=useState(false),[delAccPwd,setDelAccPwd]=useState(""),[delAccErr,setDelAccErr]=useState(""),[delAccBusy,setDelAccBusy]=useState(false);
   const save=()=>{onSave(s);setSaved(true);setTimeout(()=>setSaved(false),2000);};
   const Sl=({k,label,desc,min,max,step,unit})=><div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><p style={{fontSize:13,fontWeight:500,margin:0}}>{label}</p><p style={{fontSize:18,fontWeight:300,color:C.accent,margin:0}}>{s[k]}<span style={{fontSize:11}}> {unit}</span></p></div><p style={{fontSize:11,color:C.textMed,margin:"0 0 8px"}}>{desc}</p><input type="range" min={min} max={max} step={step} value={s[k]} onChange={e=>setS(p=>({...p,[k]:Number(e.target.value)}))} style={{width:"100%"}}/></div>;
   const Sec=({title,children})=><div style={{marginBottom:24}}><h2 style={{fontFamily:serif,fontSize:19,fontWeight:400,margin:"0 0 12px",paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>{title}</h2>{children}</div>;
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
     <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center="Paramètres" right={<Btn fill onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder"}</Btn>}/>
     <div style={{maxWidth:600,margin:"0 auto",padding:"28px 24px"}}>
+      <Sec title="👤 Profil">
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.6}}>Ton pseudonyme est le nom sous lequel tu es reconnu·e sur le Forum et dans les autres outils communs à tous les utilisateurs de MyFlashCard.</p>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <input style={{...iBox,flex:"1 1 220px"}} maxLength={40} placeholder="Ton pseudonyme" value={pseudoInput} onChange={e=>setPseudoInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&savePseudoClick()}/>
+            <Btn fill onClick={savePseudoClick} disabled={!pseudoInput.trim()}>{pseudoSaved?"✓ Enregistré":"Enregistrer"}</Btn>
+          </div>
+        </div>
+      </Sec>
       <Sec title="⏱ Intervalles d'apprentissage">
         <div style={{background:"#fef8e8",border:"1px solid #d9b23c50",borderRadius:8,padding:"10px 14px",marginBottom:10}}>
           <p style={{fontSize:12,color:"#8b5e00",margin:0,lineHeight:1.6}}>⚠️ Il est déconseillé de modifier ces intervalles : ils sont optimisés au mieux par défaut pour la mémorisation à long terme.</p>
@@ -2676,10 +2983,20 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
               {PACKETS.map(pk=><option key={pk.id} value={pk.id}>{pk.label} seulement</option>)}
             </select>
           </div>
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={rResetOrder} onChange={e=>setRResetOrder(e.target.checked)} style={{marginTop:2,accentColor:C.again}}/>
+            <span style={{fontSize:12,color:C.textMed,lineHeight:1.6}}>Réinitialiser aussi <strong>l'ordre d'importance</strong> (paquet Prioritaire/Important/Utile) que j'ai éventuellement modifié sur ces cartes. Décoché par défaut : seule la progression de révision est remise à "Nouveau", ton classement personnalisé des paquets est conservé.</span>
+          </label>
           <button onClick={()=>{setConfirmReset(true);setResetPwd("");setResetErr("");setResetDone(false);}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:C.againBg,color:C.again,alignSelf:"flex-start"}}>🗑 Réinitialiser</button>
         </div>
       </Sec>}
       <Btn fill full style={{fontSize:14}} onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder tous les paramètres"}</Btn>
+      {onDeleteAccount&&currentUser?.role!=="admin"&&<Sec title="⚠️ Zone de danger">
+        <div style={{background:C.againBg,border:`1.5px solid ${C.again}40`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          <p style={{fontSize:12,color:C.again,margin:0,lineHeight:1.6}}><strong>Supprimer définitivement mon compte.</strong> Ton compte, tes flashcards personnelles, ta progression de révision et tes points sont effacés sans possibilité de retour en arrière. Ton abonnement n'est pas remboursé automatiquement.</p>
+          <button onClick={()=>{setConfirmDelAcc(true);setDelAccPwd("");setDelAccErr("");}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:"#fff",color:C.again,alignSelf:"flex-start"}}>🗑 Supprimer mon compte</button>
+        </div>
+      </Sec>}
     </div>
     {confirmReset&&(()=>{
       const targetCards=(cards||[]).filter(cd=>cd.groupId===rGroup&&cd.num===rNum&&(rPkt==="all"||cd.packetId===rPkt));
@@ -2689,7 +3006,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
         const acc=(accounts||[]).find(a=>a.username===currentUser?.username);
         const validPwd=acc?acc.password===resetPwd:false;
         if(!validPwd){setResetErr("Mot de passe incorrect.");return;}
-        onResetProgress(targetCards.map(cd=>cd.id));
+        onResetProgress(targetCards.map(cd=>cd.id),rResetOrder);
         setResetErr("");setResetDone(true);
         setTimeout(()=>{setConfirmReset(false);setResetDone(false);},1400);
       };
@@ -2700,7 +3017,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
           ):(
             <>
               <p style={{fontFamily:serif,fontSize:17,margin:"0 0 8px"}}>⚠️ Confirmer la réinitialisation</p>
-              <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Tu es sur le point de remettre à zéro <strong>{targetCards.length} carte{targetCards.length>1?"s":""}</strong> — {grp?.label} · Cours {rNum} · {pktLabel}. Cette action est <strong>irréversible</strong>.</p>
+              <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Tu es sur le point de remettre à zéro <strong>{targetCards.length} carte{targetCards.length>1?"s":""}</strong> — {grp?.label} · Cours {rNum} · {pktLabel}. {rResetOrder?<>L'<strong>ordre d'importance</strong> de ces cartes sera aussi réinitialisé.</>:<>L'ordre d'importance de ces cartes sera <strong>conservé</strong>.</>} Cette action est <strong>irréversible</strong>.</p>
               <Lbl>Mot de passe</Lbl>
               <input type="password" style={{...iBox,marginTop:4}} value={resetPwd} onChange={e=>{setResetPwd(e.target.value);setResetErr("");}} onKeyDown={e=>e.key==="Enter"&&doConfirm()} autoFocus/>
               {resetErr&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{resetErr}</p>}
@@ -2710,6 +3027,28 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
               </div>
             </>
           )}
+        </div>
+      </div>;
+    })()}
+    {confirmDelAcc&&(()=>{
+      const doConfirmDelete=async()=>{
+        const acc=(accounts||[]).find(a=>a.username===currentUser?.username);
+        const validPwd=acc?acc.password===delAccPwd:false;
+        if(!validPwd){setDelAccErr("Mot de passe incorrect.");return;}
+        setDelAccBusy(true);
+        try{ await onDeleteAccount(); } finally{ setDelAccBusy(false); }
+      };
+      return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>!delAccBusy&&setConfirmDelAcc(false)}>
+        <div style={{background:C.surface,borderRadius:12,padding:"24px 22px",maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
+          <p style={{fontFamily:serif,fontSize:17,margin:"0 0 8px"}}>⚠️ Supprimer définitivement ton compte ?</p>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Ton compte <strong>{currentUser?.username}</strong>, tes flashcards personnelles, ta progression de révision, tes points et ton classement seront <strong>définitivement effacés</strong>. Cette action est <strong>irréversible</strong>.</p>
+          <Lbl>Mot de passe</Lbl>
+          <input type="password" style={{...iBox,marginTop:4}} value={delAccPwd} onChange={e=>{setDelAccPwd(e.target.value);setDelAccErr("");}} onKeyDown={e=>e.key==="Enter"&&doConfirmDelete()} autoFocus/>
+          {delAccErr&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{delAccErr}</p>}
+          <div style={{display:"flex",gap:10,marginTop:18}}>
+            <button onClick={()=>setConfirmDelAcc(false)} disabled={delAccBusy} style={{flex:1,fontFamily:font,fontSize:13,padding:"10px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>Annuler</button>
+            <button onClick={doConfirmDelete} disabled={!delAccPwd||delAccBusy} style={{flex:1,fontFamily:font,fontSize:13,fontWeight:600,padding:"10px",cursor:delAccPwd&&!delAccBusy?"pointer":"default",borderRadius:7,border:"none",background:C.again,color:"#fff",opacity:delAccPwd&&!delAccBusy?1:0.5}}>{delAccBusy?"Suppression…":"Supprimer définitivement"}</button>
+          </div>
         </div>
       </div>;
     })()}
@@ -2739,37 +3078,42 @@ const LANDING_ARGS=[
   {num:"07",reverse:true,title:"Faites-les vôtres",text:"Chaque carte a été pensée pour être la **plus simple** et la **plus précise** possible. Mais une formulation qui fonctionne pour nous ne sera pas forcément celle qui vous parlera le plus. Vous pouvez **modifier** n'importe quelle carte existante avec vos propres mots, ou **créer les vôtres depuis zéro**, **gratuitement** et à **volonté**."},
 ];
 function ForgettingCurve(){
-  return <svg viewBox="0 0 560 230" style={{width:"65%",maxWidth:460,height:"auto",display:"block",margin:"16px auto 0"}}>
-    <text x="14" y="20" fontSize="10" fontWeight="700" fill={C.text}>100%</text>
-    <line x1="50" y1="26" x2="50" y2="185" stroke={C.text} strokeWidth="1.5"/>
-    <line x1="50" y1="185" x2="470" y2="185" stroke={C.text} strokeWidth="1.5"/>
-    <text x="6" y="108" fontSize="9.5" fill={C.textMed}>Rétention</text>
-    <text x="6" y="121" fontSize="9.5" fill={C.textMed}>d'information</text>
-    <line x1="95" y1="26" x2="95" y2="185" stroke={C.border} strokeWidth="1.2" strokeDasharray="3 3"/>
-    <line x1="165" y1="26" x2="165" y2="185" stroke={C.border} strokeWidth="1.2" strokeDasharray="3 3"/>
-    <line x1="235" y1="26" x2="235" y2="185" stroke={C.border} strokeWidth="1.2" strokeDasharray="3 3"/>
-    <line x1="305" y1="26" x2="305" y2="185" stroke={C.border} strokeWidth="1.2" strokeDasharray="3 3"/>
-    <line x1="375" y1="26" x2="375" y2="185" stroke={C.border} strokeWidth="1.2" strokeDasharray="3 3"/>
-    <text x="76" y="200" fontSize="9" fill={C.textMed}>10 min</text>
-    <text x="148" y="200" fontSize="9" fill={C.textMed}>1 jour</text>
-    <text x="207" y="200" fontSize="9" fill={C.textMed}>1 semaine</text>
-    <text x="287" y="200" fontSize="9" fill={C.textMed}>1 mois</text>
-    <text x="363" y="200" fontSize="9" fill={C.textMed}>6 mois</text>
-    <path d="M 50 23 C 120 113, 240 153, 460 168" fill="none" stroke="#a8a39a" strokeWidth="2.2"/>
-    <polygon points="470,168 456,161 456,175" fill="#a8a39a"/>
-    <path d="M 50 23 C 68 30, 80 36, 95 42 L 95 30 C 122 36, 148 41, 165 48 L 165 34 C 190 39, 218 45, 235 52 L 235 38 C 260 43, 288 49, 305 56 L 305 42 C 328 47, 355 53, 375 59 L 375 46 C 400 50, 425 55, 448 59" fill="none" stroke={C.accent} strokeWidth="2.2"/>
-    <polygon points="462,61 448,55 449,66" fill={C.accent}/>
-    <circle cx="95" cy="30" r="3" fill={C.accent}/>
-    <circle cx="165" cy="34" r="3" fill={C.accent}/>
-    <circle cx="235" cy="38" r="3" fill={C.accent}/>
-    <circle cx="305" cy="42" r="3" fill={C.accent}/>
-    <circle cx="375" cy="46" r="3" fill={C.accent}/>
-    <line x1="490" y1="30" x2="490" y2="180" stroke={C.accent} strokeWidth="1.3"/>
-    <polygon points="490,180 486,171 494,171" fill={C.accent}/>
-    <line x1="486" y1="30" x2="494" y2="30" stroke={C.accent} strokeWidth="1.3"/>
-    <text x="500" y="98" fontSize="9.5" fontWeight="700" fill={C.accent}>Gains</text>
-    <text x="500" y="112" fontSize="9.5" fontWeight="700" fill={C.accent}>grâce aux</text>
-    <text x="500" y="126" fontSize="9.5" fontWeight="700" fill={C.accent}>rappels</text>
+  // Remarque : le graphique était réglé à 65% de largeur avec des polices de 9-10px
+  // dans un viewBox de 560px — sur mobile (conteneur souvent <350px), le facteur
+  // d'échelle résultant rendait tout le texte illisible (~4px réels). Corrigé en
+  // passant à 100% de largeur (donc pleine largeur du conteneur disponible, y
+  // compris sur mobile) et en augmentant les tailles de police et épaisseurs de trait.
+  return <svg viewBox="0 0 600 240" role="img" aria-label="Courbe de l'oubli : sans révision la rétention chute rapidement, avec des rappels espacés elle se maintient" style={{width:"100%",maxWidth:520,height:"auto",display:"block",margin:"16px auto 0"}}>
+    <text x="8" y="22" fontSize="13" fontWeight="700" fill={C.text}>100%</text>
+    <line x1="54" y1="30" x2="54" y2="195" stroke={C.text} strokeWidth="1.8"/>
+    <line x1="54" y1="195" x2="480" y2="195" stroke={C.text} strokeWidth="1.8"/>
+    <text x="6" y="112" fontSize="12.5" fill={C.textMed}>Rétention</text>
+    <text x="6" y="127" fontSize="12.5" fill={C.textMed}>d'information</text>
+    <line x1="100" y1="30" x2="100" y2="195" stroke={C.border} strokeWidth="1.3" strokeDasharray="3 3"/>
+    <line x1="175" y1="30" x2="175" y2="195" stroke={C.border} strokeWidth="1.3" strokeDasharray="3 3"/>
+    <line x1="250" y1="30" x2="250" y2="195" stroke={C.border} strokeWidth="1.3" strokeDasharray="3 3"/>
+    <line x1="325" y1="30" x2="325" y2="195" stroke={C.border} strokeWidth="1.3" strokeDasharray="3 3"/>
+    <line x1="400" y1="30" x2="400" y2="195" stroke={C.border} strokeWidth="1.3" strokeDasharray="3 3"/>
+    <text x="79" y="215" fontSize="12" fill={C.textMed}>10 min</text>
+    <text x="154" y="215" fontSize="12" fill={C.textMed}>1 jour</text>
+    <text x="219" y="215" fontSize="12" fill={C.textMed}>1 semaine</text>
+    <text x="304" y="215" fontSize="12" fill={C.textMed}>1 mois</text>
+    <text x="379" y="215" fontSize="12" fill={C.textMed}>6 mois</text>
+    <path d="M 54 27 C 130 120, 255 162, 470 178" fill="none" stroke="#a8a39a" strokeWidth="2.6"/>
+    <polygon points="481,178 466,171 466,185" fill="#a8a39a"/>
+    <path d="M 54 27 C 74 35, 88 42, 100 48 L 100 34 C 128 41, 155 47, 175 54 L 175 39 C 200 45, 228 52, 250 59 L 250 44 C 275 50, 302 57, 325 64 L 325 49 C 350 55, 377 62, 400 68 L 400 53 C 424 58, 448 63, 455 65" fill="none" stroke={C.accent} strokeWidth="2.6"/>
+    <polygon points="470,68 455,62 456,74" fill={C.accent}/>
+    <circle cx="100" cy="34" r="3.4" fill={C.accent}/>
+    <circle cx="175" cy="39" r="3.4" fill={C.accent}/>
+    <circle cx="250" cy="44" r="3.4" fill={C.accent}/>
+    <circle cx="325" cy="49" r="3.4" fill={C.accent}/>
+    <circle cx="400" cy="53" r="3.4" fill={C.accent}/>
+    <line x1="502" y1="34" x2="502" y2="190" stroke={C.accent} strokeWidth="1.6"/>
+    <polygon points="502,190 497,180 507,180" fill={C.accent}/>
+    <line x1="497" y1="34" x2="507" y2="34" stroke={C.accent} strokeWidth="1.6"/>
+    <text x="514" y="104" fontSize="12.5" fontWeight="700" fill={C.accent}>Gains</text>
+    <text x="514" y="120" fontSize="12.5" fontWeight="700" fill={C.accent}>grâce aux</text>
+    <text x="514" y="136" fontSize="12.5" fontWeight="700" fill={C.accent}>rappels</text>
   </svg>;
 }
 function Landing({onBack,onRegister}){
@@ -2857,6 +3201,23 @@ function Landing({onBack,onRegister}){
 function App(){
   const [supaError,setSupaError]=useState(null);
   const [view,setView]=useState("loading"),[currentUser,setCurrentUser]=useState(null),[cards,setCards]=useState([]),[prog,setProg]=useState({}),[settings,setSettings]=useState(DEFAULT_SETTINGS),[accounts,setAccounts]=useState([]),[studyCtx,setStudyCtx]=useState(null),[paymentStatus,setPaymentStatus]=useState(null);
+  // ─── Pseudonyme (commun étudiants + admins) ─────────────────────────────────
+  const [pseudo,setPseudo]=useState("");
+  const refreshPseudoFromCloud=useCallback(async username=>{
+    if(!username)return;
+    const remote=await supa.getProfile(username);
+    if(remote&&remote.display_name){
+      savePseudoLocal(username,remote.display_name);
+      setPseudo(remote.display_name);
+    }
+  },[]);
+  const savePseudo=useCallback(async name=>{
+    const trimmed=(name||"").trim().slice(0,40);
+    if(!currentUser||!trimmed)return;
+    setPseudo(trimmed);
+    savePseudoLocal(currentUser.username,trimmed);
+    try{ await supa.upsertProfile(currentUser.username,trimmed); }catch(e){ console.error("upsertProfile failed:",e); }
+  },[currentUser]);
   // ─── Gamification : points du jour + envoi (facultatif) au classement ──────
   const [pointsTick,setPointsTick]=useState(0);
   const pointsSyncTimer=useRef(null);
@@ -2972,6 +3333,8 @@ function App(){
           const restored={...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}};
           setProg(storage.get(`mx6-prog-${saved.username}`)||{});
           refreshProgressFromCloud(saved.username);
+          setPseudo(getPseudo(saved.username));
+          refreshPseudoFromCloud(saved.username);
           if(saved.role!=="admin"){
             const cached=mergeIntegrated(getUCache(saved.username),saved.username);
             if(cached.length>0)setUserCards(cached);
@@ -3040,7 +3403,7 @@ function App(){
   const handleLogin=(email,password)=>{
     const lc=email.toLowerCase();
     const adminMatch=ADMINS.find(a=>a.username===lc&&a.password===password);
-    if(adminMatch){const u={username:adminMatch.username,role:"admin",plan:{planId:"both",groups:ALL}};setProg(storage.get(`mx6-prog-${adminMatch.username}`)||{});refreshProgressFromCloud(adminMatch.username);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;}
+    if(adminMatch){const u={username:adminMatch.username,role:"admin",plan:{planId:"both",groups:ALL}};setProg(storage.get(`mx6-prog-${adminMatch.username}`)||{});refreshProgressFromCloud(adminMatch.username);setPseudo(getPseudo(adminMatch.username));refreshPseudoFromCloud(adminMatch.username);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;}
     const acc=accounts.find(a=>a.username===lc&&a.password===password);
     if(acc){
       const rawPlanId=acc.plan_id||acc.planId;
@@ -3050,11 +3413,11 @@ function App(){
       const groups=computeGroups(subPlanId,supaGroups,extra);
       const fullGroups=computeFullGroups(subPlanId,supaGroups,extra);
       const u={username:acc.username,role:"student",plan:{planId:subPlanId,groups,fullGroups}};
-      setProg(storage.get(`mx6-prog-${lc}`)||{});refreshProgressFromCloud(lc);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
+      setProg(storage.get(`mx6-prog-${lc}`)||{});refreshProgressFromCloud(lc);setPseudo(getPseudo(lc));refreshPseudoFromCloud(lc);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
     }
     return false;
   };
-  const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setView("login");};
+  const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setPseudo("");setView("login");};
   const refreshProgressFromCloud=useCallback(async username=>{
     const remote=await supa.getProgress(username);
     if(remote===null)return;
@@ -3147,18 +3510,64 @@ function App(){
   const handleDeleteCard=useCallback(async id=>{await supa.deleteCard(id);setCards(p=>p.filter(c=>c.id!==id));},[]);
   const handleSaveUser=useCallback(async acc=>{await supa.upsertAccount(acc);setAccounts(p=>p.find(a=>a.username===acc.username)?p.map(a=>a.username===acc.username?{...a,...acc,plan_id:acc.planId}:a):[...p,{...acc,plan_id:acc.planId}]);},[]);
   const handleDeleteUser=useCallback(async username=>{await supa.deleteAccount(username);setAccounts(p=>p.filter(a=>a.username!==username));},[]);
-  const handleResetProgress=useCallback(async cardIds=>{
+  const handleResetProgress=useCallback(async(cardIds,alsoResetPacketOrder=false)=>{
     if(!currentUser||!cardIds||!cardIds.length)return;
     const idSet=new Set(cardIds);
+    // Par défaut, on ne touche PAS à l'ordre d'importance (packetOverride) que
+    // l'étudiant a éventuellement défini sur ses cartes — seule la progression de
+    // révision (état FSRS) est réinitialisée. Si la case "réinitialiser aussi
+    // l'ordre d'importance" est cochée, tout est effacé, y compris ce réglage.
+    const fullyDeleteIds=[]; // cartes entièrement supprimées de prog
+    const partialUpdates=[]; // {id,packetOverride} — on garde uniquement ce champ
     setProg(prev=>{
       const next={...prev};
-      idSet.forEach(id=>{delete next[id];});
+      idSet.forEach(id=>{
+        const entry=prev[id];
+        if(alsoResetPacketOrder||!entry?.packetOverride){
+          delete next[id];
+          fullyDeleteIds.push(id);
+        } else {
+          next[id]={packetOverride:entry.packetOverride};
+          partialUpdates.push({id,packetOverride:entry.packetOverride});
+        }
+      });
       storage.set(`mx6-prog-${currentUser.username}`,next);
       return next;
     });
-    try{ await supa.deleteProgressBatch(currentUser.username,cardIds); }catch(e){ console.error("deleteProgressBatch failed:",e); }
+    try{
+      if(fullyDeleteIds.length)await supa.deleteProgressBatch(currentUser.username,fullyDeleteIds);
+      if(partialUpdates.length){
+        await Promise.all(partialUpdates.map(({id,packetOverride})=>supa.upsertProgress(currentUser.username,id,{packetOverride})));
+      }
+    }catch(e){ console.error("resetProgress persist failed:",e); }
   },[currentUser]);
-  const handleRegister=useCallback(async newAcc=>{await supa.upsertAccount(newAcc);setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};setProg({});setCurrentUser(u);storage.set("mx6-session",u);},[]);
+  // ─── Suppression de compte (étudiant) ───────────────────────────────────────
+  // Efface le compte côté Supabase (accounts, user_cards, progress, daily_points,
+  // profil/pseudo) ainsi que toutes les données locales de cet utilisateur, puis
+  // déconnecte. Action déclenchée uniquement depuis les Réglages, après
+  // confirmation par mot de passe.
+  const handleDeleteAccount=useCallback(async()=>{
+    if(!currentUser||currentUser.role==="admin")return;
+    const username=currentUser.username;
+    try{
+      await Promise.all([
+        supa.deleteAccount(username),
+        supa.deleteAllUserCards(username),
+        supa.deleteAllProgress(username),
+        supa.deleteDailyPoints(username),
+        supa.deleteProfile?supa.deleteProfile(username):Promise.resolve(),
+      ]);
+    }catch(e){ console.error("handleDeleteAccount failed:",e); }
+    [
+      `mx6-prog-${username}`,`mx6-stats-${username}`,`mx6-points-${username}`,
+      `mx6-extra-${username}`,`mx6-integrated-${username}`,`mx6-ucache-${username}`,
+      `mx6-rankprefs-${username}`,`mx6-pseudo-${username}`,
+    ].forEach(k=>storage.del(k));
+    setAccounts(p=>p.filter(a=>a.username!==username));
+    storage.del("mx6-session");
+    setCurrentUser(null);setProg({});setUserCards([]);setPseudo("");setView("login");
+  },[currentUser]);
+  const handleRegister=useCallback(async newAcc=>{await supa.upsertAccount(newAcc);setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};setProg({});setPseudo(getPseudo(newAcc.username));setCurrentUser(u);storage.set("mx6-session",u);},[]);
   useEffect(()=>{
     if(!currentUser||currentUser.role==="admin"){setUserCards([]);return;}
     const cached=mergeIntegrated(getUCache(currentUser.username),currentUser.username);
@@ -3279,6 +3688,14 @@ function App(){
     setStudyCtx({label,queue});
     setView("study");
   },[userCards,prog,settings]);
+  const startPersonalCourseStudy=useCallback((courseName,pkId)=>{
+    const filtered=userCards.filter(c=>c.personalCourseName===courseName&&(pkId===null||c.packetId===pkId));
+    const queue=buildQueue(filtered,prog,settings);
+    if(!queue.length){alert("Aucune carte à réviser dans ce cours personnel !");return;}
+    const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
+    setStudyCtx({label:`Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`,queue});
+    setView("study");
+  },[userCards,prog,settings]);
   const allCards=useMemo(()=>[
     ...cards,
     ...userCards.filter(c=>c.integrated)
@@ -3385,11 +3802,11 @@ function App(){
   if(view==="landing")   return <Landing onBack={()=>setView("login")} onRegister={()=>setView("register")}/>;
   if(view==="login")     return <LoginView onLogin={handleLogin} onShowLanding={()=>setView("landing")} onRegister={()=>setView("register")} accounts={accounts} onPasswordReset={(em,pwd)=>setAccounts(p=>p.map(a=>a.username===em?{...a,password:pwd}:a))}/>;
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
-  if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]}/>;
-  if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick}/>;
+  if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards}/>;
+  if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)}/>;
   if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")}/>;
-  if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress}/>;
+  if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo}/>;
   return null;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
