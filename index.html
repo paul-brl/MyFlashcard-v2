@@ -593,34 +593,110 @@ const ADMINS = [
 const DEFAULT_SETTINGS = { againMin:1, hardMin:5, goodMin:10, easyDays:4, newCardsPerDay:20, maxReviewsPerDay:100, dailyGroups:[], dailyPackets:[], newCardOrder:"first", newCardEvery:5 };
 const INITIAL_CARDS = [];
 const groupLabel = (g) => g.label + (g.sem===1?" — Sem. 1":" — Sem. 2");
-// ─── SRS ─────────────────────────────────────────────────────────────────────
+// ─── SRS : FSRS (Free Spaced Repetition Scheduler) ────────────────────────────
+// Modèle de mémoire adaptatif (remplace l'ancien SM2 à intervalles/ease fixes).
+// Chaque carte a désormais sa propre stabilité et difficulté mémorielles ; les
+// paliers d'apprentissage en minutes (Again/Hard/Good sur une carte neuve) sont
+// conservés à l'identique — seule la mécanique de "révision" (une fois la carte
+// graduée) est recalculée avec FSRS. Poids par défaut FSRS-4.5 (open-source,
+// projet open-spaced-repetition/fsrs4anki).
+const FSRS_W=[0.4072,1.1829,3.1262,15.4722,7.2102,0.5316,1.0651,0.0234,1.616,0.1544,1.0824,1.9813,0.0953,0.2975,2.2042,0.2407,2.9466,0.5034,0.6567];
+const FSRS_REQUEST_RETENTION=0.90; // cible : ~90% de probabilité de rappel à la prochaine révision
+const clampD=d=>Math.min(10,Math.max(1,d));
+const clampS=s=>Math.max(0.01,s);
+// R(t) = (1 + t / (9×S))^-1 — probabilité de se souvenir après t jours pour une stabilité S.
+function fsrsR(t,S){ return Math.pow(1+t/(9*S),-1); }
+function fsrsInitStability(rating){ return FSRS_W[rating-1]; } // stabilité initiale selon le 1er bouton (Again..Easy)
+function fsrsInitDifficulty(rating){ return clampD(FSRS_W[4]-Math.exp(FSRS_W[5]*(rating-1))+1); }
+// Difficulté après une révision, avec régression vers la moyenne (comme Anki moderne).
+function fsrsNextDifficulty(D,rating){
+  const dPrime=D-FSRS_W[6]*(rating-3);
+  return clampD(FSRS_W[7]*fsrsInitDifficulty(4)+(1-FSRS_W[7])*dPrime);
+}
+// Nouvelle stabilité après un rappel réussi (Difficile / Correct / Facile).
+function fsrsNextStabilityRecall(D,S,R,rating){
+  let inc=Math.exp(FSRS_W[8])*(11-D)*Math.pow(S,-FSRS_W[9])*(Math.exp((1-R)*FSRS_W[10])-1);
+  if(rating===2) inc*=FSRS_W[15]; // Difficile : progression pénalisée
+  if(rating===4) inc*=FSRS_W[16]; // Facile : progression bonifiée
+  return clampS(S*(1+Math.max(0,inc)));
+}
+// Nouvelle stabilité après un oubli (À revoir) : toujours ≤ à la stabilité précédente.
+function fsrsNextStabilityForget(D,S,R){
+  const sFail=FSRS_W[11]*Math.pow(D,-FSRS_W[12])*(Math.pow(S+1,FSRS_W[13])-1)*Math.exp(FSRS_W[14]*(1-R));
+  return clampS(Math.min(sFail,S));
+}
+// Intervalle (jours, arrondi, ≥1) visant la rétention cible.
+// Formule demandée : intervalle = 9 × stabilité × ((1/R) - 1)
+function fsrsIntervalDays(S){
+  const raw=9*S*((1/FSRS_REQUEST_RETENTION)-1);
+  return Math.min(36500,Math.max(1,Math.round(raw)));
+}
+// Migration en douceur des cartes déjà en cours de révision avant l'arrivée de FSRS :
+// on déduit une stabilité/difficulté de départ depuis leur ancien intervalle/ease,
+// sans rien perdre de leur historique ni de leurs données.
+function fsrsMigrateLegacy(prev){
+  if(prev.stability!=null&&prev.difficulty!=null) return {S:prev.stability,D:prev.difficulty};
+  const legacyEase=prev.ease||2.5;
+  const S=Math.max(0.5,prev.interval||1);
+  const D=clampD(10-((legacyEase-1.3)/(3.5-1.3))*9);
+  return {S,D};
+}
 function computeNext(prev,rating,s=DEFAULT_SETTINGS){
-  const {againMin=1,hardMin=5,goodMin=10,easyDays=4}=s;
-  const {state="new",step=0,interval=1,ease=2.5,reps=0,lapses=0,lapseInt=1,next:prevNext}=prev||{};
+  const {againMin=1,hardMin=5,goodMin=10}=s;
+  const p=prev||{};
+  const {state="new",step=0,reps=0,lapses=0,lastReview,reviewHistory=[]}=p;
   const mf=m=>new Date(Date.now()+m*60000).toISOString();
   const df=d=>new Date(Date.now()+d*86400000).toISOString();
-  const base={ease,reps,lapses,lapseInt};
+  const now=new Date().toISOString();
+  const log=entry=>{const h=[...reviewHistory,{date:now,rating,...entry}];return h.length>50?h.slice(h.length-50):h;};
+  // Carte neuve ou encore en apprentissage : paliers en minutes inchangés.
+  // La mémoire FSRS (stabilité/difficulté) démarre à la graduation.
   if(state==="new"||state==="learning"){
-    if(rating===1)return{...base,state:"learning",step:0,interval:againMin,next:mf(againMin)};
-    if(rating===2)return{...base,state:"learning",step:1,interval:hardMin,next:mf(hardMin)};
-    if(rating===3){if(step>=2)return{...base,state:"review",step:0,interval:1,reps:1,lapseInt:0,next:df(1)};return{...base,state:"learning",step:2,interval:goodMin,next:mf(goodMin)};}
-    return{...base,state:"review",step:0,interval:easyDays,reps:1,lapseInt:0,next:df(easyDays)};
+    if(rating===1)return{...p,state:"learning",step:0,interval:againMin,next:mf(againMin),lastReview:now,reviewHistory:log({state:"learning"})};
+    if(rating===2)return{...p,state:"learning",step:1,interval:hardMin,next:mf(hardMin),lastReview:now,reviewHistory:log({state:"learning"})};
+    if(rating===3&&step<2)return{...p,state:"learning",step:2,interval:goodMin,next:mf(goodMin),lastReview:now,reviewHistory:log({state:"learning"})};
+    // Graduation (Correct après les paliers, ou Facile immédiatement) : la mémoire
+    // FSRS est initialisée à partir du bouton choisi. Deux cartes graduées le même
+    // jour avec des boutons différents partent donc avec des rythmes différents —
+    // aucun intervalle fixe.
+    const S=fsrsInitStability(rating),D=fsrsInitDifficulty(rating),iv=fsrsIntervalDays(S);
+    return{state:"review",step:0,stability:S,difficulty:D,reps:1,lapses,interval:iv,lastReview:now,nextReview:df(iv),next:df(iv),
+      reviewHistory:log({state:"review",stabilityAfter:S,difficultyAfter:D,intervalDays:iv})};
   }
+  // Carte mature, due pour une vraie révision : calcul FSRS complet à partir du
+  // temps réellement écoulé depuis la dernière révision.
   if(state==="review"){
-    // Temps réellement écoulé depuis la date prévue (retard). Plafonné à 2x l'intervalle prévu
-    // pour éviter qu'une carte oubliée très longtemps ne bondisse de façon démesurée.
-    const rawDelay=prevNext?Math.max(0,(Date.now()-new Date(prevNext).getTime())/86400000):0;
-    const delay=Math.min(rawDelay,interval*2);
-    if(rating===1){const li=Math.max(1,Math.round(interval*0.2));return{state:"relearning",step:0,interval,ease:Math.max(1.3,ease-0.2),reps,lapses:lapses+1,lapseInt:li,next:mf(againMin)};}
-    let ni,ne=ease;
-    // Comme Anki : le retard ne compte que partiellement selon la note (1/4 en Difficile, 1/2 en Bien, en totalité en Facile).
-    if(rating===2){ni=Math.max(interval+1,Math.round((interval+delay/4)*1.2));ne=Math.max(1.3,ease-0.15);}
-    else if(rating===3){ni=Math.max(interval+1,Math.round((interval+delay/2)*ease));}
-    else{ni=Math.max(interval+1,Math.round((interval+delay)*ease*1.3));ne=Math.min(3.5,ease+0.15);}
-    return{state:"review",step:0,interval:ni,ease:ne,reps:reps+1,lapses,lapseInt:0,next:df(ni)};
+    const {S,D}=fsrsMigrateLegacy(p);
+    const t=lastReview?Math.max(0,(Date.now()-new Date(lastReview).getTime())/86400000):(p.interval||1);
+    const R=fsrsR(t,S);
+    if(rating===1){
+      // Oubli : la stabilité chute, la difficulté augmente, la carte repart sur un
+      // palier court de réapprentissage (comme une carte neuve), avec sa mémoire
+      // déjà réduite en conséquence.
+      const nD=fsrsNextDifficulty(D,1),nS=fsrsNextStabilityForget(D,S,R);
+      return{state:"relearning",step:0,stability:nS,difficulty:nD,reps,lapses:lapses+1,interval:p.interval||1,
+        lastReview:now,next:mf(againMin),nextReview:mf(againMin),
+        reviewHistory:log({state:"relearning",R,stabilityBefore:S,stabilityAfter:nS,difficultyBefore:D,difficultyAfter:nD})};
+    }
+    // Rappel réussi (Difficile / Correct / Facile) : la stabilité progresse selon la
+    // formule FSRS (plus l'intervalle était long et le rappel juste, plus le gain est
+    // grand), la difficulté est mise à jour, et le prochain intervalle vise ~90% de
+    // probabilité de rappel — jamais un palier fixe du type 1→3→7 jours.
+    const nD=fsrsNextDifficulty(D,rating),nS=fsrsNextStabilityRecall(D,S,R,rating),iv=fsrsIntervalDays(nS);
+    return{state:"review",step:0,stability:nS,difficulty:nD,reps:reps+1,lapses,interval:iv,
+      lastReview:now,next:df(iv),nextReview:df(iv),
+      reviewHistory:log({state:"review",R,stabilityBefore:S,stabilityAfter:nS,difficultyBefore:D,difficultyAfter:nD,intervalDays:iv})};
   }
-  if(rating===1)return{...prev,next:mf(againMin)};
-  const ni=Math.max(1,lapseInt);return{state:"review",step:0,interval:ni,ease,reps:reps+1,lapses,lapseInt:0,next:df(ni)};
+  // Carte en réapprentissage (a été oubliée, boucle courte en cours) : un nouveau
+  // "À revoir" prolonge simplement la boucle sans recalcul FSRS (le seul événement
+  // mémoriel est celui de l'oubli initial, déjà appliqué ci-dessus) ; tout autre
+  // bouton fait graduer la carte en révision avec la stabilité déjà réduite par
+  // l'oubli — pas de nouvel intervalle fixe.
+  if(rating===1)return{...p,next:mf(againMin),lastReview:now};
+  const S=p.stability||1,iv=fsrsIntervalDays(S);
+  return{state:"review",step:0,stability:S,difficulty:p.difficulty||fsrsInitDifficulty(1),reps:reps+1,lapses,interval:iv,
+    lastReview:now,next:df(iv),nextReview:df(iv),
+    reviewHistory:log({state:"review",stabilityAfter:S,intervalDays:iv})};
 }
 function getIntervalLabel(prev,rating,s=DEFAULT_SETTINGS){
   const r=computeNext(prev,rating,s);
