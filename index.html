@@ -11,6 +11,7 @@
     @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @keyframes fadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
     @keyframes dotPulse { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
+    @keyframes pointsPop { 0% { opacity:0; transform:translateY(-10px) scale(0.9); } 60% { transform:translateY(0) scale(1.04); } 100% { opacity:1; transform:translateY(0) scale(1); } }
   </style>
   <!-- MathJax: renders \( ... \) and \[ ... \] formulas inside flashcards, exactly
        like Anki's card templates. Loaded before React so it's ready when the first
@@ -35,6 +36,8 @@
 <script type="text/babel">
 const { useState, useEffect, useCallback, useMemo, useRef } = React;
 // ─── Supabase ────────────────────────────────────────────────────────────────
+// Le classement public (onglet Rang) utilise la table optionnelle "daily_points".
+// SQL à exécuter séparément dans Supabase : voir le fichier supabase_daily_points.sql
 const SUPA_URL = "https://cytdlgvtwvofwrgqnkhe.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5dGRsZ3Z0d3ZvZndyZ3Fua2hlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTU4MTIsImV4cCI6MjA5NDU5MTgxMn0.QLQrzrkAjDjEY1x0VJwMguteUYdcGJ_pREX03VElyOs";
 const EDGE_URL = `${SUPA_URL}/functions/v1`;
@@ -221,6 +224,30 @@ const supa = {
       return prog;
     } catch(e){ console.error("getProgress failed:",e); return null; }
   },
+  // ─── Classement public journalier (table optionnelle « daily_points ») ─────
+  // Si la table n'existe pas côté Supabase, tout échoue silencieusement et
+  // l'application continue de fonctionner en mode strictement individuel.
+  upsertDailyPoints: async (username, day, points, cards, displayName, anonymous) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/daily_points?on_conflict=username,day`, {
+        method:"POST",
+        headers:{...H,"Prefer":"resolution=merge-duplicates"},
+        body:JSON.stringify([{username,day,points,cards,display_name:displayName,anonymous:!!anonymous,updated_at:new Date().toISOString()}])
+      });
+      return r.ok;
+    } catch(e){ return false; }
+  },
+  deleteDailyPoints: async (username) => {
+    try { await fetch(`${SUPA_URL}/rest/v1/daily_points?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {}
+  },
+  getLeaderboard: async (day) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/daily_points?day=eq.${day}&select=username,points,cards,display_name,anonymous&order=points.desc&limit=200`,{headers:H});
+      if(!r.ok) return null;
+      const rows=await r.json();
+      return Array.isArray(rows)?rows:null;
+    } catch(e){ return null; }
+  },
   upsertProgress: async (username, cardId, data) => {
     try {
       await fetch(`${SUPA_URL}/rest/v1/progress?on_conflict=username,card_id`, {
@@ -300,6 +327,109 @@ const formatSeconds = (s) => {
   if(h===0)return `${m} min`;
   return `${h}h ${m}min`;
 };
+// ─── Système de points & de rangs (gamification) ─────────────────────────────
+// Couche 100 % indépendante de l'algorithme de répétition espacée : elle ne
+// modifie ni les boutons (À revoir / Difficile / Correct / Facile), ni les
+// intervalles. Elle observe seulement le résultat de chaque notation et décide
+// si la carte rapporte des points ou non.
+const RANKS = [
+  {name:"Bronze I",    min:0,    col:"#a1662f", bg:"#f8f0e7", tier:"Bronze"},
+  {name:"Bronze II",   min:20,   col:"#a1662f", bg:"#f8f0e7", tier:"Bronze"},
+  {name:"Bronze III",  min:55,   col:"#a1662f", bg:"#f8f0e7", tier:"Bronze"},
+  {name:"Argent I",    min:106,  col:"#6b7280", bg:"#f3f4f6", tier:"Argent"},
+  {name:"Argent II",   min:173,  col:"#6b7280", bg:"#f3f4f6", tier:"Argent"},
+  {name:"Argent III",  min:256,  col:"#6b7280", bg:"#f3f4f6", tier:"Argent"},
+  {name:"Or I",        min:355,  col:"#b7791f", bg:"#fdf6e3", tier:"Or"},
+  {name:"Or II",       min:470,  col:"#b7791f", bg:"#fdf6e3", tier:"Or"},
+  {name:"Or III",      min:601,  col:"#b7791f", bg:"#fdf6e3", tier:"Or"},
+  {name:"Platine I",   min:748,  col:"#0f766e", bg:"#ecfdf5", tier:"Platine"},
+  {name:"Platine II",  min:911,  col:"#0f766e", bg:"#ecfdf5", tier:"Platine"},
+  {name:"Platine III", min:1090, col:"#0f766e", bg:"#ecfdf5", tier:"Platine"},
+  {name:"Diamant I",   min:1285, col:"#1d4ed8", bg:"#eff6ff", tier:"Diamant"},
+  {name:"Diamant II",  min:1496, col:"#1d4ed8", bg:"#eff6ff", tier:"Diamant"},
+  {name:"Diamant III", min:1723, col:"#1d4ed8", bg:"#eff6ff", tier:"Diamant"},
+  {name:"Élite",       min:1966, col:"#7c3aed", bg:"#f5f3ff", tier:"Élite"},
+  {name:"Champion",    min:2225, col:"#b91c1c", bg:"#fef2f2", tier:"Champion"},
+  {name:"Unreal",      min:2500, col:"#111827", bg:"#e5e7eb", tier:"Unreal"},
+];
+const RANK_ICONS = {Bronze:"🥉",Argent:"🥈",Or:"🥇",Platine:"💠",Diamant:"💎","Élite":"⚔️",Champion:"👑",Unreal:"🔥"};
+const rankIndexFor = pts => RANKS.reduce((acc,r,i)=>pts>=r.min?i:acc,0);
+const rankFor = pts => RANKS[rankIndexFor(pts)];
+// Valeur de base selon l'ancienneté de la carte
+const AGE_VALUES = {new:10, young:6, mid:3, old:1};
+const AGE_LABELS = {new:"Nouvelle", young:"Jeune", mid:"Intermédiaire", old:"Ancienne"};
+const AGE_DESC   = {new:"jamais vue auparavant", young:"découverte il y a 7 jours ou moins", mid:"découverte entre 7 et 30 jours", old:"découverte il y a 30 jours ou plus"};
+// Bonus selon l'importance (packet) de la carte
+const IMP_BONUS  = {prioritaire:3, important:2, utile:1};
+const IMP_LABELS = {prioritaire:"Prioritaire", important:"Importante", utile:"Utile"};
+// Ancienneté = temps écoulé depuis la première découverte de la carte.
+function cardAgeClass(prev){
+  if(!prev || !prev.state || prev.state==="new") return "new";
+  let fs = prev.firstSeen ? new Date(prev.firstSeen).getTime() : NaN;
+  if(isNaN(fs)){
+    // Cartes révisées avant l'arrivée du système de points : on estime la date de
+    // découverte à partir de l'intervalle courant. Elles ne sont jamais traitées
+    // comme « Nouvelles », pour ne pas offrir 10 points à des cartes déjà acquises.
+    fs = (prev.state==="review"||prev.state==="relearning")
+      ? Date.now()-((prev.interval||1)+1)*86400000
+      : Date.now();
+  }
+  const days=(Date.now()-fs)/86400000;
+  if(days<=7)  return "young";
+  if(days<30)  return "mid";
+  return "old";
+}
+// Prochain intervalle généré par l'algorithme, exprimé en jours.
+function nextIntervalDays(np){
+  if(!np) return 0;
+  if(np.state==="learning"||np.state==="relearning") return 0; // minutes → 0 point
+  if(np.next){
+    const d=(new Date(np.next).getTime()-Date.now())/86400000;
+    if(!isNaN(d)) return d;
+  }
+  return np.interval||0;
+}
+// Combien vaut cette notation ? (avant application de l'anti-farming)
+function cardPointValue(prev,np,packetId){
+  const age=cardAgeClass(prev);
+  if(nextIntervalDays(np)<0.999) return {points:0,age,base:0,bonus:0,reason:"short"};
+  const base=AGE_VALUES[age]||0;
+  const bonus=IMP_BONUS[packetId]||0;
+  return {points:base+bonus,age,base,bonus,packetId,reason:"ok"};
+}
+// ─── Stockage des points (localStorage, par utilisateur) ─────────────────────
+const emptyPointsDay = () => ({points:0,cards:0,byAge:{new:0,young:0,mid:0,old:0},byImp:{prioritaire:0,important:0,utile:0},scored:{}});
+const getPoints = u => { try{ const v=JSON.parse(localStorage.getItem(`mx6-points-${u}`)||"null"); return (v&&v.days)?v:{days:{}}; }catch{ return {days:{}}; } };
+const savePoints = (u,p) => { try{
+  const keys=Object.keys(p.days).sort();
+  if(keys.length>60) keys.slice(0,keys.length-60).forEach(k=>{ delete p.days[k]; }); // on garde 60 jours
+  localStorage.setItem(`mx6-points-${u}`,JSON.stringify(p));
+}catch{} };
+const todayPoints = u => { const p=getPoints(u); return p.days[dateKey()]||emptyPointsDay(); };
+// Attribution effective. Renvoie null si la carte ne rapporte rien.
+// Anti-farming : une même carte ne peut rapporter des points qu'UNE SEULE FOIS
+// par jour, même si elle repasse plusieurs fois dans la file de révision.
+function awardPoints(username,cardId,prev,np,packetId){
+  if(!username) return null;
+  const res=cardPointValue(prev,np,packetId);
+  if(res.points<=0) return null;
+  const store=getPoints(username), key=dateKey();
+  const day=store.days[key]||emptyPointsDay();
+  if(!day.scored) day.scored={};
+  if(day.scored[cardId]) return null; // déjà comptabilisée aujourd'hui
+  day.scored[cardId]=res.points;
+  day.points+=res.points;
+  day.cards+=1;
+  day.byAge[res.age]=(day.byAge[res.age]||0)+res.points;
+  if(packetId&&day.byImp[packetId]!==undefined) day.byImp[packetId]+=res.points;
+  store.days[key]=day;
+  savePoints(username,store);
+  return {...res,total:day.points};
+}
+// ─── Préférences de classement public ────────────────────────────────────────
+const getRankPrefs  = u => ({share:false,anon:false,...(storage.get(`mx6-rankprefs-${u}`)||{})});
+const saveRankPrefs = (u,p) => storage.set(`mx6-rankprefs-${u}`,p);
+const rankDisplayName = (username,anon) => anon?"Anonyme":(String(username).includes("@")?String(username).split("@")[0]:String(username));
 const formatNextDue = date => {
   const diff=date-Date.now();
   if(diff<=0)return"maintenant";
@@ -1848,14 +1978,243 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
     {delId&&<Modal onClose={()=>setDelId(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer cette carte ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>Action irréversible.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delId);setDelId(null);}}>Supprimer</Btn><Btn onClick={()=>setDelId(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
+// ─── Rang (gamification) ──────────────────────────────────────────────────────
+function RankBadge({pts,size=92}){
+  const i=rankIndexFor(pts),r=RANKS[i];
+  return <div style={{width:size,height:size,borderRadius:"50%",background:r.bg,border:`3px solid ${r.col}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+    <span style={{fontSize:size*0.3,lineHeight:1}}>{RANK_ICONS[r.tier]||"🏆"}</span>
+    <span style={{fontFamily:mono,fontSize:size*0.11,letterSpacing:1,color:r.col,fontWeight:700,marginTop:4,textAlign:"center",padding:"0 4px"}}>{r.name.toUpperCase()}</span>
+  </div>;
+}
+function RankTab({username,tick}){
+  const [refresh,setRefresh]=useState(0);
+  const [sub,setSub]=useState("board");
+  const [prefs,setPrefs]=useState(()=>getRankPrefs(username));
+  const [board,setBoard]=useState(undefined); // undefined = chargement · null = indisponible
+  const data=useMemo(()=>getPoints(username),[username,tick,refresh]);
+  const today=data.days[dateKey()]||emptyPointsDay();
+  const pts=today.points;
+  const ri=rankIndexFor(pts),rank=RANKS[ri],next=RANKS[ri+1]||null;
+  const pctToNext=next?Math.min(1,(pts-rank.min)/(next.min-rank.min)):1;
+  useEffect(()=>{
+    let alive=true;
+    (async()=>{
+      setBoard(b=>b===undefined?undefined:b);
+      if(prefs.share){
+        const d=todayPoints(username);
+        await supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
+      }
+      const rows=await supa.getLeaderboard(dateKey());
+      if(alive) setBoard(rows);
+    })();
+    return()=>{alive=false;};
+  },[username,prefs.share,prefs.anon,tick,refresh]);
+  const applyPrefs=async p=>{
+    setPrefs(p); saveRankPrefs(username,p);
+    if(p.share){
+      const d=todayPoints(username);
+      await supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,p.anon),p.anon);
+    } else {
+      await supa.deleteDailyPoints(username);
+    }
+    setRefresh(r=>r+1);
+  };
+  // Historique 30 jours
+  const history=useMemo(()=>{
+    const out=[];
+    for(let i=29;i>=0;i--){
+      const k=dateKey(new Date(Date.now()-i*86400000));
+      out.push({key:k,pts:data.days[k]?.points||0,cards:data.days[k]?.cards||0});
+    }
+    return out;
+  },[data]);
+  const maxHist=Math.max(1,...history.map(h=>h.pts));
+  const best=history.reduce((a,h)=>Math.max(a,h.pts),0);
+  const sum30=history.reduce((a,h)=>a+h.pts,0);
+  const Toggle=({on,onClick,children,col})=>(
+    <button onClick={onClick} style={{fontFamily:font,fontSize:12,fontWeight:500,padding:"8px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${on?(col||C.accent):C.border}`,background:on?(col?col+"14":C.accentBg):"transparent",color:on?(col||C.accent):C.textMed,display:"flex",alignItems:"center",gap:8}}>
+      <span style={{width:15,height:15,borderRadius:4,border:`1.5px solid ${on?(col||C.accent):C.border}`,background:on?(col||C.accent):"transparent",color:"#fff",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{on?"✓":""}</span>
+      {children}
+    </button>
+  );
+  const SubTab=({id,label})=><button onClick={()=>setSub(id)} style={{fontFamily:font,fontSize:12,fontWeight:sub===id?600:400,padding:"7px 14px",cursor:"pointer",border:"none",borderBottom:`2px solid ${sub===id?"#b7791f":"transparent"}`,background:"transparent",color:sub===id?"#b7791f":C.textMed,marginBottom:-1}}>{label}</button>;
+  const myName=rankDisplayName(username,prefs.anon);
+  return(
+    <div style={{animation:"fadeIn 0.18s ease"}}>
+      <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Rang du jour</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 22px"}}>Les points sont remis à zéro chaque jour à minuit · seules les cartes réellement consolidées en rapportent</p>
+
+      {/* Carte principale */}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"22px",display:"flex",gap:22,alignItems:"center",flexWrap:"wrap",marginBottom:16}}>
+        <RankBadge pts={pts}/>
+        <div style={{flex:1,minWidth:220}}>
+          <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 6px"}}>Rang actuel</p>
+          <p style={{fontFamily:serif,fontSize:26,margin:"0 0 2px",color:rank.col}}>{rank.name}</p>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 14px"}}><strong style={{color:C.text,fontSize:16}}>{pts}</strong> point{pts>1?"s":""} aujourd'hui · {today.cards} carte{today.cards>1?"s":""} comptabilisée{today.cards>1?"s":""}</p>
+          <div style={{height:9,background:"#eeebe5",borderRadius:6,overflow:"hidden"}}>
+            <div style={{height:9,width:`${pctToNext*100}%`,background:rank.col,borderRadius:6,transition:"width 0.4s"}}/>
+          </div>
+          <p style={{fontSize:11,color:C.textLt,margin:"7px 0 0"}}>
+            {next?<>Encore <strong style={{color:C.text}}>{next.min-pts}</strong> point{next.min-pts>1?"s":""} pour atteindre <strong style={{color:next.col}}>{next.name}</strong></>:<>Rang maximum atteint — bravo 🔥</>}
+          </p>
+        </div>
+      </div>
+
+      {/* Détail des points du jour */}
+      {pts>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:12,marginBottom:20}}>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px"}}>
+          <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 12px"}}>Points par ancienneté</p>
+          {["new","young","mid","old"].map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:12,color:C.textMed}}>
+            <span>{AGE_LABELS[a]} <span style={{fontFamily:mono,fontSize:9,color:C.textLt}}>({AGE_VALUES[a]} pt{AGE_VALUES[a]>1?"s":""})</span></span>
+            <strong style={{color:today.byAge[a]?C.text:C.textLt}}>{today.byAge[a]||0}</strong>
+          </div>)}
+        </div>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px"}}>
+          <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 12px"}}>Points par importance</p>
+          {["prioritaire","important","utile"].map(k=><div key={k} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",fontSize:12,color:C.textMed}}>
+            <span style={{color:pC(k)}}>{IMP_LABELS[k]} <span style={{fontFamily:mono,fontSize:9,color:C.textLt}}>(+{IMP_BONUS[k]})</span></span>
+            <strong style={{color:today.byImp[k]?C.text:C.textLt}}>{today.byImp[k]||0}</strong>
+          </div>)}
+        </div>
+      </div>}
+
+      <div style={{display:"flex",gap:0,marginBottom:16,borderBottom:`1px solid ${C.border}`,flexWrap:"wrap"}}>
+        <SubTab id="board" label="🌍 Classement"/>
+        <SubTab id="history" label="📈 Historique 30 j"/>
+        <SubTab id="ladder" label="🏅 Les 18 rangs"/>
+        <SubTab id="help" label="❓ Comment gagner des points"/>
+      </div>
+
+      {sub==="board"&&<div>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:14}}>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Le classement public est <strong>facultatif</strong>. Tu peux y participer sous ton nom d'utilisateur ou de façon anonyme, et te retirer à tout moment (ta ligne est alors supprimée).</p>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <Toggle on={prefs.share} col="#b7791f" onClick={()=>applyPrefs({...prefs,share:!prefs.share})}>Participer au classement public</Toggle>
+            <Toggle on={prefs.anon} col={C.accent} onClick={()=>prefs.share&&applyPrefs({...prefs,anon:!prefs.anon})}>Apparaître comme « Anonyme »</Toggle>
+          </div>
+          {prefs.share&&<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0"}}>Tu apparais sous le nom : <strong style={{color:C.text}}>{myName}</strong></p>}
+        </div>
+        {board===undefined?(
+          <p style={{fontSize:13,color:C.textLt,padding:"20px 0",textAlign:"center"}}>Chargement du classement…</p>
+        ):board===null?(
+          <div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"22px",background:C.surface}}>
+            <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le classement collectif n'est pas disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"#f0ece6",padding:"1px 5px",borderRadius:4}}>daily_points</code> n'existe pas encore dans Supabase. Ton rang personnel fonctionne normalement.</p>
+            <p style={{fontSize:11,color:C.textLt,margin:0,lineHeight:1.6}}>À créer une fois dans l'éditeur SQL Supabase (voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_daily_points.sql</code>).</p>
+          </div>
+        ):board.length===0?(
+          <p style={{fontSize:13,color:C.textLt,padding:"20px 0",textAlign:"center"}}>Personne n'a encore marqué de points aujourd'hui. Sois le premier !</p>
+        ):(
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+            {board.map((row,i)=>{
+              const me=row.username===username;
+              const r=rankFor(row.points||0);
+              const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
+              return <div key={row.username+i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",borderTop:i?`1px solid ${C.border}`:"none",background:me?C.accentBg:"transparent"}}>
+                <span style={{fontFamily:mono,fontSize:12,color:C.textLt,minWidth:30,textAlign:"right"}}>{medal||`#${i+1}`}</span>
+                <span style={{flex:1,fontSize:13,fontWeight:me?600:400,color:me?C.accent:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {row.anonymous?"Anonyme":(row.display_name||rankDisplayName(row.username,false))}{me&&<span style={{fontFamily:mono,fontSize:9,marginLeft:8,color:C.accent}}>TOI</span>}
+                </span>
+                <span style={{fontFamily:mono,fontSize:10,padding:"2px 8px",borderRadius:10,background:r.bg,color:r.col,fontWeight:700,whiteSpace:"nowrap"}}>{RANK_ICONS[r.tier]} {r.name}</span>
+                <strong style={{fontFamily:serif,fontSize:16,minWidth:52,textAlign:"right"}}>{row.points}</strong>
+              </div>;
+            })}
+          </div>
+        )}
+      </div>}
+
+      {sub==="history"&&<div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 8px"}}>Meilleur jour</p>
+            <p style={{fontFamily:serif,fontSize:26,margin:"0 0 2px"}}>{best}</p>
+            <p style={{fontSize:11,color:C.textMed,margin:0}}>{rankFor(best).name}</p>
+          </div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 8px"}}>Total 30 jours</p>
+            <p style={{fontFamily:serif,fontSize:26,margin:"0 0 2px"}}>{sum30}</p>
+            <p style={{fontSize:11,color:C.textMed,margin:0}}>points cumulés</p>
+          </div>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 8px"}}>Jours marqués</p>
+            <p style={{fontFamily:serif,fontSize:26,margin:"0 0 2px"}}>{history.filter(h=>h.pts>0).length}</p>
+            <p style={{fontSize:11,color:C.textMed,margin:0}}>sur 30</p>
+          </div>
+        </div>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px"}}>
+          <p style={{fontFamily:serif,fontSize:16,margin:"0 0 16px"}}>Points par jour</p>
+          <div style={{display:"flex",alignItems:"flex-end",gap:3,height:130}}>
+            {history.map(h=>{
+              const r=rankFor(h.pts);
+              return <div key={h.key} title={`${h.key} · ${h.pts} pts · ${h.cards} cartes`} style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",height:"100%"}}>
+                <div style={{height:`${Math.max(h.pts?4:1,(h.pts/maxHist)*100)}%`,background:h.pts?r.col:"#e8e5e0",borderRadius:"3px 3px 0 0",transition:"height 0.3s"}}/>
+              </div>;
+            })}
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
+            <span style={{fontFamily:mono,fontSize:9,color:C.textLt}}>il y a 30 j</span>
+            <span style={{fontFamily:mono,fontSize:9,color:C.textLt}}>aujourd'hui</span>
+          </div>
+        </div>
+      </div>}
+
+      {sub==="ladder"&&<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        {RANKS.map((r,i)=>{
+          const cur=i===ri, reached=pts>=r.min;
+          return <div key={r.name} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",borderTop:i?`1px solid ${C.border}`:"none",background:cur?r.bg:"transparent",opacity:reached||cur?1:0.65}}>
+            <span style={{fontSize:16,width:24,textAlign:"center"}}>{RANK_ICONS[r.tier]}</span>
+            <span style={{flex:1,fontSize:13,fontWeight:cur?700:400,color:cur?r.col:C.text}}>{r.name}{cur&&<span style={{fontFamily:mono,fontSize:9,marginLeft:8,color:r.col}}>RANG ACTUEL</span>}</span>
+            <span style={{fontFamily:mono,fontSize:11,color:reached?C.good:C.textLt}}>{reached?"✓ ":""}{r.min.toLocaleString("fr-FR")} pts</span>
+          </div>;
+        })}
+      </div>}
+
+      {sub==="help"&&<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"22px",fontSize:13,color:C.textMed,lineHeight:1.75}}>
+        <p style={{fontFamily:serif,fontSize:17,color:C.text,margin:"0 0 10px"}}>1 · Seules les cartes réellement acquises rapportent</p>
+        <p style={{margin:"0 0 8px"}}>Quand tu cliques sur un bouton, on regarde le <strong>prochain intervalle</strong> proposé par l'algorithme (celui affiché sur le bouton) :</p>
+        <ul style={{margin:"0 0 18px 18px"}}>
+          <li>intervalle <strong>inférieur à 1 jour</strong> (minutes, heures) → <strong>0 point</strong> ;</li>
+          <li>intervalle <strong>d'au moins 1 jour</strong> → la carte rapporte des points.</li>
+        </ul>
+        <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",margin:"0 0 18px"}}>
+          <p style={{fontFamily:mono,fontSize:10,letterSpacing:1,color:C.textLt,margin:"0 0 6px",textTransform:"uppercase"}}>Exemple — carte en apprentissage</p>
+          <p style={{fontSize:12,margin:0}}>À revoir 1 min · Difficile 5 min · Correct 10 min · <strong style={{color:C.easy}}>Facile 4 jours</strong> → seul <strong>Facile</strong> rapporte des points.</p>
+          <p style={{fontFamily:mono,fontSize:10,letterSpacing:1,color:C.textLt,margin:"12px 0 6px",textTransform:"uppercase"}}>Exemple — carte bien connue</p>
+          <p style={{fontSize:12,margin:0}}>À revoir 10 min · <strong style={{color:C.hard}}>Difficile 1 j</strong> · <strong style={{color:C.good}}>Correct 5 j</strong> · <strong style={{color:C.easy}}>Facile 20 j</strong> → les trois derniers rapportent des points.</p>
+        </div>
+        <p style={{fontFamily:serif,fontSize:17,color:C.text,margin:"0 0 10px"}}>2 · Valeur d'une carte</p>
+        <p style={{margin:"0 0 8px"}}><strong>Points = valeur d'ancienneté + bonus d'importance</strong></p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,margin:"0 0 18px"}}>
+          <div style={{border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,margin:"0 0 8px",textTransform:"uppercase"}}>Ancienneté</p>
+            {["new","young","mid","old"].map(a=><div key={a} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span>{AGE_LABELS[a]} <span style={{color:C.textLt,fontSize:11}}>— {AGE_DESC[a]}</span></span><strong style={{whiteSpace:"nowrap",marginLeft:8}}>{AGE_VALUES[a]} pt{AGE_VALUES[a]>1?"s":""}</strong></div>)}
+          </div>
+          <div style={{border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px"}}>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,margin:"0 0 8px",textTransform:"uppercase"}}>Importance</p>
+            {["prioritaire","important","utile"].map(k=><div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0"}}><span style={{color:pC(k)}}>{IMP_LABELS[k]}</span><strong>+{IMP_BONUS[k]}</strong></div>)}
+          </div>
+        </div>
+        <p style={{fontSize:12,color:C.textLt,margin:"0 0 18px"}}>Exemple : une carte <strong>nouvelle</strong> (10) et <strong>prioritaire</strong> (+3) notée « Facile » (4 jours) rapporte <strong style={{color:C.text}}>13 points</strong>.</p>
+        <p style={{fontFamily:serif,fontSize:17,color:C.text,margin:"0 0 10px"}}>3 · Protections anti-triche</p>
+        <ul style={{margin:"0 0 18px 18px"}}>
+          <li><strong>Une carte = des points une seule fois par jour.</strong> Repasser dix fois la même carte dans la journée ne rapporte rien de plus.</li>
+          <li><strong>La phase d'apprentissage ne rapporte rien.</strong> Cliquer en boucle sur « À revoir » ou « Difficile » pendant l'apprentissage laisse l'intervalle sous la journée : 0 point.</li>
+          <li><strong>Le farming de cartes faciles est peu rentable.</strong> Une carte ancienne, déjà consolidée, ne vaut qu'1 point : l'effort utile (nouvelles cartes, cartes difficiles, cartes prioritaires) est mieux payé.</li>
+          <li><strong>Remise à zéro quotidienne.</strong> Le classement porte uniquement sur la journée en cours : c'est la régularité qui compte, pas le cumul.</li>
+        </ul>
+        <p style={{fontSize:12,color:C.textLt,margin:0}}>L'algorithme de répétition espacée (boutons et intervalles) reste strictement inchangé : le système de points ne fait que l'observer.</p>
+      </div>}
+    </div>
+  );
+}
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner}){
+function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner,pointsTick}){
   const isAdmin=currentUser.role==="admin";
   const userGroups=currentUser.plan?.groups||[];
   const fullGroups=currentUser.plan?.fullGroups||[];
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
   const displayName=currentUser.username.includes("@")?currentUser.username.split("@")[0]:currentUser.username;
   const [showUpgrade,setShowUpgrade]=useState(false);
+  const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
   const TABS=[
     {id:"sem1",label:"Semestre 1",sem:1,price:"99 €"},
@@ -2017,8 +2376,11 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         {!isAdmin&&<button onClick={()=>setActiveTab("shop")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="shop"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="shop"?C.imp:C.border}`,background:activeTab==="shop"?C.impBg:"transparent",color:activeTab==="shop"?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>🛒 Acheter par matière</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("mes-cartes")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="mes-cartes"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="mes-cartes"?"#7c3aed":C.border}`,background:activeTab==="mes-cartes"?"#f5f3ff":"transparent",color:activeTab==="mes-cartes"?"#7c3aed":C.textMed,display:"flex",alignItems:"center",gap:6}}>✏️ Mes flashcards{(userCards||[]).length>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#7c3aed",color:"#fff"}}>{(userCards||[]).length}</span>}</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("stats")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="stats"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="stats"?C.accent:C.border}`,background:activeTab==="stats"?C.accentBg:"transparent",color:activeTab==="stats"?C.accent:C.textMed,display:"flex",alignItems:"center",gap:6}}>📊 Statistiques</button>}
+        {!isAdmin&&<button onClick={()=>setActiveTab("rank")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="rank"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="rank"?"#b7791f":C.border}`,background:activeTab==="rank"?"#fdf6e3":"transparent",color:activeTab==="rank"?"#b7791f":C.textMed,display:"flex",alignItems:"center",gap:6}}>🏆 Rang{todayPts>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#b7791f",color:"#fff"}}>{todayPts}</span>}</button>}
       </div>
-      {activeTab==="stats"&&!isAdmin?(
+      {activeTab==="rank"&&!isAdmin?(
+        <RankTab username={currentUser.username} tick={pointsTick}/>
+      ):activeTab==="stats"&&!isAdmin?(
         <StatsTab username={currentUser.username} progress={progress} allCards={allCardsProp||[...cards,...(userCards||[]).filter(c=>c.integrated)]} onUnbury={onUnbury}/>
       ):activeTab==="mes-cartes"&&!isAdmin?(
         <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser}/>
@@ -2044,7 +2406,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
 }
 // ─── Study ────────────────────────────────────────────────────────────────────
 function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isAdmin,progress}){
-  const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false);
+  const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0);
   useEffect(()=>{
     const card=localQ[idx];
     if(card&&!card.front&&card.card_type==='occlusion'){
@@ -2077,6 +2439,12 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
     const elapsed=Date.now()-cardStart.current;
     setStats(s=>({total:s.total+1,correct:s.correct+(rating>=3?1:0)}));
     const np=await onRate(card,rating,elapsed);
+    if(np&&np.__gain){
+      const g=np.__gain,fid=Date.now()+Math.random();
+      setSessionPts(p=>p+g.points);
+      setGainFlash({id:fid,...g});
+      setTimeout(()=>setGainFlash(f=>(f&&f.id===fid)?null:f),1500);
+    }
     cardStart.current=Date.now();
     const q=[...localQ];
     if(np.state==="learning"||np.state==="relearning"){q.splice(idx,1);q.splice(Math.min(idx+4,q.length),0,card);}else q.splice(idx,1);
@@ -2095,9 +2463,13 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
   const cardProg=progress?.[card.id];
   const isNewCard=!cardProg||cardProg.state==="new";
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
-    <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span><button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button></div>}/>
+    <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"#fdf6e3",border:"1px solid #e6d3a3",color:"#b7791f"}}>🏆 +{sessionPts}</span>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span><button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button></div>}/>
     <div style={{height:3,background:C.border}}><div style={{height:3,background:col,width:`${(idx/Math.max(1,localQ.length))*100}%`,transition:"width 0.3s"}}/></div>
     {buryFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#374151",color:"#fff",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🙈 Carte enfouie — plus dans tes révisions</div>}
+    {gainFlash&&<div key={gainFlash.id} style={{position:"fixed",top:88,right:24,zIndex:210,background:"#fdf6e3",border:"1.5px solid #b7791f",color:"#8a5a00",borderRadius:10,padding:"10px 16px",fontFamily:font,boxShadow:"0 6px 20px rgba(0,0,0,0.12)",animation:"pointsPop 0.35s ease",textAlign:"right"}}>
+      <div style={{fontFamily:serif,fontSize:22,fontWeight:600,lineHeight:1}}>+{gainFlash.points} pts</div>
+      <div style={{fontSize:10,color:"#a97c2a",marginTop:3}}>{AGE_LABELS[gainFlash.age]} {gainFlash.base} {gainFlash.bonus?`+ ${IMP_LABELS[gainFlash.packetId]||""} ${gainFlash.bonus}`:""} · {gainFlash.total} pts aujourd'hui</div>
+    </div>}
     <div style={{maxWidth:560,margin:"0 auto",padding:"28px 24px 0"}}>
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18,alignItems:"center"}}>
         {isNewCard&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",padding:"3px 8px",borderRadius:3,background:"#fef2f2",color:"#dc2626",border:"1px solid #fca5a5",fontWeight:700}}>Nouveau</span>}
@@ -2409,6 +2781,19 @@ function Landing({onBack,onRegister}){
 function App(){
   const [supaError,setSupaError]=useState(null);
   const [view,setView]=useState("loading"),[currentUser,setCurrentUser]=useState(null),[cards,setCards]=useState([]),[prog,setProg]=useState({}),[settings,setSettings]=useState(DEFAULT_SETTINGS),[accounts,setAccounts]=useState([]),[studyCtx,setStudyCtx]=useState(null),[paymentStatus,setPaymentStatus]=useState(null);
+  // ─── Gamification : points du jour + envoi (facultatif) au classement ──────
+  const [pointsTick,setPointsTick]=useState(0);
+  const pointsSyncTimer=useRef(null);
+  const syncDailyPoints=useCallback(username=>{
+    if(!username)return;
+    const prefs=getRankPrefs(username);
+    if(!prefs.share)return; // participation au classement public desactivee
+    if(pointsSyncTimer.current)clearTimeout(pointsSyncTimer.current);
+    pointsSyncTimer.current=setTimeout(()=>{
+      const d=todayPoints(username);
+      supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
+    },2000);
+  },[]);
   const [userCards,setUserCards]=useState([]);
   const [userCardEditor,setUserCardEditor]=useState(null);
   const [userCardKey,setUserCardKey]=useState(0);
@@ -2880,12 +3265,18 @@ function App(){
     const preserved={};
     if(existing.packetOverride)preserved.packetOverride=existing.packetOverride;
     if(existing.buried)preserved.buried=existing.buried;
-    saveProg({...prog,[card.id]:{...np,...preserved}},card.id);
+    // Date de premiere decouverte : sert au calcul de l'anciennete (points).
+    const firstSeen=existing.firstSeen||new Date().toISOString();
+    saveProg({...prog,[card.id]:{...np,...preserved,firstSeen}},card.id);
+    let gain=null;
     if(currentUser&&currentUser.role!=="admin"){
       recordStat(currentUser.username,rating>=3,elapsedMs,wasNew);
+      // Gamification : n'influence en rien l'algorithme ci-dessus.
+      gain=awardPoints(currentUser.username,card.id,existing,np,effPkt(card,prog));
+      if(gain){setPointsTick(t=>t+1);syncDailyPoints(currentUser.username);}
     }
-    return np;
-  },[prog,saveProg,settings,currentUser]);
+    return gain?{...np,__gain:gain}:np;
+  },[prog,saveProg,settings,currentUser,syncDailyPoints]);
   const handleBury=useCallback((card)=>{
     const existing=prog[card.id]||{};
     saveProg({...prog,[card.id]:{...existing,buried:true}},card.id);
@@ -2919,7 +3310,7 @@ function App(){
   if(view==="login")     return <LoginView onLogin={handleLogin} onShowLanding={()=>setView("landing")} onRegister={()=>setView("register")} accounts={accounts} onPasswordReset={(em,pwd)=>setAccounts(p=>p.map(a=>a.username===em?{...a,password:pwd}:a))}/>;
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
   if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]}/>;
-  if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)}/>;
+  if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick}/>;
   if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")}/>;
   if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress}/>;
