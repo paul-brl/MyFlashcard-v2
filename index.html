@@ -238,6 +238,18 @@ const supa = {
       return r.ok;
     } catch { return false; }
   },
+  // Matières réellement payées. Écrit dans une requête SÉPARÉE de updateGroups :
+  // si la colonne "paid_groups" n'existe pas encore côté Supabase, seul cet appel
+  // échoue (silencieusement) et la mise à jour des groupes reste effective.
+  updatePaidGroups: async (username, paidGroups) => {
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`, {
+        method: "PATCH", headers: { ...H, "Prefer": "return=minimal" },
+        body: JSON.stringify({ paid_groups: [...new Set(paidGroups||[])] }),
+      });
+      return r.ok;
+    } catch { return false; }
+  },
   // Fetch a single user's account (lightweight alternative to getAccounts)
   getAccount: async (username) => {
     try {
@@ -410,23 +422,56 @@ const PSEUDO_WARNING="Choisis un pseudonyme correct : tout pseudonyme vulgaire, 
 const getExtraGroups = u => { try { return JSON.parse(localStorage.getItem(`mx6-extra-${u}`) || "[]"); } catch { return []; } };
 const saveExtraGroups = (u, gs) => { try { localStorage.setItem(`mx6-extra-${u}`, JSON.stringify([...new Set(gs)])); } catch {} };
 const toSubscriptionPlan = pid => ["sem1","sem2","both","prerentree"].includes(pid) ? pid : "prerentree";
+// ─── Droits d'accès ───────────────────────────────────────────────────────────
+// Deux notions DISTINCTES, à ne jamais confondre :
+//
+//  · groups     → matières VISIBLES sur le tableau de bord. Contient toujours les
+//                 5 matières offertes, car tout le monde y a droit au cours 1.
+//  · paidGroups → matières RÉELLEMENT PAYÉES, seules à donner accès aux cours 2+.
+//
+// Un abonnement actif ("sem1"/"sem2"/"both") ou l'achat d'une matière à l'unité
+// alimente paidGroups. Le plan gratuit ("prerentree") n'y ajoute jamais rien.
+const isPaidPlan = planId => ["sem1","sem2","both"].includes(planId);
 const computeGroups = (subscriptionPlanId, supaGroups, extraGroups) => {
   const basePlan = PLANS.find(p => p.id === subscriptionPlanId);
   const baseGroups = basePlan?.groups || [];
-  return [...new Set([...FREE_GROUP_IDS, ...baseGroups, ...supaGroups, ...extraGroups])];
+  return [...new Set([...FREE_GROUP_IDS, ...baseGroups, ...(supaGroups||[]), ...(extraGroups||[])])];
 };
-// Groupes en accès COMPLET (tous les cours) : la base gratuite (plan "prerentree")
-// ne donne accès qu'au cours 1 des 5 matières offertes, donc on l'exclut ici.
-const computeFullGroups = (subscriptionPlanId, supaGroups, extraGroups) => {
+// Accès COMPLET (tous les cours d'une matière). N'accepte QUE des droits payants :
+// le second argument doit être la liste des matières achetées, jamais la colonne
+// "groups" de Supabase (qui contient aussi les matières offertes).
+const computeFullGroups = (subscriptionPlanId, paidGroups, extraGroups) => {
   const basePlan = PLANS.find(p => p.id === subscriptionPlanId);
-  const fullBase = subscriptionPlanId === "prerentree" ? [] : (basePlan?.groups || []);
-  return [...new Set([...fullBase, ...supaGroups, ...extraGroups])];
+  const fullBase = isPaidPlan(subscriptionPlanId) ? (basePlan?.groups || []) : [];
+  return [...new Set([...fullBase, ...(paidGroups||[]), ...(extraGroups||[])])];
 };
-// Un cours est accessible si le groupe est en accès complet, ou si c'est le cours 1
-// d'une des 5 matières offertes gratuitement.
+// Reconstitue les matières payées d'un compte, de façon fiable et rétro-compatible.
+// C'est LE point d'entrée unique : tous les chemins (connexion, rechargement,
+// synchronisation différée) doivent passer par ici pour rester cohérents.
+//
+//  1. accounts.paid_groups → source de vérité si la colonne existe ;
+//  2. sinon, repli hérité : accounts.groups PRIVÉ des matières offertes. Cela
+//     restitue tous les achats de matières non gratuites déjà effectués, sans
+//     jamais accorder d'accès complet aux 5 matières offertes ;
+//  3. les achats mémorisés localement (mx6-extra-*) sont toujours ajoutés, ce qui
+//     couvre l'achat d'une matière pourtant offerte (ex. Biophysique) — cas que
+//     le repli hérité ne peut pas deviner.
+const derivePaidGroups = (acc, username) => {
+  const planId = toSubscriptionPlan(acc?.plan_id || acc?.planId);
+  const planGroups = isPaidPlan(planId) ? (PLANS.find(p => p.id === planId)?.groups || []) : [];
+  const explicit = Array.isArray(acc?.paid_groups) ? acc.paid_groups : null;
+  const legacy = explicit === null
+    ? (Array.isArray(acc?.groups) ? acc.groups : []).filter(g => !FREE_GROUP_IDS.includes(g))
+    : explicit;
+  const local = username ? getExtraGroups(username) : [];
+  return [...new Set([...planGroups, ...legacy, ...local])];
+};
+// Un cours est accessible si la matière est payée (accès complet), ou si c'est le
+// cours 1 d'une des matières offertes. La Biostatistique n'étant pas dans
+// FREE_GROUP_IDS, aucun de ses cours n'est offert.
 const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
-  if (fullGroups.includes(groupId)) return true;
-  if (num === 1 && FREE_GROUP_IDS.includes(groupId) && userGroups.includes(groupId)) return true;
+  if ((fullGroups||[]).includes(groupId)) return true;
+  if (num === 1 && FREE_GROUP_IDS.includes(groupId) && (userGroups||[]).includes(groupId)) return true;
   return false;
 };
 // ─── Statistics helpers ───────────────────────────────────────────────────────
@@ -3373,6 +3418,7 @@ function App(){
   },[]);
   useEffect(()=>{
     async function init(){
+      let loadedAccounts=[];
       try {
         const savedSet=storage.get("mx6-settings");
         if(savedSet)setSettings({...DEFAULT_SETTINGS,...savedSet});
@@ -3407,7 +3453,6 @@ function App(){
             setCards(sortCardsGlobally(loadedCards));
           } catch(sortErr){ console.warn("Sort failed:",sortErr); setCards(loadedCards); }
         } else if(loadedCards&&loadedCards.length===0){ setCards([]); }
-        let loadedAccounts=[];
         try {
           const r=await fetch(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H});
           const d=await r.json();
@@ -3444,8 +3489,18 @@ function App(){
           }catch{}
           const extra=getExtraGroups(saved.username);
           const restoredGroups=computeGroups(planId,groups,extra);
-          const priorFull=Array.isArray(saved.plan?.fullGroups)?saved.plan.fullGroups:[];
-          const restoredFullGroups=computeFullGroups(planId,priorFull,extra);
+          // Les droits ne sont JAMAIS repris tels quels depuis la session stockée
+          // (elle pourrait être périmée ou modifiée à la main) : ils sont
+          // recalculés depuis le compte Supabase à chaque rechargement.
+          const freshAcc=loadedAccounts.find(a=>a.username===saved.username)||null;
+          if(freshAcc){
+            const accPlan=toSubscriptionPlan(freshAcc.plan_id||freshAcc.planId);
+            if(!pendingApplied)planId=accPlan;
+          }
+          const restoredPaid=freshAcc
+            ? derivePaidGroups(freshAcc,saved.username)
+            : [...new Set([...(isPaidPlan(planId)?(PLANS.find(p=>p.id===planId)?.groups||[]):[]),...extra])];
+          const restoredFullGroups=computeFullGroups(planId,restoredPaid,[]);
           const restored={...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}};
           setProg(storage.get(`mx6-prog-${saved.username}`)||{});
           refreshProgressFromCloud(saved.username);
@@ -3460,6 +3515,7 @@ function App(){
           setView("dashboard");
           if(pendingApplied&&saved.username){
             supa.updateGroups(saved.username,restoredGroups,planId).catch(()=>{});
+            supa.updatePaidGroups(saved.username,restoredFullGroups).catch(()=>{});
           }
         }else{setView("landing");}
       }
@@ -3488,11 +3544,13 @@ function App(){
           const extra=getExtraGroups(currentUser.username);
           saveExtraGroups(currentUser.username,[...extra,...pp.groups]);
           const newGroups=computeGroups(subPlanId,currentUser.plan?.groups||[],pp.groups);
+          // L'achat qui vient d'aboutir est un droit payant : il alimente fullGroups.
           const newFullGroups=computeFullGroups(subPlanId,currentUser.plan?.fullGroups||[],pp.groups);
           const immediateUser={...currentUser,plan:{planId:subPlanId,groups:newGroups,fullGroups:newFullGroups}};
           setCurrentUser(immediateUser);
           storage.set("mx6-session",immediateUser);
           supa.updateGroups(currentUser.username,newGroups,isFullPlan?subPlanId:undefined).catch(()=>{});
+          supa.updatePaidGroups(currentUser.username,newFullGroups).catch(()=>{});
         }
         localStorage.removeItem("mx6-pending-purchase");
       }
@@ -3507,7 +3565,7 @@ function App(){
           const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
           const extra=getExtraGroups(currentUser.username);
           const mergedGroups=computeGroups(subPlanId,supaGroups,extra);
-          const mergedFullGroups=computeFullGroups(subPlanId,supaGroups,extra);
+          const mergedFullGroups=computeFullGroups(subPlanId,derivePaidGroups(acc,currentUser.username),[]);
           const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}};
           setCurrentUser(newUser);
           storage.set("mx6-session",newUser);
@@ -3527,7 +3585,11 @@ function App(){
       const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
       const extra=getExtraGroups(lc);
       const groups=computeGroups(subPlanId,supaGroups,extra);
-      const fullGroups=computeFullGroups(subPlanId,supaGroups,extra);
+      // Droits recalculés à partir des seules matières PAYÉES, jamais de acc.groups
+      // (qui contient aussi les matières offertes) — sinon un compte gratuit
+      // récupérait l'accès complet au S1 à chaque reconnexion.
+      const paid=derivePaidGroups(acc,lc);
+      const fullGroups=computeFullGroups(subPlanId,paid,[]);
       const u={username:acc.username,role:"student",plan:{planId:subPlanId,groups,fullGroups}};
       setProg(storage.get(`mx6-prog-${lc}`)||{});refreshProgressFromCloud(lc);setPseudo(getPseudo(lc));refreshPseudoFromCloud(lc);setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
     }
@@ -3773,10 +3835,17 @@ function App(){
         const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
         const extra=getExtraGroups(currentUser.username);
         const mergedGroups=computeGroups(subPlanId,supaGroups,extra);
-        const mergedFullGroups=computeFullGroups(subPlanId,supaGroups,extra);
+        const mergedPaid=derivePaidGroups(acc,currentUser.username);
+        const mergedFullGroups=computeFullGroups(subPlanId,mergedPaid,[]);
         const extraNotInSupa=extra.filter(g=>!supaGroups.includes(g));
         if(extraNotInSupa.length>0){
           supa.updateGroups(currentUser.username,mergedGroups,isFullPlan?subPlanId:undefined).catch(()=>{});
+        }
+        // Migration douce : aligne paid_groups sur les droits réellement acquis.
+        const storedPaid=Array.isArray(acc.paid_groups)?acc.paid_groups:null;
+        const paidMissing=storedPaid===null||mergedPaid.some(g=>!storedPaid.includes(g));
+        if(paidMissing&&mergedPaid.length>0){
+          supa.updatePaidGroups(currentUser.username,mergedPaid).catch(()=>{});
         }
         const curStr=JSON.stringify([...(currentUser.plan?.groups||[])].sort());
         const newStr=JSON.stringify([...mergedGroups].sort());
@@ -3846,10 +3915,22 @@ function App(){
       if(!queue.length){alert(getEmptyQueueMsg(userCards,prog,settings,getNewShownToday()));return;}
       setStudyCtx({label:"Mes flashcards personnelles",queue});setView("study");return;
     }
+    // ─── Garde-fou d'accès ────────────────────────────────────────────────────
+    // La restriction ne repose pas seulement sur l'interface : même en forçant
+    // l'appel (console, lien direct, état résiduel), un cours non débloqué ne
+    // peut pas démarrer. La liste de cartes est en plus refiltrée ci-dessous.
+    const isAdminUser=currentUser?.role==="admin";
+    const uGroups=currentUser?.plan?.groups||[];
+    const uFull=currentUser?.plan?.fullGroups||[];
+    const canAccess=(g,n)=>isAdminUser||isCourseAccessible(g,n,uGroups,uFull);
+    if(!canAccess(gid,num)){
+      alert("Ce cours n'est pas inclus dans ton offre actuelle.\nDébloque-le depuis « Changer d'abonnement » pour y accéder.");
+      return;
+    }
     const grp=GROUPS.find(g=>g.id===gid);
     if(pkId==="__all__"||pkId==="__course__"){
       const isCourse=pkId==="__course__";
-      const filtered=allCards.filter(c=>c.groupId===gid&&c.num===num&&(isCourse||c.chapterId===chapterId));
+      const filtered=allCards.filter(c=>c.groupId===gid&&c.num===num&&(isCourse||c.chapterId===chapterId)&&canAccess(c.groupId,c.num));
       const queue=buildQueue(filtered,prog,settings,getNewShownToday(),true);
       if(!queue.length){alert(getEmptyQueueMsg(filtered,prog,settings,getNewShownToday()));return;}
       const fullQueue=await enrichCards(queue);
@@ -3857,14 +3938,14 @@ function App(){
       const label=isCourse?`${grp?.label} · Cours ${num} · Cours complet`:`${grp?.label} · Cours ${num} · ${chName} · Tout`;
       setStudyCtx({label,queue:fullQueue});setView("study");return;
     }
-    const scopeFiltered=allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId);
+    const scopeFiltered=allCards.filter(c=>c.groupId===gid&&c.num===num&&c.chapterId===chapterId&&effPkt(c,prog)===pkId&&canAccess(c.groupId,c.num));
     const queue=buildQueue(scopeFiltered,prog,settings,getNewShownToday(),true);
     if(!queue.length){alert(getEmptyQueueMsg(scopeFiltered,prog,settings,getNewShownToday()));return;}
     const fullQueue=await enrichCards(queue);
     const chName=getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`;
     setStudyCtx({label:`${grp?.label} · Cours ${num} · ${chName} · ${PACKETS.find(p=>p.id===pkId)?.label}`,queue:fullQueue});
     setView("study");
-  },[allCards,userCards,prog,settings,getNewShownToday,enrichCards]);
+  },[allCards,userCards,prog,settings,getNewShownToday,enrichCards,currentUser]);
   const startGlobalStudy=useCallback(async pkId=>{
     const ids=currentUser?.plan?.groups||[];
     const fGroups=currentUser?.plan?.fullGroups||[];
