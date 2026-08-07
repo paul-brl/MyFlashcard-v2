@@ -225,10 +225,34 @@
     /* Grilles de 4 colonnes (révision globale, boutons de notation) */
     @media (max-width: 640px) { .mfc-grid-4 { grid-template-columns: repeat(2, 1fr) !important; } }
 
-    /* Grilles à 2 colonnes de l'éditeur de carte : empilées sous 900px */
-    @media (max-width: 900px) {
+    /* Éditeur de carte, sur ordinateur : la saisie à gauche, le panneau de
+       classification à droite. Le panneau reste collant et défile avec la page,
+       et devient lui-même défilant si la liste des chapitres est longue.
+       L'ordre du HTML n'est pas modifié — seul le placement en grille l'est —
+       pour que l'empilement mobile ci-dessous continue de fonctionner.       */
+    /* Éditeur de carte, dès qu'il y a deux colonnes (ordinateur ET écran
+       divisé) : la saisie à gauche, et à droite un bandeau collant qui suit le
+       défilement, avec l'ORDRE D'IMPORTANCE tout en haut. C'est le réglage le
+       plus souvent modifié : il doit rester atteignable sans faire défiler.
+       Le bandeau défile de lui-même si son contenu dépasse l'écran.          */
+    .mfc-editor-packet { flex-shrink: 0; }
+    .mfc-editor-side { flex-shrink: 0; }
+    @media (min-width: 641px) {
+      .mfc-editor-main { grid-column: 1; grid-row: 1; }
+      .mfc-editor-rail { grid-column: 2; grid-row: 1; position: sticky; top: 72px;
+                         max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain; }
+    }
+    /* Écran divisé : bandeau resserré, mais l'ordre d'importance reste visible. */
+    @media (min-width: 641px) and (max-width: 900px) {
+      .mfc-editor-grid { grid-template-columns: minmax(0,1fr) 186px !important; }
+      .mfc-occlusion-grid { grid-template-columns: 1fr !important; }
+    }
+    /* Téléphone : tout empilé, la saisie d'abord — comportement inchangé. */
+    @media (max-width: 640px) {
       .mfc-editor-grid { grid-template-columns: 1fr !important; }
       .mfc-occlusion-grid { grid-template-columns: 1fr !important; }
+      .mfc-editor-main { order: 1; }
+      .mfc-editor-rail { order: 2; position: static !important; max-height: none; overflow: visible; }
     }
 
     /* Barres d'onglets : défilement horizontal plutôt que chevauchement */
@@ -1408,9 +1432,9 @@ function MultiToggle({label,options,value,onChange,colorFn}){
   const TBtn=({active,onClick,label:lbl,color,bg})=><button onClick={onClick} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${active?(color||C.accent):C.border}`,background:active?(bg||C.accentBg):"transparent",color:active?(color||C.accent):C.textMed,display:"flex",alignItems:"center",gap:5}}>{active&&<span style={{fontSize:10}}>✓</span>}{lbl}</button>;
   return <div><Lbl>{label}</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:8}}><TBtn active={isAll} onClick={()=>onChange([])} label="Tout" color={C.accent} bg={C.accentBg}/>{options.map(o=>{const col=colorFn?colorFn(o.value):C.accent,bg2=col===C.prio?C.prioBg:col===C.imp?C.impBg:col===C.util?C.utilBg:C.accentBg;return<TBtn key={o.value} active={value.includes(o.value)} onClick={()=>toggle(o.value)} label={o.label} color={col} bg={bg2}/>;})}</div><p style={{fontSize:11,color:C.textLt,margin:"8px 0 0"}}>{isAll?"Toutes les options incluses":`${value.length} sélectionnée${value.length>1?"s":""}`}</p></div>;
 }
-function ClassSelector({label,options,value,onChange,columns="auto"}){
+const ClassSelector=React.memo(function ClassSelector({label,options,value,onChange,columns="auto"}){
   return <div><Lbl>{label}</Lbl><div style={{display:"grid",gridTemplateColumns:columns==="auto"?"repeat(auto-fill,minmax(160px,1fr))":`repeat(${columns},1fr)`,gap:8,marginTop:8}}>{options.map(opt=>{const active=value===opt.value,col=opt.color||C.accent,bg=opt.bg||C.accentBg;return<button key={String(opt.value)} onClick={()=>onChange(opt.value)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"10px 12px",cursor:"pointer",borderRadius:8,border:`2px solid ${active?col:C.border}`,background:active?bg:C.surface,color:active?col:C.textMed,textAlign:"left",lineHeight:1.4}} onMouseEnter={e=>{if(!active)e.currentTarget.style.borderColor=col;}} onMouseLeave={e=>{if(!active)e.currentTarget.style.borderColor=C.border;}}>{active&&<span style={{marginRight:6}}>✓</span>}{opt.label}</button>;})}</div></div>;
-}
+});
 // ─── Footer ───────────────────────────────────────────────────────────────────
 function Footer(){
   const [hov,setHov]=useState(null);
@@ -1693,6 +1717,12 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
     :(selGroup?.nums||[1]);
   const availChapters=getChapters(form.groupId,form.num);
   const selPacket=PACKETS.find(p=>p.id===form.packetId);
+  // Listes d'options mémoïsées : sans cela, chaque lettre tapée dans la question
+  // recréait tous les tableaux, donc tous les boutons de classification.
+  const packetOptions=useMemo(()=>PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)})),[]);
+  const groupOptions=useMemo(()=>availableGroups.map(g=>({value:g.id,label:groupLabel(g)})),[availableGroups]);
+  const numOptions=useMemo(()=>availNums.map(nn=>({value:nn,label:`Cours ${nn}`})),[availNums.join(',')]);
+  const chapterOptions=useMemo(()=>availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`})),[availChapters.join('|')]);
   const availPersonalNames=isStudentMode?personalCourseNamesForGroup(form.groupId):[];
   const handleGroupChange=v=>{
     const g=GROUPS.find(g=>g.id===v);
@@ -1737,13 +1767,20 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
       <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>{availPersonalNames.length>0?"Choisis un cours existant ci-dessus ou tape un nouveau nom pour en créer un autre.":"Tape le nom que tu veux — ce sera ton propre cours, personnel."}</p>
     </div>
   );
-  const renderClassPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)}))} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={availableGroups.map(g=>({value:g.id,label:groupLabel(g)}))}/></div>{renderModeToggle()}{personalMode?renderPersonalCoursePicker():<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={availNums.map(n=>({value:n,label:`Cours ${n}`}))} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`}))} columns={1}/></div>)}</>}</div></div>);
+  // Bloc « ordre d'importance » isolé : sur écran divisé il se place à droite
+  // du contenu, pour rester atteignable sans faire défiler la page.
+  const renderPacketPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px",height:"fit-content"}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={packetOptions} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div></div>);
+  const renderClassPanel=(withPacket)=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}>{withPacket&&<div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={packetOptions} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div>}<div style={withPacket?{borderTop:`1px solid ${C.border}`,paddingTop:18}:undefined}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={groupOptions}/></div>{renderModeToggle()}{personalMode?renderPersonalCoursePicker():<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={numOptions} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={chapterOptions} columns={1}/></div>)}</>}</div></div>);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
     <div className="mfc-page" style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
       {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid var(--c-accentSoft)`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
       {isNew&&(<div style={{marginBottom:24}}><Lbl>Type de carte</Lbl><div style={{display:"flex",gap:8,marginTop:8}}>{[["text","📝 Texte","Recto / Verso classique"],["occlusion","🖼 Image Occlusion","Masquer des zones sur une image"]].map(([t,lbl,desc])=>(<button key={t} onClick={()=>setCardType(t)} style={{fontFamily:font,fontSize:13,fontWeight:cardType===t?600:400,padding:"12px 20px",cursor:"pointer",borderRadius:8,border:`2px solid ${cardType===t?C.accent:C.border}`,background:cardType===t?C.accentBg:C.surface,color:cardType===t?C.accent:C.textMed,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:3}}><span>{cardType===t&&"✓ "}{lbl}</span><span style={{fontSize:11,fontWeight:400,color:cardType===t?C.accent:C.textLt}}>{desc}</span></button>))}</div></div>)}
-      {cardType==="text"&&(<div className="mfc-editor-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {cardType==="text"&&(<div className="mfc-editor-grid" style={{display:"grid",gridTemplateColumns:"1fr 360px",gap:16,alignItems:"start"}}>
+        <div className="mfc-editor-rail" style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div className="mfc-editor-packet">{renderPacketPanel()}</div>
+          <div className="mfc-editor-side">{renderClassPanel(false)}</div>
+        </div>
+        <div className="mfc-editor-main" style={{display:"flex",flexDirection:"column",gap:16}}>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px"}}>
             <p style={{fontFamily:serif,fontSize:16,margin:"0 0 16px"}}>Contenu</p>
             <div style={{marginBottom:20}}>
@@ -1769,7 +1806,6 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
           </div>
           <div style={{display:"flex",gap:10}}><Btn fill full onClick={handleSaveText}>{saved?"✓":isNew?"Créer la carte":"Mettre à jour"}</Btn><Btn full onClick={onCancel}>Annuler</Btn></div>
         </div>
-        {renderClassPanel()}
       </div>)}
       {cardType==="occlusion"&&(<div className="mfc-occlusion-grid" style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20,alignItems:"start"}}>
         <div>
@@ -1864,7 +1900,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
               <p style={{fontSize:11,color:C.textMed,margin:"6px 0 0"}}>{zones.length} zone{zones.length>1?"s":""} → {zones.length} flashcard{zones.length>1?"s":""} · chaque zone garde son propre paquet</p>
             </div>}
           </div>
-          {renderClassPanel()}
+          {renderClassPanel(true)}
           {zones.length>0&&<Btn fill full onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>}
         </div>
       </div>)}
@@ -1876,6 +1912,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   const [search,setSearch]=useState(""),[sem,setSem]=useState("all"),[fg,setFg]=useState("all"),[fn,setFn]=useState("all"),[fc,setFc]=useState("all"),[fp,setFp]=useState("all"),[delId,setDelId]=useState(null),[showFilters,setShowFilters]=useState(true);
   const [dragIdx,setDragIdx]=useState(null),[dragOverIdx,setDragOverIdx]=useState(null),[orderFlash,setOrderFlash]=useState(false);
   const [previewIdx,setPreviewIdx]=useState(null);
+  const [visibleCount,setVisibleCount]=useState(80);
   const [adminCards,setAdminCards]=useState([]);
   const [adminLoading,setAdminLoading]=useState(false);
   const searchRef=useRef(null);
@@ -1903,6 +1940,10 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   },[cards,sem,fg,fn,fc,fp,search]);
   const filtered=baseFiltered;
   const [contentMap,setContentMap]=useState({});
+  // Clé stable : recalculée seulement quand la liste change réellement.
+  const filteredIdsKey=useMemo(()=>filtered.map(c=>c.id).join(','),[filtered]);
+  // Le plafond d'affichage repart de zéro à chaque changement de filtre.
+  useEffect(()=>{setVisibleCount(80);},[search,sem,fg,fn,fc,fp]);
   useEffect(()=>{
     if(filtered.length===0)return;
     const missing=filtered.filter(c=>c.card_type!=='occlusion'&&c.front==null&&!contentMap[c.id]).map(c=>c.id);
@@ -1914,7 +1955,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
       if(!cancelled&&Object.keys(data).length>0)setContentMap(prev=>({...prev,...data}));
     }).catch(e=>console.warn("Content load failed:",e));
     return()=>{cancelled=true;};
-  },[filtered.map(c=>c.id).join(',')]);
+  },[filteredIdsKey]);
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
   const canReorder=fc!=="all";
   const handleDragStart=(e,idx)=>{if(!canReorder)return;setDragIdx(idx);e.dataTransfer.effectAllowed="move";};
@@ -1994,7 +2035,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     )}
     {filtered.length===0?(<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"48px 24px",textAlign:"center"}}><p style={{fontSize:36,margin:"0 0 12px"}}>{search?"🔍":"📭"}</p><p style={{fontSize:14,color:C.textLt,margin:"0 0 16px"}}>{cards.length===0?"Aucune carte créée.":search?`Aucun résultat pour « ${search} »`:"Aucune carte pour ces filtres."}</p>{cards.length===0&&<Btn onClick={onNew}>Créer la première carte →</Btn>}{hasFilters&&cards.length>0&&<button onClick={clearAll} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.accent,textDecoration:"underline",display:"block",margin:"8px auto 0"}}>Réinitialiser les filtres</button>}</div>):(
       <div style={{display:"flex",flexDirection:"column",gap:4}}>
-        {filtered.map((card,idx)=>{
+        {filtered.slice(0,visibleCount).map((card,idx)=>{
           const grp=GROUPS.find(g=>g.id===card.groupId);
           const col=pC(card.packetId),bg=pB(card.packetId);
           const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
@@ -2067,6 +2108,11 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
             </div>
           );
         })}
+        {filtered.length>visibleCount&&(
+          <button onClick={()=>setVisibleCount(v=>v+200)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"10px 16px",marginTop:8,cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.border}`,background:C.surface,color:C.textMed}}>
+            Afficher plus — {filtered.length-visibleCount} carte{filtered.length-visibleCount>1?"s":""} restante{filtered.length-visibleCount>1?"s":""}
+          </button>
+        )}
       </div>
     )}
     {previewIdx!==null&&filtered[previewIdx]&&(()=>{
@@ -2165,7 +2211,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
     <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="users" label="👤 Étudiants"/></div>
-    {tab==="cards"&&<AdminCards cards={cards} onNew={()=>{setEditCard(null);setSubView("editor");}} onEdit={c=>{setEditCard(c);setSubView("editor");}} onDelete={onDeleteCard} onSortCards={onSortCards}/>}
+    {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>{setEditCard(null);setSubView("editor");}} onEdit={c=>{setEditCard(c);setSubView("editor");}} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
   </div>;
 }
