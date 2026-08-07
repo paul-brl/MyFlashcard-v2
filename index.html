@@ -6,8 +6,177 @@
   <title>MyFlashcard — Flashcards médicales</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #f5f3ee; }
-    input[type=range] { accent-color: #2c4a7c; }
+
+    /* ─── Thème clair / sombre ──────────────────────────────────────────────
+       Toutes les couleurs de l'application passent par ces variables. Basculer
+       l'attribut data-theme sur <html> suffit à repeindre tout le site, sans
+       re-rendu React. Le thème sombre s'inspire de Firefox : des gris
+       légèrement violacés plutôt qu'un noir pur, et des couleurs sémantiques
+       éclaircies pour rester lisibles sur fond foncé.                        */
+    :root {
+      --c-bg: #f5f3ee;
+      --c-surface: #ffffff;
+      --c-border: #d0ccc4;
+      --c-text: #1a1917;
+      --c-textMed: #4e4a46;
+      --c-textLt: #7a7672;
+      --c-accent: #2c4a7c;
+      --c-accentBg: #eef3fb;
+      --c-prio: #9b2335;
+      --c-prioBg: #fef2f4;
+      --c-imp: #8b5e00;
+      --c-impBg: #fef8e8;
+      --c-util: #1e5a3a;
+      --c-utilBg: #edf7f2;
+      --c-again: #b91c1c;
+      --c-againBg: #fff0f0;
+      --c-hard: #b45309;
+      --c-hardBg: #fff8ed;
+      --c-good: #15803d;
+      --c-goodBg: #edfdf3;
+      --c-easy: #1d4ed8;
+      --c-easyBg: #eff6ff;
+      --c-onSolid: #ffffff;
+      --c-violet: #7c3aed;
+      --c-violetBg: #f5f3ff;
+      --c-violetBg2: #ede9fe;
+      --c-violetTint: #faf8ff;
+      --c-gold: #b7791f;
+      --c-goldBg: #fdf6e3;
+      --c-goldText: #8a5a00;
+      --c-goldTextSoft: #a97c2a;
+      --c-danger: #dc2626;
+      --c-dangerBg: #fef2f2;
+      --c-dangerDeep: #7f1d1d;
+      --c-dangerMid: #991b1b;
+      --c-borderSoft: #e8e5e0;
+      --c-borderSoft2: #e8e4dc;
+      --c-textDisabled: #c0bbb5;
+      --c-chipBg: #f0ece6;
+      --c-listBg: #fafaf9;
+      --c-surfaceAlt: #f9f9f9;
+      --c-track: #eeebe5;
+      --c-curveGrey: #a8a39a;
+      --c-toast: #374151;
+      --c-warnBg: #fef3c7;
+      --c-warnBg2: #fef08a;
+      --c-warn: #f59e0b;
+      --c-streak: #ea580c;
+      --c-greenSoft: #d1fae5;
+      --c-greenSoft2: #bbf7d0;
+      --c-green1: #4ade80;
+      --c-green2: #16a34a;
+      --c-green3: #14532d;
+      --c-blueDeep: #1e40af;
+      --c-grey1: #9ca3af;
+      --c-rkBronze: #a1662f;
+      --c-rkBronzeBg: #f8f0e7;
+      --c-rkArgent: #6b7280;
+      --c-rkArgentBg: #f3f4f6;
+      --c-rkOr: #b7791f;
+      --c-rkOrBg: #fdf6e3;
+      --c-rkPlatine: #0f766e;
+      --c-rkPlatineBg: #ecfdf5;
+      --c-rkDiamant: #1d4ed8;
+      --c-rkDiamantBg: #eff6ff;
+      --c-rkElite: #7c3aed;
+      --c-rkEliteBg: #f5f3ff;
+      --c-rkChampion: #b91c1c;
+      --c-rkChampionBg: #fef2f2;
+      --c-rkUnreal: #111827;
+      --c-rkUnrealBg: #e5e7eb;
+      --c-accentSoft: rgba(44,74,124,0.13);
+      --c-againSoft: rgba(185,28,28,0.25);
+      --c-goodSoft: rgba(21,128,61,0.18);
+      --c-utilSoft: rgba(30,90,58,0.19);
+      --c-violetSoft: rgba(124,58,237,0.25);
+      --c-goldSoft: rgba(183,121,31,0.31);
+      color-scheme: light;
+    }
+    [data-theme="dark"] {
+      --c-bg: #1c1b22;
+      --c-surface: #26252e;
+      --c-border: #3f3d4b;
+      --c-text: #f4f3f7;
+      --c-textMed: #b9b7c6;
+      --c-textLt: #8a8798;
+      --c-accent: #8ab4f8;
+      --c-accentBg: #1e2a3f;
+      --c-prio: #f4879b;
+      --c-prioBg: #3a1d26;
+      --c-imp: #e8b339;
+      --c-impBg: #372c12;
+      --c-util: #63d197;
+      --c-utilBg: #14301f;
+      --c-again: #f2727f;
+      --c-againBg: #391b21;
+      --c-hard: #eaa043;
+      --c-hardBg: #382713;
+      --c-good: #5ed18e;
+      --c-goodBg: #143020;
+      --c-easy: #8ab4f8;
+      --c-easyBg: #1c2a44;
+      --c-onSolid: #1c1b22;
+      --c-violet: #b48ef5;
+      --c-violetBg: #2a2140;
+      --c-violetBg2: #35275c;
+      --c-violetTint: #23203a;
+      --c-gold: #e3b341;
+      --c-goldBg: #352a12;
+      --c-goldText: #f0c869;
+      --c-goldTextSoft: #c8a44e;
+      --c-danger: #f2727f;
+      --c-dangerBg: #391b21;
+      --c-dangerDeep: #f7b0b6;
+      --c-dangerMid: #ef8a94;
+      --c-borderSoft: #34323e;
+      --c-borderSoft2: #34323e;
+      --c-textDisabled: #63616e;
+      --c-chipBg: #32303b;
+      --c-listBg: #222129;
+      --c-surfaceAlt: #24232c;
+      --c-track: #34323e;
+      --c-curveGrey: #6f6c7d;
+      --c-toast: #43414f;
+      --c-warnBg: #3a2f12;
+      --c-warnBg2: #4a3c14;
+      --c-warn: #e8b339;
+      --c-streak: #f08a4b;
+      --c-greenSoft: #163a26;
+      --c-greenSoft2: #1a4530;
+      --c-green1: #5ed18e;
+      --c-green2: #4cbf80;
+      --c-green3: #a8e6c1;
+      --c-blueDeep: #6d9ff0;
+      --c-grey1: #7d7b8a;
+      --c-rkBronze: #d19a5e;
+      --c-rkBronzeBg: #33291f;
+      --c-rkArgent: #a9a7b6;
+      --c-rkArgentBg: #2f2e39;
+      --c-rkOr: #e3b341;
+      --c-rkOrBg: #352a12;
+      --c-rkPlatine: #4fc4b0;
+      --c-rkPlatineBg: #10302b;
+      --c-rkDiamant: #8ab4f8;
+      --c-rkDiamantBg: #1c2a44;
+      --c-rkElite: #b48ef5;
+      --c-rkEliteBg: #2a2140;
+      --c-rkChampion: #f2727f;
+      --c-rkChampionBg: #391b21;
+      --c-rkUnreal: #f4f3f7;
+      --c-rkUnrealBg: #3a3945;
+      --c-accentSoft: rgba(138,180,248,0.22);
+      --c-againSoft: rgba(242,114,127,0.30);
+      --c-goodSoft: rgba(94,209,142,0.26);
+      --c-utilSoft: rgba(99,209,151,0.26);
+      --c-violetSoft: rgba(180,142,245,0.32);
+      --c-goldSoft: rgba(227,179,65,0.34);
+      color-scheme: dark;
+    }
+    html, body { background: var(--c-bg); }
+    /* Le basculement se fait en douceur, sans animer les changements de position */
+    body * { transition: background-color .18s ease, border-color .18s ease, color .18s ease; }
+    input[type=range] { accent-color: var(--c-accent); }
     @keyframes spin    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @keyframes fadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
     @keyframes dotPulse { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
@@ -435,6 +604,18 @@ const storage = {
   set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
   del: k => { try { localStorage.removeItem(k); } catch {} },
 };
+// ─── Thème clair / sombre ─────────────────────────────────────────────────────
+// Le thème est appliqué en posant data-theme sur <html> : toutes les couleurs
+// passant par des variables CSS, un seul attribut repeint l'application entière.
+// Mémorisé par utilisateur ; au tout premier lancement on suit la préférence
+// système du téléphone ou de l'ordinateur.
+const THEME_KEY="mx6-theme";
+const systemPrefersDark = () => { try { return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches; } catch { return false; } };
+const getStoredTheme = () => { try { const v=localStorage.getItem(THEME_KEY); return v==="dark"||v==="light"?v:null; } catch { return null; } };
+const applyTheme = theme => { try { document.documentElement.setAttribute("data-theme", theme==="dark"?"dark":"light"); } catch {} };
+const initialTheme = () => getStoredTheme() || (systemPrefersDark()?"dark":"light");
+// Appliqué immédiatement, avant le premier rendu, pour éviter tout flash blanc.
+applyTheme(initialTheme());
 // ─── Pseudonymes ──────────────────────────────────────────────────────────────
 // Disponible pour TOUS les utilisateurs (étudiants comme administrateurs).
 // Utilisé partout où un nom doit être affiché (forum, classement, tableau de
@@ -548,24 +729,24 @@ const formatSeconds = (s) => {
 // intervalles. Elle observe seulement le résultat de chaque notation et décide
 // si la carte rapporte des points ou non.
 const RANKS = [
-  {name:"Bronze I",    min:0,    col:"#a1662f", bg:"#f8f0e7", tier:"Bronze"},
-  {name:"Bronze II",   min:20,   col:"#a1662f", bg:"#f8f0e7", tier:"Bronze"},
-  {name:"Bronze III",  min:55,   col:"#a1662f", bg:"#f8f0e7", tier:"Bronze"},
-  {name:"Argent I",    min:106,  col:"#6b7280", bg:"#f3f4f6", tier:"Argent"},
-  {name:"Argent II",   min:173,  col:"#6b7280", bg:"#f3f4f6", tier:"Argent"},
-  {name:"Argent III",  min:256,  col:"#6b7280", bg:"#f3f4f6", tier:"Argent"},
-  {name:"Or I",        min:355,  col:"#b7791f", bg:"#fdf6e3", tier:"Or"},
-  {name:"Or II",       min:470,  col:"#b7791f", bg:"#fdf6e3", tier:"Or"},
-  {name:"Or III",      min:601,  col:"#b7791f", bg:"#fdf6e3", tier:"Or"},
-  {name:"Platine I",   min:748,  col:"#0f766e", bg:"#ecfdf5", tier:"Platine"},
-  {name:"Platine II",  min:911,  col:"#0f766e", bg:"#ecfdf5", tier:"Platine"},
-  {name:"Platine III", min:1090, col:"#0f766e", bg:"#ecfdf5", tier:"Platine"},
-  {name:"Diamant I",   min:1285, col:"#1d4ed8", bg:"#eff6ff", tier:"Diamant"},
-  {name:"Diamant II",  min:1496, col:"#1d4ed8", bg:"#eff6ff", tier:"Diamant"},
-  {name:"Diamant III", min:1723, col:"#1d4ed8", bg:"#eff6ff", tier:"Diamant"},
-  {name:"Élite",       min:1966, col:"#7c3aed", bg:"#f5f3ff", tier:"Élite"},
-  {name:"Champion",    min:2225, col:"#b91c1c", bg:"#fef2f2", tier:"Champion"},
-  {name:"Unreal",      min:2500, col:"#111827", bg:"#e5e7eb", tier:"Unreal"},
+  {name:"Bronze I",    min:0,    col:"var(--c-rkBronze)", bg:"var(--c-rkBronzeBg)", tier:"Bronze"},
+  {name:"Bronze II",   min:20,   col:"var(--c-rkBronze)", bg:"var(--c-rkBronzeBg)", tier:"Bronze"},
+  {name:"Bronze III",  min:55,   col:"var(--c-rkBronze)", bg:"var(--c-rkBronzeBg)", tier:"Bronze"},
+  {name:"Argent I",    min:106,  col:"var(--c-rkArgent)", bg:"var(--c-rkArgentBg)", tier:"Argent"},
+  {name:"Argent II",   min:173,  col:"var(--c-rkArgent)", bg:"var(--c-rkArgentBg)", tier:"Argent"},
+  {name:"Argent III",  min:256,  col:"var(--c-rkArgent)", bg:"var(--c-rkArgentBg)", tier:"Argent"},
+  {name:"Or I",        min:355,  col:"var(--c-gold)", bg:"var(--c-goldBg)", tier:"Or"},
+  {name:"Or II",       min:470,  col:"var(--c-gold)", bg:"var(--c-goldBg)", tier:"Or"},
+  {name:"Or III",      min:601,  col:"var(--c-gold)", bg:"var(--c-goldBg)", tier:"Or"},
+  {name:"Platine I",   min:748,  col:"var(--c-rkPlatine)", bg:"var(--c-rkPlatineBg)", tier:"Platine"},
+  {name:"Platine II",  min:911,  col:"var(--c-rkPlatine)", bg:"var(--c-rkPlatineBg)", tier:"Platine"},
+  {name:"Platine III", min:1090, col:"var(--c-rkPlatine)", bg:"var(--c-rkPlatineBg)", tier:"Platine"},
+  {name:"Diamant I",   min:1285, col:"var(--c-easy)", bg:"var(--c-easyBg)", tier:"Diamant"},
+  {name:"Diamant II",  min:1496, col:"var(--c-easy)", bg:"var(--c-easyBg)", tier:"Diamant"},
+  {name:"Diamant III", min:1723, col:"var(--c-easy)", bg:"var(--c-easyBg)", tier:"Diamant"},
+  {name:"Élite",       min:1966, col:"var(--c-violet)", bg:"var(--c-violetBg)", tier:"Élite"},
+  {name:"Champion",    min:2225, col:"var(--c-again)", bg:"var(--c-dangerBg)", tier:"Champion"},
+  {name:"Unreal",      min:2500, col:"var(--c-rkUnreal)", bg:"var(--c-rkUnrealBg)", tier:"Unreal"},
 ];
 const RANK_ICONS = {Bronze:"🥉",Argent:"🥈",Or:"🥇",Platine:"💠",Diamant:"💎","Élite":"⚔️",Champion:"👑",Unreal:"🔥"};
 const rankIndexFor = pts => RANKS.reduce((acc,r,i)=>pts>=r.min?i:acc,0);
@@ -633,6 +814,9 @@ function awardPoints(username,cardId,prev,np,packetId){
   if(!day.scored) day.scored={};
   if(day.scored[cardId]) return null; // déjà comptabilisée aujourd'hui
   day.scored[cardId]=res.points;
+  // Détail mémorisé pour pouvoir annuler proprement en cas de retour arrière.
+  if(!day.scoredInfo) day.scoredInfo={};
+  day.scoredInfo[cardId]={age:res.age,packetId:packetId||null};
   day.points+=res.points;
   day.cards+=1;
   day.byAge[res.age]=(day.byAge[res.age]||0)+res.points;
@@ -641,6 +825,45 @@ function awardPoints(username,cardId,prev,np,packetId){
   savePoints(username,store);
   return {...res,total:day.points};
 }
+// Annule les points d'une carte pour la journée en cours (retour arrière).
+// La carte redevient « non comptabilisée aujourd'hui » : si l'étudiant la renote
+// ensuite, elle peut de nouveau rapporter des points, une seule fois.
+function revokePoints(username,cardId){
+  if(!username)return null;
+  const store=getPoints(username), key=dateKey();
+  const day=store.days[key];
+  if(!day||!day.scored||!day.scored[cardId])return null;
+  const pts=day.scored[cardId];
+  const info=day.scoredInfo&&day.scoredInfo[cardId];
+  day.points=Math.max(0,day.points-pts);
+  day.cards=Math.max(0,day.cards-1);
+  if(info){
+    if(info.age&&day.byAge[info.age]!==undefined)day.byAge[info.age]=Math.max(0,day.byAge[info.age]-pts);
+    if(info.packetId&&day.byImp[info.packetId]!==undefined)day.byImp[info.packetId]=Math.max(0,day.byImp[info.packetId]-pts);
+    delete day.scoredInfo[cardId];
+  }
+  delete day.scored[cardId];
+  store.days[key]=day;
+  savePoints(username,store);
+  return {points:pts,total:day.points};
+}
+// Annule une révision dans les statistiques (retour arrière).
+const revokeStat = (username, correct, elapsedMs, wasNewCard=false) => {
+  if(!username)return;
+  const st=getStats(username), key=dateKey();
+  const secs=cappedCardSeconds(elapsedMs);
+  const d=st.days[key];
+  if(d){
+    d.cards=Math.max(0,d.cards-1);
+    if(correct)d.correct=Math.max(0,d.correct-1);
+    d.seconds=Math.max(0,d.seconds-secs);
+    if(wasNewCard)d.newShown=Math.max(0,(d.newShown||0)-1);
+  }
+  st.total.cards=Math.max(0,st.total.cards-1);
+  if(correct)st.total.correct=Math.max(0,st.total.correct-1);
+  st.total.seconds=Math.max(0,st.total.seconds-secs);
+  saveStats(username,st);
+};
 // ─── Préférences de classement public ────────────────────────────────────────
 const getRankPrefs  = u => ({share:false,anon:false,...(storage.get(`mx6-rankprefs-${u}`)||{})});
 const saveRankPrefs = (u,p) => storage.set(`mx6-rankprefs-${u}`,p);
@@ -859,7 +1082,7 @@ function fsrsMigrateLegacy(prev){
   return {S,D};
 }
 function computeNext(prev,rating,s=DEFAULT_SETTINGS){
-  const {againMin=1,hardMin=5,goodMin=10}=s;
+  const {againMin=1,hardMin=5,goodMin=10,easyDays=4}=s;
   const p=prev||{};
   const {state="new",step=0,reps=0,lapses=0,lastReview,reviewHistory=[]}=p;
   const mf=m=>new Date(Date.now()+m*60000).toISOString();
@@ -876,7 +1099,18 @@ function computeNext(prev,rating,s=DEFAULT_SETTINGS){
     // FSRS est initialisée à partir du bouton choisi. Deux cartes graduées le même
     // jour avec des boutons différents partent donc avec des rythmes différents —
     // aucun intervalle fixe.
-    const S=fsrsInitStability(rating),D=fsrsInitDifficulty(rating),iv=fsrsIntervalDays(S);
+    //
+    // PLAFOND DE PREMIÈRE GRADUATION. Les poids FSRS d'origine donnent une
+    // stabilité initiale de 15,5 pour « Facile », soit une carte jamais vue
+    // renvoyée à 2 semaines. C'est le comportement moyen mesuré sur Anki, mais
+    // c'est trop risqué en préparation au concours, où « Facile » veut souvent
+    // dire « ça m'a paru simple à la lecture ». On plafonne donc la stabilité de
+    // départ à la valeur du réglage « Facile » (4 jours par défaut, ajustable
+    // dans les Paramètres). Ce plafond ne s'applique QU'À la toute première
+    // graduation : ensuite, la carte suit FSRS sans aucune restriction.
+    const cap=Math.max(1,easyDays||4);
+    const S=Math.min(fsrsInitStability(rating),cap);
+    const D=fsrsInitDifficulty(rating),iv=fsrsIntervalDays(S);
     return{state:"review",step:0,stability:S,difficulty:D,reps:1,lapses,interval:iv,lastReview:now,nextReview:df(iv),next:df(iv),
       reviewHistory:log({state:"review",stabilityAfter:S,difficultyAfter:D,intervalDays:iv})};
   }
@@ -1050,7 +1284,7 @@ function globalReviewDue(cards,prog,ids,pkId=null){
   return globalReviewDueCards(cards,prog,ids,pkId).length;
 }
 // ─── Design ──────────────────────────────────────────────────────────────────
-const C={bg:"#f5f3ee",surface:"#ffffff",border:"#d0ccc4",text:"#1a1917",textMed:"#4e4a46",textLt:"#7a7672",accent:"#2c4a7c",accentBg:"#eef3fb",prio:"#9b2335",prioBg:"#fef2f4",imp:"#8b5e00",impBg:"#fef8e8",util:"#1e5a3a",utilBg:"#edf7f2",again:"#b91c1c",againBg:"#fff0f0",hard:"#b45309",hardBg:"#fff8ed",good:"#15803d",goodBg:"#edfdf3",easy:"#1d4ed8",easyBg:"#eff6ff"};
+const C={bg:"var(--c-bg)",surface:"var(--c-surface)",border:"var(--c-border)",text:"var(--c-text)",textMed:"var(--c-textMed)",textLt:"var(--c-textLt)",accent:"var(--c-accent)",accentBg:"var(--c-accentBg)",prio:"var(--c-prio)",prioBg:"var(--c-prioBg)",imp:"var(--c-imp)",impBg:"var(--c-impBg)",util:"var(--c-util)",utilBg:"var(--c-utilBg)",again:"var(--c-again)",againBg:"var(--c-againBg)",hard:"var(--c-hard)",hardBg:"var(--c-hardBg)",good:"var(--c-good)",goodBg:"var(--c-goodBg)",easy:"var(--c-easy)",easyBg:"var(--c-easyBg)"};
 const pC=id=>id==="prioritaire"?C.prio:id==="important"?C.imp:C.util;
 const parseContent=raw=>{
   if(!raw)return{text:"",img:null};
@@ -1087,7 +1321,7 @@ function ImageDropZone({value,onChange,label="Image (optionnelle)"}){
       {value?(
         <div style={{position:"relative",display:"inline-block",maxWidth:"100%"}}>
           <img src={value} style={{maxWidth:"100%",maxHeight:180,borderRadius:8,display:"block",border:`1px solid ${C.border}`}}/>
-          <button onClick={()=>onChange(null)} style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:C.again,color:"#fff",border:"none",cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>×</button>
+          <button onClick={()=>onChange(null)} style={{position:"absolute",top:-8,right:-8,width:22,height:22,borderRadius:"50%",background:C.again,color:"var(--c-onSolid)",border:"none",cursor:"pointer",fontSize:14,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>×</button>
         </div>
       ):(
         <div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);handleFile(e.dataTransfer.files[0]);}} style={{border:`2px dashed ${drag?C.accent:C.border}`,borderRadius:8,padding:"16px",textAlign:"center",background:drag?C.accentBg:C.bg,cursor:"pointer",transition:"all 0.15s"}}>
@@ -1139,10 +1373,22 @@ function MathText({ text, tag = "p", ...props }) {
   return React.createElement(tag, { ref, ...props });
 }
 function Tag({color,bg,children,small}){return <span style={{display:"inline-block",fontFamily:mono,fontSize:small?8:9,letterSpacing:2,textTransform:"uppercase",padding:small?"2px 6px":"3px 8px",borderRadius:3,background:bg||C.accentBg,color:color||C.accent,whiteSpace:"nowrap"}}>{children}</span>;}
-function Btn({fill,danger,small,full,disabled,children,style,...rest}){return <button {...rest} disabled={disabled} style={{fontFamily:font,fontSize:small?12:13,fontWeight:500,padding:small?"6px 12px":"9px 18px",cursor:disabled?"not-allowed":"pointer",border:`1.5px solid ${fill?C.accent:danger?C.again:C.border}`,borderRadius:6,background:fill?C.accent:"transparent",color:fill?"#fff":danger?C.again:C.text,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,opacity:disabled?0.4:1,width:full?"100%":undefined,...style}}>{children}</button>;}
+function Btn({fill,danger,small,full,disabled,children,style,...rest}){return <button {...rest} disabled={disabled} style={{fontFamily:font,fontSize:small?12:13,fontWeight:500,padding:small?"6px 12px":"9px 18px",cursor:disabled?"not-allowed":"pointer",border:`1.5px solid ${fill?C.accent:danger?C.again:C.border}`,borderRadius:6,background:fill?C.accent:"transparent",color:fill?"var(--c-onSolid)":danger?C.again:C.text,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,opacity:disabled?0.4:1,width:full?"100%":undefined,...style}}>{children}</button>;}
 function Modal({children,onClose,width=440}){return <div style={{position:"fixed",inset:0,background:"rgba(26,25,23,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,backdropFilter:"blur(2px)"}} onClick={e=>e.target===e.currentTarget&&onClose()}><div className="mfc-modal" style={{background:C.surface,borderRadius:12,padding:"32px 28px",width,maxWidth:"94vw",maxHeight:"92vh",overflowY:"auto",position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,0.18)"}}><button onClick={onClose} style={{position:"absolute",top:14,right:16,background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textLt}}>×</button>{children}</div></div>;}
 function Lbl({children,color}){return <p style={{fontFamily:mono,fontSize:9,letterSpacing:2.5,textTransform:"uppercase",color:color||C.textLt,margin:"0 0 6px"}}>{children}</p>;}
-function Nav({left,center,right}){return <div className="mfc-nav" style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,gap:12}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div className="mfc-nav-center" style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,textAlign:"center"}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{right}</div></div>;}
+// Bouton soleil / lune. Présent dans la barre de navigation de toutes les pages.
+function ThemeToggle({theme,onToggle,compact}){
+  const dark=theme==="dark";
+  const size=compact?28:32;
+  return <button onClick={onToggle} title={dark?"Passer en mode clair":"Passer en mode sombre"} aria-label={dark?"Passer en mode clair":"Passer en mode sombre"} style={{width:size,height:size,flexShrink:0,borderRadius:"50%",cursor:"pointer",border:`1.5px solid var(--c-gold)`,background:"var(--c-goldBg)",color:"var(--c-gold)",display:"flex",alignItems:"center",justifyContent:"center",padding:0,lineHeight:1}}>
+    <svg width={compact?15:17} height={compact?15:17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {dark
+        ? <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></>
+        : <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>}
+    </svg>
+  </button>;
+}
+function Nav({left,center,right,theme,onToggleTheme}){return <div className="mfc-nav" style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,gap:12}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div className="mfc-nav-center" style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,textAlign:"center"}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{right}{onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme} compact/>}</div></div>;}
 function PasswordField({label,value,onChange,placeholder,onKeyDown,hint}){
   const [show,setShow]=useState(false);
   return <div><Lbl>{label}</Lbl><div style={{position:"relative"}}><input style={{...iLine,paddingRight:36}} type={show?"text":"password"} placeholder={placeholder||"••••••••"} value={value} onChange={onChange} onKeyDown={onKeyDown}/><button type="button" onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:16,padding:"2px 4px",lineHeight:1}}>{show?"🙈":"👁"}</button></div>{hint&&<p style={{fontSize:11,color:C.textLt,margin:"5px 0 0",lineHeight:1.5}}>{hint}</p>}</div>;
@@ -1206,7 +1452,7 @@ function ForgotPasswordModal({onClose,accounts,onPasswordReset}){
   return <Modal onClose={onClose} width={400}>
     {done?(<div style={{textAlign:"center"}}><p style={{fontSize:52,margin:"0 0 16px"}}>✓</p><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Mot de passe modifié !</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>Tu peux maintenant te connecter avec ton nouveau mot de passe.</p><Btn fill full onClick={onClose}>Retour à la connexion →</Btn></div>):(
       <><p style={{fontFamily:serif,fontSize:20,margin:"0 0 4px"}}>Mot de passe oublié</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>{step===1?"Saisis ton adresse email pour recevoir un code de réinitialisation.":`Code envoyé à ${email}. Saisis le code et ton nouveau mot de passe.`}</p>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:22}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:24,height:24,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"#fff":C.textLt,fontSize:11,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:32,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:22}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:24,height:24,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"var(--c-onSolid)":C.textLt,fontSize:11,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:32,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
         {step===1&&(<div><Lbl>Adresse email</Lbl><input style={iLine} type="email" placeholder="votre@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSendCode()} autoFocus/>{error&&<p style={{fontSize:12,color:C.again,margin:"12px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:20,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Envoyer le code →"}</Btn></div>)}
         {step===2&&(<div style={{display:"flex",flexDirection:"column",gap:16}}><div><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:28,fontWeight:700,letterSpacing:10,textAlign:"center",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} autoFocus/><p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",textAlign:"center"}}>Vérifie tes spams · expire dans 10 min</p></div><div><PasswordField label="Nouveau mot de passe" value={password} onChange={e=>setPassword(e.target.value)}/><PasswordStrength password={password}/></div><PasswordField label="Confirmer le mot de passe" value={confirm} onChange={e=>setConfirm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleReset()}/>{error&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:0}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px"}} onClick={handleReset} disabled={saving||code.length!==6}>{saving?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Réinitialisation…</>:"Réinitialiser le mot de passe →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(cooldown>0)return;handleSendCode();}} disabled={cooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:cooldown>0?"not-allowed":"pointer",color:cooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:cooldown>0?0.6:1}}>{cooldown>0?`Renvoyer (${cooldown}s)`:"Renvoyer un code"}</button></div></div>)}
       </>
@@ -1214,10 +1460,11 @@ function ForgotPasswordModal({onClose,accounts,onPasswordReset}){
   </Modal>;
 }
 // ─── Login ────────────────────────────────────────────────────────────────────
-function LoginView({onLogin,onShowLanding,onRegister,accounts,onPasswordReset}){
+function LoginView({onLogin,onShowLanding,onRegister,accounts,onPasswordReset,theme,onToggleTheme}){
   const [email,setEmail]=useState(""),[password,setPassword]=useState(""),[error,setError]=useState(""),[loading,setLoading]=useState(false),[showForgot,setShowForgot]=useState(false);
   const handleSubmit=()=>{if(!email.trim()||!password.trim()){setError("Veuillez remplir tous les champs.");return;}setLoading(true);setError("");setTimeout(()=>{const ok=onLogin(email.trim().toLowerCase(),password);if(!ok)setError("Email ou mot de passe incorrect.");setLoading(false);},400);};
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+    <div style={{display:"flex",justifyContent:"flex-end",padding:"14px 18px 0"}}>{onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme}/>}</div>
     <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
       <div style={{width:"100%",maxWidth:380}}>
         <div style={{textAlign:"center",marginBottom:40}}><img src={LANDING_LOGO} style={{height:40,width:"auto",marginBottom:8}} alt="MyFlashCard"/><p style={{fontFamily:serif,fontSize:34,letterSpacing:-1,margin:"0 0 6px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:3,textTransform:"uppercase",color:C.textLt,margin:0}}>Sciences du vivant</p></div>
@@ -1250,10 +1497,10 @@ function RegisterView({onRegister,onBack,accounts}){
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
     <div style={{width:"100%",maxWidth:420}}>
       <div style={{textAlign:"center",marginBottom:32}}><img src={LANDING_LOGO} style={{height:36,width:"auto",marginBottom:8}} alt="MyFlashCard"/><p style={{fontFamily:serif,fontSize:30,letterSpacing:-1,margin:"0 0 4px"}}>MyFlashcard</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:3,textTransform:"uppercase",color:C.textLt,margin:0}}>Créer un compte</p></div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:24}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"#fff":C.textLt,fontSize:12,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:40,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:24}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"var(--c-onSolid)":C.textLt,fontSize:12,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:40,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
       <p style={{textAlign:"center",fontSize:12,color:C.textLt,margin:"0 0 20px"}}>{step===1?"Étape 1 — Informations":"Étape 2 — Confirmation email"}</p>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
-        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid ${C.util}30`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p><p style={{fontSize:11,color:C.again,margin:"6px 0 0",lineHeight:1.5}}>⚠️ {PSEUDO_WARNING}</p></div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
+        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid var(--c-utilSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p><p style={{fontSize:11,color:C.again,margin:"6px 0 0",lineHeight:1.5}}>⚠️ {PSEUDO_WARNING}</p></div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
         {step===2&&<div><div style={{textAlign:"center",marginBottom:24}}><p style={{fontSize:40,margin:"0 0 12px"}}>📬</p><p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Vérifie ta boîte mail</p><p style={{fontSize:13,color:C.textMed,lineHeight:1.6}}>Code envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong></p></div><div style={{marginBottom:20}}><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:32,fontWeight:700,letterSpacing:14,textAlign:"center",padding:"12px 0",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&handleVerify()} autoFocus/></div>{error&&<p style={{fontSize:12,color:C.again,margin:"0 0 14px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px",marginBottom:12}} onClick={handleVerify} disabled={verifying||code.length!==6}>{verifying?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Vérification…</>:"Créer mon compte →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16,marginTop:8}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(resendCooldown>0)return;handleSendCode();}} disabled={resendCooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:resendCooldown>0?"not-allowed":"pointer",color:resendCooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:resendCooldown>0?0.6:1}}>{resendCooldown>0?`Renvoyer (${resendCooldown}s)`:"Renvoyer un code"}</button></div><p style={{fontSize:11,color:C.textLt,textAlign:"center",marginTop:12}}>Le code expire dans 10 minutes. Vérifie tes spams.</p></div>}
       </div>
       <button onClick={onBack} style={{display:"block",margin:"20px auto 0",fontFamily:font,fontSize:13,background:"none",border:"none",color:C.textLt,cursor:"pointer",textDecoration:"underline"}}>Déjà un compte ? Se connecter</button>
@@ -1299,7 +1546,7 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
   return <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>;
 }
 // ─── Card Editor ──────────────────────────────────────────────────────────────
-function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
+function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,theme,onToggleTheme}){
   const availableGroups=userGroups?GROUPS.filter(g=>g.sem>0&&userGroups.includes(g.id)):GROUPS;
   const isNew=!card?.id;
   const initType=!isNew&&isOcclusion(card)?"occlusion":"text";
@@ -1475,7 +1722,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
       <Lbl>Type de cours</Lbl>
       <div style={{display:"flex",gap:8,marginTop:8}}>
         <button onClick={()=>{setPersonalMode(false);setPersonalErr(false);}} style={{flex:1,fontFamily:font,fontSize:12,fontWeight:!personalMode?600:400,padding:"9px 10px",cursor:"pointer",borderRadius:7,border:`2px solid ${!personalMode?C.accent:C.border}`,background:!personalMode?C.accentBg:C.surface,color:!personalMode?C.accent:C.textMed}}>{!personalMode&&"✓ "}📚 Cours officiel</button>
-        <button onClick={()=>setPersonalMode(true)} style={{flex:1,fontFamily:font,fontSize:12,fontWeight:personalMode?600:400,padding:"9px 10px",cursor:"pointer",borderRadius:7,border:`2px solid ${personalMode?"#7c3aed":C.border}`,background:personalMode?"#f5f3ff":C.surface,color:personalMode?"#7c3aed":C.textMed}}>{personalMode&&"✓ "}✏️ Mon cours personnel</button>
+        <button onClick={()=>setPersonalMode(true)} style={{flex:1,fontFamily:font,fontSize:12,fontWeight:personalMode?600:400,padding:"9px 10px",cursor:"pointer",borderRadius:7,border:`2px solid ${personalMode?"var(--c-violet)":C.border}`,background:personalMode?"var(--c-violetBg)":C.surface,color:personalMode?"var(--c-violet)":C.textMed}}>{personalMode&&"✓ "}✏️ Mon cours personnel</button>
       </div>
       <p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>{personalMode?"Ce cours n'est visible que par toi — donne-lui le nom que tu veux (ex. \"Bio Cell perso\").":"Uniquement les cours déjà créés par un administrateur."}</p>
     </div>
@@ -1484,16 +1731,16 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
     <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
       <Lbl color={personalErr?C.again:undefined}>Nom du cours personnel{personalErr?" (requis)":""}</Lbl>
       {availPersonalNames.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-        {availPersonalNames.map(n=><button key={n} onClick={()=>{setPersonalCourseName(n);setPersonalErr(false);}} style={{fontFamily:font,fontSize:11,fontWeight:personalCourseName===n?600:400,padding:"5px 10px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${personalCourseName===n?"#7c3aed":C.border}`,background:personalCourseName===n?"#ede9fe":"transparent",color:personalCourseName===n?"#7c3aed":C.textMed}}>{personalCourseName===n&&"✓ "}{n}</button>)}
+        {availPersonalNames.map(n=><button key={n} onClick={()=>{setPersonalCourseName(n);setPersonalErr(false);}} style={{fontFamily:font,fontSize:11,fontWeight:personalCourseName===n?600:400,padding:"5px 10px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${personalCourseName===n?"var(--c-violet)":C.border}`,background:personalCourseName===n?"var(--c-violetBg2)":"transparent",color:personalCourseName===n?"var(--c-violet)":C.textMed}}>{personalCourseName===n&&"✓ "}{n}</button>)}
       </div>}
       <input style={{...iLine,borderColor:personalErr?C.again:C.border}} placeholder="Ex. Bio Cell perso" value={personalCourseName} onChange={e=>{setPersonalCourseName(e.target.value);setPersonalErr(false);}}/>
       <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>{availPersonalNames.length>0?"Choisis un cours existant ci-dessus ou tape un nouveau nom pour en créer un autre.":"Tape le nom que tu veux — ce sera ton propre cours, personnel."}</p>
     </div>
   );
   const renderClassPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={PACKETS.map(pk=>({value:pk.id,label:pk.label,color:pC(pk.id),bg:pB(pk.id)}))} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div><div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={availableGroups.map(g=>({value:g.id,label:groupLabel(g)}))}/></div>{renderModeToggle()}{personalMode?renderPersonalCoursePicker():<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={availNums.map(n=>({value:n,label:`Cours ${n}`}))} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={availChapters.map((ch,i)=>({value:i+1,label:`${i+1}. ${ch}`}))} columns={1}/></div>)}</>}</div></div>);
-  return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
+  return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
     <div className="mfc-page" style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
-      {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid ${C.accent}20`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
+      {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid var(--c-accentSoft)`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
       {isNew&&(<div style={{marginBottom:24}}><Lbl>Type de carte</Lbl><div style={{display:"flex",gap:8,marginTop:8}}>{[["text","📝 Texte","Recto / Verso classique"],["occlusion","🖼 Image Occlusion","Masquer des zones sur une image"]].map(([t,lbl,desc])=>(<button key={t} onClick={()=>setCardType(t)} style={{fontFamily:font,fontSize:13,fontWeight:cardType===t?600:400,padding:"12px 20px",cursor:"pointer",borderRadius:8,border:`2px solid ${cardType===t?C.accent:C.border}`,background:cardType===t?C.accentBg:C.surface,color:cardType===t?C.accent:C.textMed,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:3}}><span>{cardType===t&&"✓ "}{lbl}</span><span style={{fontSize:11,fontWeight:400,color:cardType===t?C.accent:C.textLt}}>{desc}</span></button>))}</div></div>)}
       {cardType==="text"&&(<div className="mfc-editor-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -1515,7 +1762,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
             <div style={{display:"flex",flexWrap:"wrap",gap:6,margin:"8px 0 0"}}>
               <Tag color={pC(form.packetId)} bg={pB(form.packetId)}>{selPacket?.label}</Tag>
               <Tag color={C.accent} bg={C.accentBg}>{selGroup?.label}</Tag>
-              {personalMode?<Tag color="#7c3aed" bg="#f5f3ff">✏️ {personalCourseName.trim()||"Cours personnel"}</Tag>:<><Tag color={C.textMed} bg={C.bg}>Cours {form.num}</Tag>{availChapters[form.chapterId-1]&&<Tag color={C.textMed} bg={C.bg}>Ch. {form.chapterId} — {availChapters[form.chapterId-1]}</Tag>}</>}
+              {personalMode?<Tag color="var(--c-violet)" bg="var(--c-violetBg)">✏️ {personalCourseName.trim()||"Cours personnel"}</Tag>:<><Tag color={C.textMed} bg={C.bg}>Cours {form.num}</Tag>{availChapters[form.chapterId-1]&&<Tag color={C.textMed} bg={C.bg}>Ch. {form.chapterId} — {availChapters[form.chapterId-1]}</Tag>}</>}
             </div>
             {formFront&&<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.5}}>{formFront.slice(0,100)}{formFront.length>100?"…":""}</p>}
             {frontImg&&<img src={frontImg} style={{maxWidth:"100%",maxHeight:80,borderRadius:6,marginTop:8,display:"block"}}/>}
@@ -1573,14 +1820,14 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
                   return<g key={z.id}>
                     <rect x={z.x} y={z.y} width={z.w} height={z.h}
                       fill={isSel?z.color+"66":z.color+"44"}
-                      stroke={isSel?"#1e40af":z.color}
+                      stroke={isSel?"var(--c-blueDeep)":z.color}
                       strokeWidth={isSel?Math.max(2,HR*0.25):2}
                       style={{cursor:isSel?"grab":"pointer"}}
                     />
                     <text x={z.x+HR*0.4} y={z.y+HR*1.4} fill="white" fontSize={Math.max(14,HR)} fontWeight="bold" style={{pointerEvents:"none"}}>{i+1}</text>
                     {isSel&&[{t:'nw',x:z.x,y:z.y},{t:'ne',x:z.x+z.w,y:z.y},{t:'sw',x:z.x,y:z.y+z.h},{t:'se',x:z.x+z.w,y:z.y+z.h}].map(h=>(
                       <rect key={h.t} x={h.x-HR} y={h.y-HR} width={HR*2} height={HR*2}
-                        fill="white" stroke="#1e40af" strokeWidth={Math.max(1.5,HR*0.12)} rx={HR*0.25}
+                        fill="white" stroke="var(--c-blueDeep)" strokeWidth={Math.max(1.5,HR*0.12)} rx={HR*0.25}
                         style={{cursor:'nwse-resize'}}
                       />
                     ))}
@@ -1588,7 +1835,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
                 })}
                 {currentRect&&currentRect.w>0&&(
                   <rect x={currentRect.x} y={currentRect.y} width={currentRect.w} height={currentRect.h}
-                    fill="#1e40af18" stroke="#1e40af" strokeWidth={Math.max(1.5,imgW*0.002)} strokeDasharray={`${imgW*0.012} ${imgW*0.006}`}
+                    fill="var(--c-accentSoft)" stroke="var(--c-blueDeep)" strokeWidth={Math.max(1.5,imgW*0.002)} strokeDasharray={`${imgW*0.012} ${imgW*0.006}`}
                   />
                 )}
               </svg>}
@@ -1600,7 +1847,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards}){
             <p style={{fontFamily:serif,fontSize:15,margin:"0 0 10px"}}>Zones ({zones.length})</p>
             {zones.length===0?<p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Dessine des rectangles sur l'image.<br/>Chaque rectangle = 1 flashcard.<br/><span style={{color:C.accent}}>Tablette : toucher et glisser.</span></p>:
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {zones.map((z,i)=><div key={z.id} style={{borderRadius:6,border:`1.5px solid ${z.id===selectedZoneId?"#1e40af":z.color}`,background:z.id===selectedZoneId?"#eff6ff":z.color+"11",overflow:"hidden"}}>
+              {zones.map((z,i)=><div key={z.id} style={{borderRadius:6,border:`1.5px solid ${z.id===selectedZoneId?"var(--c-blueDeep)":z.color}`,background:z.id===selectedZoneId?"var(--c-easyBg)":z.color+"11",overflow:"hidden"}}>
                 <div onClick={()=>setSelectedZoneId(z.id===selectedZoneId?null:z.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",cursor:"pointer"}}>
                   <div style={{width:14,height:14,borderRadius:3,background:z.color,flexShrink:0}}/>
                   <span style={{fontSize:13,flex:1}}>Zone {i+1}</span>
@@ -1716,12 +1963,12 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   }
   const Pill=({active,onClick,children,color,bg})=>(<button onClick={onClick} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"5px 12px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${active?(color||C.accent):C.border}`,background:active?(bg||C.accentBg):"transparent",color:active?(color||C.accent):C.textMed,whiteSpace:"nowrap",transition:"all 0.12s"}}>{children}</button>);
   const q=search.toLowerCase().trim();
-  const highlight=text=>{if(!q||!text)return text;const idx=text.toLowerCase().indexOf(q);if(idx===-1)return text;return<>{text.slice(0,idx)}<mark style={{background:"#fef08a",borderRadius:2,padding:"0 1px"}}>{text.slice(idx,idx+q.length)}</mark>{text.slice(idx+q.length)}</>;};
+  const highlight=text=>{if(!q||!text)return text;const idx=text.toLowerCase().indexOf(q);if(idx===-1)return text;return<>{text.slice(0,idx)}<mark style={{background:"var(--c-warnBg2)",borderRadius:2,padding:"0 1px"}}>{text.slice(idx,idx+q.length)}</mark>{text.slice(idx+q.length)}</>;};
   return <div style={{maxWidth:920,margin:"0 auto",padding:24}}>
-    {orderFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:C.good,color:"#fff",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>✓ Ordre sauvegardé</div>}
+    {orderFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:C.good,color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>✓ Ordre sauvegardé</div>}
     <div style={{position:"relative",marginBottom:12}}><span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",color:C.textLt,fontSize:18,pointerEvents:"none"}}>⌕</span><input ref={searchRef} style={{...iBox,paddingLeft:44,paddingRight:44,borderRadius:10,fontSize:14,border:`1.5px solid ${search?C.accent:C.border}`,transition:"border-color 0.2s"}} placeholder="Rechercher dans le recto, verso, matière, chapitre…" value={search} onChange={e=>setSearch(e.target.value)} autoFocus/>{search&&<button onClick={()=>{setSearch("");searchRef.current?.focus();}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:20,lineHeight:1,display:"flex",alignItems:"center"}}>×</button>}</div>
     <div style={{background:C.surface,border:`1px solid ${showFilters?C.accent:C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",transition:"border-color 0.2s"}}>
-      <div style={{padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:showFilters?`1px solid ${C.border}`:"none",cursor:"pointer",background:C.bg,userSelect:"none"}} onClick={()=>setShowFilters(s=>!s)}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:13,fontWeight:500,color:C.textMed}}>🔍 Filtres</span>{hasFilters&&<span style={{fontFamily:mono,fontSize:8,letterSpacing:1,padding:"2px 8px",borderRadius:10,background:C.accent,color:"#fff",fontWeight:700}}>ACTIFS</span>}</div><div style={{display:"flex",alignItems:"center",gap:12}}>{hasFilters&&<button onClick={e=>{e.stopPropagation();clearAll();}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.again,textDecoration:"underline"}}>✕ Tout effacer</button>}<span style={{color:C.textLt,fontSize:11,fontFamily:mono}}>{showFilters?"▲":"▼"}</span></div></div>
+      <div style={{padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:showFilters?`1px solid ${C.border}`:"none",cursor:"pointer",background:C.bg,userSelect:"none"}} onClick={()=>setShowFilters(s=>!s)}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:13,fontWeight:500,color:C.textMed}}>🔍 Filtres</span>{hasFilters&&<span style={{fontFamily:mono,fontSize:8,letterSpacing:1,padding:"2px 8px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)",fontWeight:700}}>ACTIFS</span>}</div><div style={{display:"flex",alignItems:"center",gap:12}}>{hasFilters&&<button onClick={e=>{e.stopPropagation();clearAll();}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.again,textDecoration:"underline"}}>✕ Tout effacer</button>}<span style={{color:C.textLt,fontSize:11,fontFamily:mono}}>{showFilters?"▲":"▼"}</span></div></div>
       {showFilters&&<div style={{padding:"16px",display:"flex",flexDirection:"column",gap:16}}>
         <div><Lbl>Semestre</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={sem==="all"} onClick={()=>handleSemChange("all")}>Tous</Pill><Pill active={sem==="s1"} onClick={()=>handleSemChange("s1")} color={C.accent} bg={C.accentBg}>Semestre 1</Pill><Pill active={sem==="s2"} onClick={()=>handleSemChange("s2")} color={C.imp} bg={C.impBg}>Semestre 2</Pill></div></div>
         <div><Lbl>Matière {fg!=="all"&&<span style={{color:C.accent}}>· {selGroup?groupLabel(selGroup):""}</span>}</Lbl><div style={{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}}><Pill active={fg==="all"} onClick={()=>handleGroupChange("all")}>Toutes</Pill>{semGroups.map(g=>{const col=g.sem===0?C.util:g.sem===1?C.accent:C.imp;const bg=g.sem===0?C.utilBg:g.sem===1?C.accentBg:C.impBg;return<Pill key={g.id} active={fg===g.id} onClick={()=>handleGroupChange(g.id)} color={col} bg={bg}>{groupLabel(g)}</Pill>;})}</div></div>
@@ -1764,10 +2011,10 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               onDragLeave={handleDragLeave}
               onDrop={e=>handleDrop(e,idx)}
               onDragEnd={handleDragEnd}
-              style={{background:C.surface,border:`1.5px solid ${isOver?"#f59e0b":isDragging?C.accent:C.border}`,borderRadius:8,overflow:"hidden",display:"flex",opacity:isDragging?0.4:1,transition:"all 0.15s",boxShadow:isOver?"0 4px 16px rgba(245,158,11,0.25)":"none",transform:isOver?"translateY(-2px)":"none",cursor:canReorder?"grab":"default"}}
+              style={{background:C.surface,border:`1.5px solid ${isOver?"var(--c-warn)":isDragging?C.accent:C.border}`,borderRadius:8,overflow:"hidden",display:"flex",opacity:isDragging?0.4:1,transition:"all 0.15s",boxShadow:isOver?"0 4px 16px rgba(245,158,11,0.25)":"none",transform:isOver?"translateY(-2px)":"none",cursor:canReorder?"grab":"default"}}
               onMouseEnter={e=>{if(!isDragging)e.currentTarget.style.boxShadow="0 2px 10px rgba(0,0,0,0.07)";}}
               onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";}}>
-              {canReorder&&<div style={{width:28,background:isOver?"#fef3c7":isDragging?C.accentBg:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"grab",borderRight:`1px solid ${C.border}`}}>
+              {canReorder&&<div style={{width:28,background:isOver?"var(--c-warnBg)":isDragging?C.accentBg:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"grab",borderRight:`1px solid ${C.border}`}}>
                 <span style={{fontSize:14,color:C.textLt,userSelect:"none",lineHeight:1}}>⠿</span>
               </div>}
               {canReorder?(
@@ -1894,7 +2141,7 @@ function AdminUsers({accounts,onSave,onDelete}){
     {delUser&&<Modal onClose={()=>setDelUser(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer {delUser} ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>L'étudiant ne pourra plus se connecter.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delUser);setDelUser(null);}}>Supprimer</Btn><Btn onClick={()=>setDelUser(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
-function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUser,onSortCards,onBack}){
+function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUser,onSortCards,onBack,theme,onToggleTheme}){
   const [tab,setTab]=useState("cards"),[subView,setSubView]=useState("list"),[editCard,setEditCard]=useState(null);
   const [cardKey,setCardKey]=useState(0);
   const [saveFlash,setSaveFlash]=useState(false);
@@ -1912,11 +2159,11 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
     {tab==="cards"&&subView==="editor"&&(
       <div style={{position:"fixed",inset:0,zIndex:500,background:C.bg,overflowY:"auto"}}>
-        {saveFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:600,background:C.good,color:"#fff",borderRadius:8,padding:"12px 20px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",display:"flex",alignItems:"center",gap:8,animation:"fadeIn 0.2s ease"}}>✓ Carte enregistrée — formulaire prêt pour la suivante</div>}
+        {saveFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:600,background:C.good,color:"var(--c-onSolid)",borderRadius:8,padding:"12px 20px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",display:"flex",alignItems:"center",gap:8,animation:"fadeIn 0.2s ease"}}>✓ Carte enregistrée — formulaire prêt pour la suivante</div>}
         <CardEditor key={cardKey} card={editCard} onSave={handleSave} onCancel={()=>setSubView("list")}/>
       </div>
     )}
-    <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
     <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="users" label="👤 Étudiants"/></div>
     {tab==="cards"&&<AdminCards cards={cards} onNew={()=>{setEditCard(null);setSubView("editor");}} onEdit={c=>{setEditCard(c);setSubView("editor");}} onDelete={onDeleteCard} onSortCards={onSortCards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
@@ -1928,7 +2175,7 @@ function UpgradeModal({currentPlanId,username,onClose}){
   const packPlans=PLANS.filter(p=>["sem1","sem2","both"].includes(p.id));
   const subjectPlans=PLANS.filter(p=>p.id.startsWith("g-"));
   const handlePay=plan=>{setRedirectingTo(plan.id);setTimeout(()=>redirectToStripe(plan.id,username),300);};
-  const PlanRow=({plan})=>{const isCurrent=plan.id===currentPlanId,isRedirect=redirectingTo===plan.id;return<div style={{border:`1.5px solid ${isCurrent?C.accent:C.border}`,borderRadius:10,padding:"14px 18px",background:isCurrent?C.accentBg:C.surface,display:"flex",justifyContent:"space-between",alignItems:"center",opacity:redirectingTo&&!isRedirect?0.4:1,transition:"opacity 0.2s",marginBottom:8}}><div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><p style={{fontFamily:serif,fontSize:14,margin:0,color:isCurrent?C.accent:C.text}}>{plan.label}</p>{isCurrent&&<Tag color={C.accent} bg={C.accentBg} small>Actuel</Tag>}</div><p style={{fontSize:11,color:C.textMed,margin:0}}>{plan.desc}</p></div><div style={{textAlign:"right",flexShrink:0,marginLeft:16}}><p style={{fontSize:18,fontWeight:300,margin:"0 0 6px",color:C.text}}>{plan.price}</p>{!isCurrent&&<button onClick={()=>handlePay(plan)} disabled={!!redirectingTo} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",cursor:redirectingTo?"wait":"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:isRedirect?C.accent:C.accentBg,color:isRedirect?"#fff":C.accent,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}>{isRedirect?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Redirection...</>:<>Payer {plan.price} &rarr;</>}</button>}{isCurrent&&<span style={{fontSize:11,color:C.accent,fontWeight:500}}>Actif</span>}</div></div>;};
+  const PlanRow=({plan})=>{const isCurrent=plan.id===currentPlanId,isRedirect=redirectingTo===plan.id;return<div style={{border:`1.5px solid ${isCurrent?C.accent:C.border}`,borderRadius:10,padding:"14px 18px",background:isCurrent?C.accentBg:C.surface,display:"flex",justifyContent:"space-between",alignItems:"center",opacity:redirectingTo&&!isRedirect?0.4:1,transition:"opacity 0.2s",marginBottom:8}}><div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}><p style={{fontFamily:serif,fontSize:14,margin:0,color:isCurrent?C.accent:C.text}}>{plan.label}</p>{isCurrent&&<Tag color={C.accent} bg={C.accentBg} small>Actuel</Tag>}</div><p style={{fontSize:11,color:C.textMed,margin:0}}>{plan.desc}</p></div><div style={{textAlign:"right",flexShrink:0,marginLeft:16}}><p style={{fontSize:18,fontWeight:300,margin:"0 0 6px",color:C.text}}>{plan.price}</p>{!isCurrent&&<button onClick={()=>handlePay(plan)} disabled={!!redirectingTo} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",cursor:redirectingTo?"wait":"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:isRedirect?C.accent:C.accentBg,color:isRedirect?"var(--c-onSolid)":C.accent,whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}>{isRedirect?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Redirection...</>:<>Payer {plan.price} &rarr;</>}</button>}{isCurrent&&<span style={{fontSize:11,color:C.accent,fontWeight:500}}>Actif</span>}</div></div>;};
   return <Modal onClose={onClose} width={520}>
     <p style={{fontFamily:serif,fontSize:22,margin:"0 0 4px"}}>Changer d'abonnement</p>
     <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px"}}>Abonnement actuel : <strong>{PLANS.find(p=>p.id===currentPlanId)?.label||"Accès gratuit"}</strong></p>
@@ -1937,7 +2184,7 @@ function UpgradeModal({currentPlanId,username,onClose}){
       {tab==="packs"&&packPlans.map(plan=><PlanRow key={plan.id} plan={plan}/>)}
       {tab==="subjects"&&<div><p style={{fontSize:12,color:C.textMed,margin:"0 0 14px",lineHeight:1.6}}>Achète uniquement les matières dont tu as besoin.</p><p style={{fontFamily:mono,fontSize:9,letterSpacing:2,color:C.textLt,margin:"0 0 8px",textTransform:"uppercase"}}>Semestre 1</p>{subjectPlans.filter(p=>["g-cell-bio","g-histo","g-biochem","g-biomol","g-biophys","g-biostat"].includes(p.id)).map(plan=><PlanRow key={plan.id} plan={plan}/>)}<p style={{fontFamily:mono,fontSize:9,letterSpacing:2,color:C.textLt,margin:"14px 0 8px",textTransform:"uppercase"}}>Semestre 2</p>{subjectPlans.filter(p=>["g-anatomie","g-physio","g-medic","g-ssh"].includes(p.id)).map(plan=><PlanRow key={plan.id} plan={plan}/>)}</div>}
     </div>
-    <div style={{background:C.goodBg,border:`1px solid ${C.good}25`,borderRadius:8,padding:"10px 14px",margin:"16px 0",display:"flex",alignItems:"center",gap:8}}><span>🔒</span><p style={{fontSize:12,color:C.good,margin:0}}>Paiement sécurisé par <strong>Stripe</strong> · Accès activé automatiquement</p></div>
+    <div style={{background:C.goodBg,border:`1px solid var(--c-goodSoft)`,borderRadius:8,padding:"10px 14px",margin:"16px 0",display:"flex",alignItems:"center",gap:8}}><span>🔒</span><p style={{fontSize:12,color:C.good,margin:0}}>Paiement sécurisé par <strong>Stripe</strong> · Accès activé automatiquement</p></div>
     <Btn full onClick={onClose}>Fermer</Btn>
   </Modal>;
 }
@@ -1964,7 +2211,7 @@ function ShopTab({userGroups,fullGroups,planId,username,cards,progress,settings,
       const col=pC(pk.id),bg=pB(pk.id);
       const {total,due}=chapterStats(cards,progress,group.id,activeCours,chapterId,pk.id);
       const hasDue=due>0,upToDate=total>0&&!hasDue;
-      return <button onClick={()=>total>0&&onStudy(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 10px",cursor:total>0?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"#e8e5e0"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"#c0bbb5",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:78}} onMouseEnter={e=>{if(total>0)e.currentTarget.style.borderColor=col;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=hasDue?col:upToDate?C.border:"#e8e5e0";}}><span style={{fontSize:10}}>{pk.label}</span><span style={{fontSize:10,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}` :"✓ à jour"}</span></button>;
+      return <button onClick={()=>total>0&&onStudy(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 10px",cursor:total>0?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:78}} onMouseEnter={e=>{if(total>0)e.currentTarget.style.borderColor=col;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=hasDue?col:upToDate?C.border:"var(--c-borderSoft)";}}><span style={{fontSize:10}}>{pk.label}</span><span style={{fontSize:10,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}` :"✓ à jour"}</span></button>;
     }
     return(
       <div style={{background:C.surface,border:`1.5px solid ${C.good}`,borderRadius:10,overflow:"hidden",marginBottom:10}}>
@@ -1974,22 +2221,22 @@ function ShopTab({userGroups,fullGroups,planId,username,cards,progress,settings,
             <div>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
                 <p style={{fontFamily:serif,fontSize:14,margin:0,color:C.good}}>{plan.label}</p>
-                <Tag color={C.good} bg={"#d1fae5"} small>Débloqué</Tag>
-                {totalDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:C.accent,color:"#fff"}}>{totalDue} à réviser</span>}
+                <Tag color={C.good} bg={"var(--c-greenSoft)"} small>Débloqué</Tag>
+                {totalDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)"}}>{totalDue} à réviser</span>}
               </div>
               <p style={{fontSize:11,color:C.good,margin:0,opacity:0.8}}>{plan.desc}</p>
             </div>
           </div>
-          <button onClick={()=>{setOpen(o=>!o);setActiveCours(null);}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.good}`,background:open?"#d1fae5":C.good,color:open?C.good:"#fff",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",flexShrink:0,marginLeft:12}}>
+          <button onClick={()=>{setOpen(o=>!o);setActiveCours(null);}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.good}`,background:open?"var(--c-greenSoft)":C.good,color:open?C.good:"var(--c-onSolid)",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",flexShrink:0,marginLeft:12}}>
             {open?"Fermer ▲":"Accéder au cours ▼"}
           </button>
         </div>
         {open&&(
           <div style={{animation:"fadeIn 0.18s ease"}}>
             <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",borderBottom:activeCours?`1px solid ${C.border}`:"none",borderTop:`1px solid ${C.border}`,background:C.surface}}>
-              {group.nums.map(n=>{const active=activeCours===n;const due=courseDueCount(cards,progress,group.id,n);return<button key={n} onClick={()=>setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?C.accent:due>0?C.good:C.border}`,background:active?C.accentBg:due>0?C.goodBg:"transparent",color:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7}}><span>Cours {n}</span>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"#fff"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></button>;})}
+              {group.nums.map(n=>{const active=activeCours===n;const due=courseDueCount(cards,progress,group.id,n);return<button key={n} onClick={()=>setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?C.accent:due>0?C.good:C.border}`,background:active?C.accentBg:due>0?C.goodBg:"transparent",color:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7}}><span>Cours {n}</span>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></button>;})}
             </div>
-            {activeCours&&chapters.length>0&&chapters.map((chName,i)=>{const chIdx=i+1;const chDue=PACKETS.reduce((acc,pk)=>acc+chapterStats(cards,progress,group.id,activeCours,chIdx,pk.id).due,0);return<div key={chIdx} style={{display:"flex",alignItems:"center",padding:"9px 18px",gap:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}><div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}><span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:18,flexShrink:0}}>{chIdx}</span><span style={{fontFamily:font,fontSize:13,color:chDue>0?C.text:C.textMed,fontWeight:chDue>0?500:400}}>{chName}</span>{chDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"#fff",flexShrink:0}}>{chDue}</span>}</div><div style={{display:"flex",gap:6,flexShrink:0}}>{PACKETS.map(pk=><PktBtn key={pk.id} chapterId={chIdx} pk={pk}/>)}</div></div>;})}
+            {activeCours&&chapters.length>0&&chapters.map((chName,i)=>{const chIdx=i+1;const chDue=PACKETS.reduce((acc,pk)=>acc+chapterStats(cards,progress,group.id,activeCours,chIdx,pk.id).due,0);return<div key={chIdx} style={{display:"flex",alignItems:"center",padding:"9px 18px",gap:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}><div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}><span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:18,flexShrink:0}}>{chIdx}</span><span style={{fontFamily:font,fontSize:13,color:chDue>0?C.text:C.textMed,fontWeight:chDue>0?500:400}}>{chName}</span>{chDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)",flexShrink:0}}>{chDue}</span>}</div><div style={{display:"flex",gap:6,flexShrink:0}}>{PACKETS.map(pk=><PktBtn key={pk.id} chapterId={chIdx} pk={pk}/>)}</div></div>;})}
             {activeCours&&chapters.length===0&&(()=>{
               const noChTotal=cards.filter(c=>c.groupId===group.id&&c.num===activeCours).length;
               if(noChTotal===0)return<div style={{padding:"12px 18px"}}><p style={{fontSize:12,color:C.textLt,margin:0}}>Aucune carte pour ce cours.</p></div>;
@@ -1997,7 +2244,7 @@ function ShopTab({userGroups,fullGroups,planId,username,cards,progress,settings,
               return<div style={{display:"flex",alignItems:"center",padding:"9px 18px",gap:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
                   <span style={{fontFamily:font,fontSize:13,color:noChDue>0?C.text:C.textMed,fontWeight:noChDue>0?500:400}}>Toutes les cartes</span>
-                  {noChDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"#fff"}}>{noChDue}</span>}
+                  {noChDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)"}}>{noChDue}</span>}
                 </div>
                 <div style={{display:"flex",gap:6,flexShrink:0}}>{PACKETS.map(pk=><PktBtn key={pk.id} chapterId={1} pk={pk}/>)}</div>
               </div>;
@@ -2015,7 +2262,7 @@ function ShopTab({userGroups,fullGroups,planId,username,cards,progress,settings,
         <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.5,flex:1}}>{plan.desc}</p>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:4}}>
           <p style={{fontSize:22,fontWeight:300,margin:0}}>{plan.price}</p>
-          <button onClick={()=>{setRedir(true);setTimeout(()=>redirectToStripe(plan.id,username),300);}} disabled={redir} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:redir?"wait":"pointer",borderRadius:6,border:`1.5px solid ${C.imp}`,background:redir?C.imp:C.impBg,color:redir?"#fff":C.imp,display:"flex",alignItems:"center",gap:5,transition:"all 0.2s",whiteSpace:"nowrap"}}>{redir?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Redirection…</>:<>Acheter →</>}</button>
+          <button onClick={()=>{setRedir(true);setTimeout(()=>redirectToStripe(plan.id,username),300);}} disabled={redir} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:redir?"wait":"pointer",borderRadius:6,border:`1.5px solid ${C.imp}`,background:redir?C.imp:C.impBg,color:redir?"var(--c-onSolid)":C.imp,display:"flex",alignItems:"center",gap:5,transition:"all 0.2s",whiteSpace:"nowrap"}}>{redir?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Redirection…</>:<>Acheter →</>}</button>
         </div>
       </div>
     );
@@ -2047,9 +2294,9 @@ function ShopTab({userGroups,fullGroups,planId,username,cards,progress,settings,
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:10}}>{availableSem2.map(plan=><BuyCard key={plan.id} plan={plan}/>)}</div>
         </div>
       )}
-      <div style={{background:C.accentBg,border:`1px solid ${C.accent}20`,borderRadius:10,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+      <div style={{background:C.accentBg,border:`1px solid var(--c-accentSoft)`,borderRadius:10,padding:"16px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
         <div><p style={{fontSize:13,color:C.accent,fontWeight:600,margin:"0 0 2px"}}>💡 Packs semestre — meilleur rapport qualité/prix</p><p style={{fontSize:12,color:C.textMed,margin:0}}>Sem. 1 complet à 99 € · Sem. 2 complet à 149 € · Année entière à 200 €</p></div>
-        <button onClick={onShowPacks} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accent,color:"#fff",whiteSpace:"nowrap"}}>Voir les packs →</button>
+        <button onClick={onShowPacks} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accent,color:"var(--c-onSolid)",whiteSpace:"nowrap"}}>Voir les packs →</button>
       </div>
     </div>
   );
@@ -2082,11 +2329,11 @@ function StatsTab({username,progress,allCards,onUnbury}){
     return days;
   },[stats]);
   const heatColor=(n)=>{
-    if(n===0)return"#e8e4dc";
-    if(n<=2)return"#bbf7d0";
-    if(n<=5)return"#4ade80";
-    if(n<=15)return"#16a34a";
-    return"#14532d";
+    if(n===0)return"var(--c-borderSoft2)";
+    if(n<=2)return"var(--c-greenSoft2)";
+    if(n<=5)return"var(--c-green1)";
+    if(n<=15)return"var(--c-green2)";
+    return"var(--c-green3)";
   };
   const weeks=useMemo(()=>{
     const ws=[];
@@ -2131,7 +2378,7 @@ function StatsTab({username,progress,allCards,onUnbury}){
       ):(
         <>
           <div className="mfc-autofill" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:28}}>
-            <StatCard label="Streak" value={`${streak} ${streak>0?"🔥":""}`} sub={`${streak===0?"Pas encore actif":streak===1?"1 jour d'affilée":streak+" jours d'affilée"}`} accent={streak>0?"#ea580c":C.text}/>
+            <StatCard label="Streak" value={`${streak} ${streak>0?"🔥":""}`} sub={`${streak===0?"Pas encore actif":streak===1?"1 jour d'affilée":streak+" jours d'affilée"}`} accent={streak>0?"var(--c-streak)":C.text}/>
             <StatCard label="Aujourd'hui" value={todayCards} sub={todayCards>0?`${Math.round(todayCorrect/todayCards*100)}% de réussite`:"Pas encore révisé"} accent={todayCards>0?C.accent:C.text}/>
             <StatCard label="Total révisées" value={totalCards.toLocaleString("fr-FR")} sub="cartes au total"/>
             <StatCard label="Taux de réussite" value={`${successRate}%`} sub={`${totalCorrect} correctes / ${totalCards}`} accent={successRate>=80?C.good:successRate>=60?C.hard:C.again}/>
@@ -2182,7 +2429,7 @@ function StatsTab({username,progress,allCards,onUnbury}){
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:16}}>🙈</span>
               <p style={{fontFamily:serif,fontSize:15,margin:0}}>Cartes enfouies</p>
-              <span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:"#374151",color:"#fff",fontWeight:700}}>{buriedCards.length}</span>
+              <span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:"var(--c-toast)",color:"var(--c-onSolid)",fontWeight:700}}>{buriedCards.length}</span>
             </div>
             <p style={{fontSize:11,color:C.textLt,margin:0}}>Exclues de tes révisions · clique pour désenfouir</p>
           </div>
@@ -2199,7 +2446,7 @@ function StatsTab({username,progress,allCards,onUnbury}){
                       {grp&&<Tag color={C.textMed} bg={C.bg} small>{grp.label}</Tag>}
                       <Tag color={C.textMed} bg={C.bg} small>Cours {card.num}</Tag>
                       {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{card.chapterId} {chName}</Tag>}
-                      {card.isUserCard&&<Tag color={"#7c3aed"} bg={"#f5f3ff"} small>✏️ Perso</Tag>}
+                      {card.isUserCard&&<Tag color={"var(--c-violet)"} bg={"var(--c-violetBg)"} small>✏️ Perso</Tag>}
                     </div>
                     {isOcclusion(card)?<p style={{fontFamily:serif,fontSize:12,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{card.front}</p>}
                   </div>
@@ -2242,7 +2489,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       const total=pkCards.length;
       const col=pC(pk.id),bg=pB(pk.id);
       const hasDue=due>0,upToDate=total>0&&!hasDue;
-      return<button onClick={()=>hasDue&&onStudyUser(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"#e8e5e0"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"#c0bbb5",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
+      return<button onClick={()=>hasDue&&onStudyUser(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
         <span style={{fontSize:9}}>{pk.label}</span>
         <span style={{fontSize:9,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}`:upToDate?"✓ à jour":"vide"}</span>
       </button>;
@@ -2259,9 +2506,9 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
         {availNums.map(n=>{
           const active=activeCours===n;
           const due=groupCards.filter(c=>c.num===n&&isDue(progress[c.id])).length;
-          return<button key={n} onClick={()=>{setActiveCours(active?null:n);setExpandedCh(null);}} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?"#7c3aed":due>0?C.good:C.border}`,background:active?"#ede9fe":due>0?C.goodBg:"transparent",color:active?"#7c3aed":due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7}}>
+          return<button key={n} onClick={()=>{setActiveCours(active?null:n);setExpandedCh(null);}} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?"var(--c-violet)":due>0?C.good:C.border}`,background:active?"var(--c-violetBg2)":due>0?C.goodBg:"transparent",color:active?"var(--c-violet)":due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7}}>
             <span>Cours {n}</span>
-            {due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"#fff"}}>{due}</span>}
+            {due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{due}</span>}
             <span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span>
           </button>;
         })}
@@ -2278,15 +2525,15 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
               <div style={{display:"flex",alignItems:"center",gap:7,flex:1,minWidth:160}}>
                 <span style={{fontFamily:mono,fontSize:9,color:C.textLt,minWidth:18}}>{chId}</span>
                 <span style={{fontFamily:font,fontSize:13,color:chDue>0?C.text:C.textMed,fontWeight:chDue>0?500:400}}>{chName}</span>
-                {chDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:"#7c3aed",color:"#fff"}}>{chDue}</span>}
+                {chDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:"var(--c-violet)",color:"var(--c-onSolid)"}}>{chDue}</span>}
               </div>
               <div style={{display:"flex",gap:5,flexShrink:0}}>
                 {PACKETS.map(pk=><UserPktBtn key={pk.id} chapterId={chId} pk={pk}/>)}
-                {chDue>0&&<button onClick={()=>onStudyUser(group.id,activeCours,chId,null)} style={{fontFamily:font,fontSize:10,fontWeight:600,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"#ede9fe",color:"#7c3aed",minWidth:52,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9}}>Tout</span><span style={{fontSize:9,fontWeight:400}}>{chDue} carte{chDue>1?"s":""}</span></button>}
+                {chDue>0&&<button onClick={()=>onStudyUser(group.id,activeCours,chId,null)} style={{fontFamily:font,fontSize:10,fontWeight:600,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"var(--c-violetBg2)",color:"var(--c-violet)",minWidth:52,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9}}>Tout</span><span style={{fontSize:9,fontWeight:400}}>{chDue} carte{chDue>1?"s":""}</span></button>}
                 <button onClick={()=>setExpandedCh(expanded?null:chId)} style={{fontFamily:font,fontSize:10,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:expanded?C.bg:"transparent",color:C.textMed}}>{expanded?"▲ Masquer":`▼ Voir (${chCards.length})`}</button>
               </div>
             </div>
-            {expanded&&<div style={{background:"#fafaf9"}}>
+            {expanded&&<div style={{background:"var(--c-listBg)"}}>
               {chCards.map(card=>{
                 const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
                 const isIntegrated=card.integrated;
@@ -2331,17 +2578,17 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       const total=pkCards.length;
       const col=pC(pk.id),bg=pB(pk.id);
       const hasDue=due>0,upToDate=total>0&&!hasDue;
-      return<button onClick={()=>hasDue&&onStudyPersonal(courseName,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"#e8e5e0"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"#c0bbb5",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
+      return<button onClick={()=>hasDue&&onStudyPersonal(courseName,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
         <span style={{fontSize:9}}>{pk.label}</span>
         <span style={{fontSize:9,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}`:upToDate?"✓ à jour":"vide"}</span>
       </button>;
     }
     const courseDue=courseCards.filter(c=>isDue(progress[c.id])).length;
-    return<div style={{background:C.surface,border:"1px solid #7c3aed40",borderRadius:10,overflow:"hidden",marginBottom:12}}>
-      <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:"#f5f3ff",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+    return<div style={{background:C.surface,border:"1px solid var(--c-violetSoft)",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+      <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:"var(--c-violetBg)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          <p style={{fontFamily:serif,fontSize:15,margin:0,color:"#7c3aed"}}>✏️ {courseName}</p>
-          <Tag color="#7c3aed" bg="#ede9fe" small>Personnel</Tag>
+          <p style={{fontFamily:serif,fontSize:15,margin:0,color:"var(--c-violet)"}}>✏️ {courseName}</p>
+          <Tag color="var(--c-violet)" bg="var(--c-violetBg2)" small>Personnel</Tag>
           {subjectLabels.map(l=><Tag key={l} color={C.textMed} bg={C.bg} small>{l}</Tag>)}
           <Tag color={C.textMed} bg={C.bg} small>{courseCards.length} carte{courseCards.length>1?"s":""}</Tag>
         </div>
@@ -2350,7 +2597,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
           <button onClick={()=>setExpanded(e=>!e)} style={{fontFamily:font,fontSize:10,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:expanded?C.bg:"transparent",color:C.textMed}}>{expanded?"▲ Masquer":`▼ Voir (${courseCards.length})`}</button>
         </div>
       </div>
-      {expanded&&<div style={{background:"#fafaf9"}}>
+      {expanded&&<div style={{background:"var(--c-listBg)"}}>
         {courseCards.map(card=>{
           const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
           const dueCard=isDue(progress[card.id]);
@@ -2383,7 +2630,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       </div>
       <Btn fill onClick={onNew} style={{flexShrink:0}}>+ Créer une carte</Btn>
     </div>
-    {integratedCount>0&&<div style={{background:C.goodBg,border:`1px solid ${C.good}25`,borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span>🔗</span><p style={{fontSize:12,color:C.good,margin:0}}><strong>{integratedCount} carte{integratedCount>1?"s":""} intégrée{integratedCount>1?"s":""}</strong> — apparaissent dans les onglets Semestre 1/2 aux côtés des cartes officielles</p></div>}
+    {integratedCount>0&&<div style={{background:C.goodBg,border:`1px solid var(--c-goodSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span>🔗</span><p style={{fontSize:12,color:C.good,margin:0}}><strong>{integratedCount} carte{integratedCount>1?"s":""} intégrée{integratedCount>1?"s":""}</strong> — apparaissent dans les onglets Semestre 1/2 aux côtés des cartes officielles</p></div>}
     {userCards.length===0?<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
       <p style={{fontSize:36,margin:"0 0 12px"}}>✏️</p>
       <p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Aucune carte personnelle</p>
@@ -2454,11 +2701,11 @@ function RankTab({username,tick}){
   const sum30=history.reduce((a,h)=>a+h.pts,0);
   const Toggle=({on,onClick,children,col})=>(
     <button onClick={onClick} style={{fontFamily:font,fontSize:12,fontWeight:500,padding:"8px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${on?(col||C.accent):C.border}`,background:on?(col?col+"14":C.accentBg):"transparent",color:on?(col||C.accent):C.textMed,display:"flex",alignItems:"center",gap:8}}>
-      <span style={{width:15,height:15,borderRadius:4,border:`1.5px solid ${on?(col||C.accent):C.border}`,background:on?(col||C.accent):"transparent",color:"#fff",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{on?"✓":""}</span>
+      <span style={{width:15,height:15,borderRadius:4,border:`1.5px solid ${on?(col||C.accent):C.border}`,background:on?(col||C.accent):"transparent",color:"var(--c-onSolid)",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{on?"✓":""}</span>
       {children}
     </button>
   );
-  const SubTab=({id,label})=><button onClick={()=>setSub(id)} style={{fontFamily:font,fontSize:12,fontWeight:sub===id?600:400,padding:"7px 14px",cursor:"pointer",border:"none",borderBottom:`2px solid ${sub===id?"#b7791f":"transparent"}`,background:"transparent",color:sub===id?"#b7791f":C.textMed,marginBottom:-1}}>{label}</button>;
+  const SubTab=({id,label})=><button onClick={()=>setSub(id)} style={{fontFamily:font,fontSize:12,fontWeight:sub===id?600:400,padding:"7px 14px",cursor:"pointer",border:"none",borderBottom:`2px solid ${sub===id?"var(--c-gold)":"transparent"}`,background:"transparent",color:sub===id?"var(--c-gold)":C.textMed,marginBottom:-1}}>{label}</button>;
   const myName=rankDisplayName(username,prefs.anon);
   return(
     <div style={{animation:"fadeIn 0.18s ease"}}>
@@ -2472,7 +2719,7 @@ function RankTab({username,tick}){
           <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 6px"}}>Rang actuel</p>
           <p style={{fontFamily:serif,fontSize:26,margin:"0 0 2px",color:rank.col}}>{rank.name}</p>
           <p style={{fontSize:13,color:C.textMed,margin:"0 0 14px"}}><strong style={{color:C.text,fontSize:16}}>{pts}</strong> point{pts>1?"s":""} aujourd'hui · {today.cards} carte{today.cards>1?"s":""} comptabilisée{today.cards>1?"s":""}</p>
-          <div style={{height:9,background:"#eeebe5",borderRadius:6,overflow:"hidden"}}>
+          <div style={{height:9,background:"var(--c-track)",borderRadius:6,overflow:"hidden"}}>
             <div style={{height:9,width:`${pctToNext*100}%`,background:rank.col,borderRadius:6,transition:"width 0.4s"}}/>
           </div>
           <p style={{fontSize:11,color:C.textLt,margin:"7px 0 0"}}>
@@ -2510,7 +2757,7 @@ function RankTab({username,tick}){
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:14}}>
           <p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Le classement public est <strong>facultatif</strong>. Tu peux y participer sous ton nom d'utilisateur ou de façon anonyme, et te retirer à tout moment (ta ligne est alors supprimée).</p>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <Toggle on={prefs.share} col="#b7791f" onClick={()=>applyPrefs({...prefs,share:!prefs.share})}>Participer au classement public</Toggle>
+            <Toggle on={prefs.share} col="var(--c-gold)" onClick={()=>applyPrefs({...prefs,share:!prefs.share})}>Participer au classement public</Toggle>
             <Toggle on={prefs.anon} col={C.accent} onClick={()=>prefs.share&&applyPrefs({...prefs,anon:!prefs.anon})}>Apparaître comme « Anonyme »</Toggle>
           </div>
           {prefs.share&&<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0"}}>Tu apparais sous le nom : <strong style={{color:C.text}}>{myName}</strong></p>}
@@ -2519,7 +2766,7 @@ function RankTab({username,tick}){
           <p style={{fontSize:13,color:C.textLt,padding:"20px 0",textAlign:"center"}}>Chargement du classement…</p>
         ):board===null?(
           <div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"22px",background:C.surface}}>
-            <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le classement collectif n'est pas disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"#f0ece6",padding:"1px 5px",borderRadius:4}}>daily_points</code> n'existe pas encore dans Supabase. Ton rang personnel fonctionne normalement.</p>
+            <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le classement collectif n'est pas disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"var(--c-chipBg)",padding:"1px 5px",borderRadius:4}}>daily_points</code> n'existe pas encore dans Supabase. Ton rang personnel fonctionne normalement.</p>
             <p style={{fontSize:11,color:C.textLt,margin:0,lineHeight:1.6}}>À créer une fois dans l'éditeur SQL Supabase (voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_daily_points.sql</code>).</p>
           </div>
         ):board.length===0?(
@@ -2567,7 +2814,7 @@ function RankTab({username,tick}){
             {history.map(h=>{
               const r=rankFor(h.pts);
               return <div key={h.key} title={`${h.key} · ${h.pts} pts · ${h.cards} cartes`} style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",height:"100%"}}>
-                <div style={{height:`${Math.max(h.pts?4:1,(h.pts/maxHist)*100)}%`,background:h.pts?r.col:"#e8e5e0",borderRadius:"3px 3px 0 0",transition:"height 0.3s"}}/>
+                <div style={{height:`${Math.max(h.pts?4:1,(h.pts/maxHist)*100)}%`,background:h.pts?r.col:"var(--c-borderSoft)",borderRadius:"3px 3px 0 0",transition:"height 0.3s"}}/>
               </div>;
             })}
           </div>
@@ -2709,7 +2956,7 @@ function ForumTab({currentUser,pseudo}){
       <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Chargement du forum…</p>
     ):posts===null?(
       <div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"22px",background:C.surface}}>
-        <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le forum n'est pas encore disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"#f0ece6",padding:"1px 5px",borderRadius:4}}>forum_posts</code> n'existe pas encore dans Supabase.</p>
+        <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le forum n'est pas encore disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"var(--c-chipBg)",padding:"1px 5px",borderRadius:4}}>forum_posts</code> n'existe pas encore dans Supabase.</p>
         <p style={{fontSize:11,color:C.textLt,margin:0,lineHeight:1.6}}>À créer une fois dans l'éditeur SQL Supabase — voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_forum_posts.sql</code>.</p>
       </div>
     ):topLevel.length===0?(
@@ -2722,7 +2969,7 @@ function ForumTab({currentUser,pseudo}){
   </div>;
 }
 // ─── Dashboard ────────────────────────────────────────────────────────────────
-function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onStudyPersonal,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner,pointsTick,pseudo}){
+function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onStudyPersonal,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner,pointsTick,pseudo,theme,onToggleTheme}){
   const isAdmin=currentUser.role==="admin";
   const userGroups=currentUser.plan?.groups||[];
   const fullGroups=currentUser.plan?.fullGroups||[];
@@ -2770,7 +3017,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
       const col=pC(pk.id),bg=pB(pk.id);
       const {total,due}=chapterStats(allCards,progress,group.id,activeCours,chapterId,pk.id);
       const hasDue=due>0,upToDate=total>0&&!hasDue;
-      return <button onClick={()=>total>0&&onStudy(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 10px",cursor:total>0?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"#e8e5e0"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"#c0bbb5",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:78,transition:"border-color 0.15s"}} onMouseEnter={e=>{if(total>0)e.currentTarget.style.borderColor=col;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=hasDue?col:upToDate?C.border:"#e8e5e0";}}><span style={{fontSize:10}}>{pk.label}</span><span style={{fontSize:10,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}` :"✓ à jour"}</span></button>;
+      return <button onClick={()=>total>0&&onStudy(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 10px",cursor:total>0?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:78,transition:"border-color 0.15s"}} onMouseEnter={e=>{if(total>0)e.currentTarget.style.borderColor=col;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=hasDue?col:upToDate?C.border:"var(--c-borderSoft)";}}><span style={{fontSize:10}}>{pk.label}</span><span style={{fontSize:10,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}` :"✓ à jour"}</span></button>;
     }
     return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12}}>
       <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg}}><p style={{fontFamily:serif,fontSize:15,margin:0}}>{group.label}</p></div>
@@ -2779,7 +3026,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
           const locked=!isAdmin&&!isCourseAccessible(group.id,n,userGroups,fullGroups);
           const active=activeCours===n;
           const due=locked?0:courseDueCount(allCards,progress,group.id,n);
-          return <button key={n} onClick={()=>locked?setShowUpgrade(true):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${locked?C.border:active?C.accent:due>0?C.good:C.border}`,background:locked?"transparent":active?C.accentBg:due>0?C.goodBg:"transparent",color:locked?C.textLt:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s",opacity:locked?0.7:1}}><span>Cours {n}</span>{locked?<span style={{fontSize:10}}>🔒</span>:<>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"#fff"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></>}</button>;
+          return <button key={n} onClick={()=>locked?setShowUpgrade(true):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${locked?C.border:active?C.accent:due>0?C.good:C.border}`,background:locked?"transparent":active?C.accentBg:due>0?C.goodBg:"transparent",color:locked?C.textLt:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s",opacity:locked?0.7:1}}><span>Cours {n}</span>{locked?<span style={{fontSize:10}}>🔒</span>:<>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></>}</button>;
         })}
       </div>
       {activeCours&&(
@@ -2790,12 +3037,12 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
             if(!courseTotal)return null;
             const upToDate=courseTotal>0&&courseDue===0;
             return(
-              <div style={{padding:"10px 18px",borderBottom:`1px solid ${C.border}`,background:courseDue>0?"#faf8ff":"#f9f9f9",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+              <div style={{padding:"10px 18px",borderBottom:`1px solid ${C.border}`,background:courseDue>0?"var(--c-violetTint)":"var(--c-surfaceAlt)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:"#7c3aed",textTransform:"uppercase",fontWeight:600}}>Cours {activeCours} complet</span>
-                  <span style={{fontFamily:mono,fontSize:9,color:courseDue>0?"#7c3aed":"#9ca3af"}}>{upToDate?"✓ tout à jour":`${courseDue} carte${courseDue>1?"s":""} à réviser`}</span>
+                  <span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:"var(--c-violet)",textTransform:"uppercase",fontWeight:600}}>Cours {activeCours} complet</span>
+                  <span style={{fontFamily:mono,fontSize:9,color:courseDue>0?"var(--c-violet)":"var(--c-grey1)"}}>{upToDate?"✓ tout à jour":`${courseDue} carte${courseDue>1?"s":""} à réviser`}</span>
                 </div>
-                {courseDue>0&&<button onClick={()=>onStudy(group.id,activeCours,"__course__","__course__")} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"#ede9fe",color:"#7c3aed",whiteSpace:"nowrap",flexShrink:0}}>Tout réviser ({courseDue}) →</button>}
+                {courseDue>0&&<button onClick={()=>onStudy(group.id,activeCours,"__course__","__course__")} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"var(--c-violetBg2)",color:"var(--c-violet)",whiteSpace:"nowrap",flexShrink:0}}>Tout réviser ({courseDue}) →</button>}
               </div>
             );
           })()}
@@ -2807,12 +3054,12 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
             return<div style={{display:"flex",alignItems:"center",padding:"9px 18px",gap:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
                 <span style={{fontFamily:font,fontSize:13,color:noChDue>0?C.text:C.textMed,fontWeight:noChDue>0?500:400}}>Toutes les cartes</span>
-                {noChDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"#fff"}}>{noChDue}</span>}
-                {userNoChCards>0&&<span style={{fontFamily:mono,fontSize:8,padding:"1px 5px",borderRadius:10,background:"#f0ece6",color:C.textMed}}>+{userNoChCards} perso</span>}
+                {noChDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)"}}>{noChDue}</span>}
+                {userNoChCards>0&&<span style={{fontFamily:mono,fontSize:8,padding:"1px 5px",borderRadius:10,background:"var(--c-chipBg)",color:C.textMed}}>+{userNoChCards} perso</span>}
               </div>
               <div style={{display:"flex",gap:5,flexShrink:0,flexWrap:"wrap"}}>
                 {PACKETS.map(pk=><PktBtn key={pk.id} chapterId={1} pk={pk}/>)}
-                {noChDue>0&&<button onClick={()=>onStudy(group.id,activeCours,1,"__all__")} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 10px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"#ede9fe",color:"#7c3aed",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:64}}><span style={{fontSize:10}}>Tout</span><span style={{fontSize:10,fontWeight:400}}>{noChDue} carte{noChDue>1?"s":""}</span></button>}
+                {noChDue>0&&<button onClick={()=>onStudy(group.id,activeCours,1,"__all__")} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 10px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"var(--c-violetBg2)",color:"var(--c-violet)",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:64}}><span style={{fontSize:10}}>Tout</span><span style={{fontSize:10,fontWeight:400}}>{noChDue} carte{noChDue>1?"s":""}</span></button>}
               </div>
             </div>;
           })():(
@@ -2826,8 +3073,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
                   <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
                     <span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:18,flexShrink:0}}>{chIdx}</span>
                     <span style={{fontFamily:font,fontSize:13,color:chDue>0?C.text:C.textMed,fontWeight:chDue>0?500:400}}>{chName}</span>
-                    {chDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"#fff",flexShrink:0}}>{chDue}</span>}
-                    {userChCards>0&&<span style={{fontFamily:mono,fontSize:8,padding:"1px 5px",borderRadius:10,background:"#f0ece6",color:C.textMed,flexShrink:0}}>+{userChCards} perso</span>}
+                    {chDue>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)",flexShrink:0}}>{chDue}</span>}
+                    {userChCards>0&&<span style={{fontFamily:mono,fontSize:8,padding:"1px 5px",borderRadius:10,background:"var(--c-chipBg)",color:C.textMed,flexShrink:0}}>+{userChCards} perso</span>}
                   </div>
                   <div style={{display:"flex",gap:5,flexShrink:0,flexWrap:"wrap"}}>
                     {PACKETS.map(pk=><PktBtn key={pk.id} chapterId={chIdx} pk={pk}/>)}
@@ -2835,13 +3082,13 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
                       const hasDue=chDue>0;
                       const upToDate=chTotal>0&&!hasDue;
                       return(
-                        <button onClick={()=>hasDue&&onStudy(group.id,activeCours,chIdx,"__all__")} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 10px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?"#7c3aed":upToDate?C.border:"#e8e5e0"}`,background:hasDue?"#ede9fe":C.surface,color:hasDue?"#7c3aed":upToDate?C.textLt:"#c0bbb5",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:64}} title="Tous paquets combinés (Prioritaire + Important + Utile)">
+                        <button onClick={()=>hasDue&&onStudy(group.id,activeCours,chIdx,"__all__")} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 10px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?"var(--c-violet)":upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?"var(--c-violetBg2)":C.surface,color:hasDue?"var(--c-violet)":upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:64}} title="Tous paquets combinés (Prioritaire + Important + Utile)">
                           <span style={{fontSize:10,fontWeight:600}}>Tout</span>
                           <span style={{fontSize:10,fontWeight:400}}>{hasDue?`${chDue} carte${chDue>1?"s":""}`:upToDate?"✓ à jour":"vide"}</span>
                         </button>
                       );
                     })()}
-                    {(()=>{const rvd=chapterReviewDue(allCards,progress,group.id,activeCours,chIdx);return rvd>0?<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"5px 9px",borderRadius:6,background:C.goodBg,border:`1px solid ${C.good}30`,minWidth:52,gap:1}}><span style={{fontSize:10,color:C.good,fontWeight:700}}>{rvd}</span><span style={{fontFamily:mono,fontSize:7,letterSpacing:1,color:C.good,textTransform:"uppercase",whiteSpace:"nowrap"}}>à réviser</span></div>:null;})()}
+                    {(()=>{const rvd=chapterReviewDue(allCards,progress,group.id,activeCours,chIdx);return rvd>0?<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"5px 9px",borderRadius:6,background:C.goodBg,border:`1px solid var(--c-goodSoft)`,minWidth:52,gap:1}}><span style={{fontSize:10,color:C.good,fontWeight:700}}>{rvd}</span><span style={{fontFamily:mono,fontSize:7,letterSpacing:1,color:C.good,textTransform:"uppercase",whiteSpace:"nowrap"}}>à réviser</span></div>:null;})()}
                   </div>
                 </div>
               );
@@ -2854,7 +3101,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
   const tabHasAccess=hasTabAccess(TABS.find(t=>t.id===activeTab));
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text,paddingTop:paymentStatus?56:0}}>
     <PaymentBanner status={paymentStatus} onClose={onClosePaymentBanner}/>
-    <Nav left={<span style={{fontFamily:serif,fontSize:20}}>MyFlashcard</span>} center="Tableau de bord" right={<><Btn small onClick={onSettings}>Paramètres</Btn>{isAdmin&&<Btn small onClick={onAdmin}>Admin</Btn>}<button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",color:C.textLt,cursor:"pointer"}}>Déconnexion</button></>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<span style={{fontFamily:serif,fontSize:20}}>MyFlashcard</span>} center="Tableau de bord" right={<><Btn small onClick={onSettings}>Paramètres</Btn>{isAdmin&&<Btn small onClick={onAdmin}>Admin</Btn>}<button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",color:C.textLt,cursor:"pointer"}}>Déconnexion</button></>}/>
     <div className="mfc-page" style={{maxWidth:760,margin:"0 auto",padding:"28px 24px"}}>
       <div className="mfc-planbar" style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 18px",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div style={{minWidth:0,flex:"1 1 auto"}}>
@@ -2889,9 +3136,9 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
           </button>;
         })}
         {!isAdmin&&<button onClick={()=>setActiveTab("shop")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="shop"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="shop"?C.imp:C.border}`,background:activeTab==="shop"?C.impBg:"transparent",color:activeTab==="shop"?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>🛒 Acheter par matière</button>}
-        {!isAdmin&&<button onClick={()=>setActiveTab("mes-cartes")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="mes-cartes"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="mes-cartes"?"#7c3aed":C.border}`,background:activeTab==="mes-cartes"?"#f5f3ff":"transparent",color:activeTab==="mes-cartes"?"#7c3aed":C.textMed,display:"flex",alignItems:"center",gap:6}}>✏️ Mes flashcards{(userCards||[]).length>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#7c3aed",color:"#fff"}}>{(userCards||[]).length}</span>}</button>}
+        {!isAdmin&&<button onClick={()=>setActiveTab("mes-cartes")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="mes-cartes"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="mes-cartes"?"var(--c-violet)":C.border}`,background:activeTab==="mes-cartes"?"var(--c-violetBg)":"transparent",color:activeTab==="mes-cartes"?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:6}}>✏️ Mes flashcards{(userCards||[]).length>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"var(--c-violet)",color:"var(--c-onSolid)"}}>{(userCards||[]).length}</span>}</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("stats")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="stats"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="stats"?C.accent:C.border}`,background:activeTab==="stats"?C.accentBg:"transparent",color:activeTab==="stats"?C.accent:C.textMed,display:"flex",alignItems:"center",gap:6}}>📊 Statistiques</button>}
-        {!isAdmin&&<button onClick={()=>setActiveTab("rank")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="rank"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="rank"?"#b7791f":C.border}`,background:activeTab==="rank"?"#fdf6e3":"transparent",color:activeTab==="rank"?"#b7791f":C.textMed,display:"flex",alignItems:"center",gap:6}}>🏆 Rang{todayPts>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"#b7791f",color:"#fff"}}>{todayPts}</span>}</button>}
+        {!isAdmin&&<button onClick={()=>setActiveTab("rank")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="rank"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="rank"?"var(--c-gold)":C.border}`,background:activeTab==="rank"?"var(--c-goldBg)":"transparent",color:activeTab==="rank"?"var(--c-gold)":C.textMed,display:"flex",alignItems:"center",gap:6}}>🏆 Rang{todayPts>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"var(--c-gold)",color:"var(--c-onSolid)"}}>{todayPts}</span>}</button>}
         <button onClick={()=>setActiveTab("forum")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="forum"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="forum"?C.util:C.border}`,background:activeTab==="forum"?C.utilBg:"transparent",color:activeTab==="forum"?C.util:C.textMed,display:"flex",alignItems:"center",gap:6}}>💬 Forum</button>
       </div>
       {activeTab==="forum"?(
@@ -2923,7 +3170,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
   </div>;
 }
 // ─── Study ────────────────────────────────────────────────────────────────────
-function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isAdmin,progress}){
+function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isAdmin,progress,theme,onToggleTheme,onUndo}){
   const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0);
   useEffect(()=>{
     const card=localQ[idx];
@@ -2944,6 +3191,12 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
     }
   },[idx]);
   const cardStart=useRef(Date.now());
+  // Historique de la session : permet de revenir sur la carte précédente et de
+  // corriger une note donnée par erreur. Chaque entrée mémorise l'état EXACT
+  // d'avant la notation, pour pouvoir tout annuler (progression, points, stats).
+  const histRef2=useRef([]);
+  const [canUndo,setCanUndo]=useState(false);
+  const [undoFlash,setUndoFlash]=useState(null);
   const card=localQ[idx];
   if(card&&!card.front&&card.card_type==='occlusion'){
     return<div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
@@ -2957,8 +3210,20 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
     // Chrono plafonné à MAX_CARD_SECONDS dès la source : une carte laissée
     // ouverte pendant une pause ne fausse plus aucune statistique.
     const elapsed=Math.min(Date.now()-cardStart.current, MAX_CARD_SECONDS*1000);
+    // Instantané AVANT modification : progression d'origine, file et position.
+    const prevProgSnapshot=progress?progress[card.id]:undefined;
+    const snapshot={
+      cardId:card.id, card,
+      prevProg:prevProgSnapshot?JSON.parse(JSON.stringify(prevProgSnapshot)):undefined,
+      elapsedMs:elapsed, wasCorrect:rating>=3, wasNew:!prevProgSnapshot||prevProgSnapshot.state==="new",
+      queue:[...localQ], idx, stats:{...stats}, sessionPts, rating,
+    };
     setStats(s=>({total:s.total+1,correct:s.correct+(rating>=3?1:0)}));
     const np=await onRate(card,rating,elapsed);
+    snapshot.gain=(np&&np.__gain)?np.__gain:null;
+    histRef2.current.push(snapshot);
+    if(histRef2.current.length>50)histRef2.current.shift();
+    setCanUndo(true);
     if(np&&np.__gain){
       const g=np.__gain,fid=Date.now()+Math.random();
       setSessionPts(p=>p+g.points);
@@ -2970,6 +3235,24 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
     if(np.state==="learning"||np.state==="relearning"){q.splice(idx,1);q.splice(Math.min(idx+4,q.length),0,card);}else q.splice(idx,1);
     setLocalQ(q);if(!q.length||idx>=q.length){setDone(true);}
   };
+  // Revenir sur la carte précédente pour corriger sa note.
+  const handleUndoClick=()=>{
+    const snap=histRef2.current.pop();
+    if(!snap)return;
+    const revoked=onUndo?onUndo(snap):null;
+    setLocalQ(snap.queue);
+    setIdx(snap.idx);
+    setStats(snap.stats);
+    setSessionPts(snap.sessionPts);
+    setDone(false);
+    setShowBack(false);setShowOthers(false);setShowPktChange(false);
+    setGainFlash(null);
+    cardStart.current=Date.now();
+    setCanUndo(histRef2.current.length>0);
+    const lost=revoked&&revoked.points?revoked.points:0;
+    setUndoFlash({id:Date.now(),points:lost});
+    setTimeout(()=>setUndoFlash(f=>f?null:f),2200);
+  };
   const handleBury=()=>{
     onBury&&onBury(card);
     setBuryFlash(true);
@@ -2977,27 +3260,28 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
     const q=[...localQ];q.splice(idx,1);
     setLocalQ(q);if(!q.length||idx>=q.length){setDone(true);return;}setShowBack(false);setShowOthers(false);
   };
-  if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p><Btn fill style={{marginTop:20}} onClick={onBack}>← Tableau de bord</Btn></div>;
+  if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p>{sessionPts>0&&<p style={{fontFamily:mono,fontSize:12,color:"var(--c-gold)",margin:0}}>🏆 +{sessionPts} points aujourd'hui</p>}<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap",justifyContent:"center"}}>{canUndo&&<Btn onClick={handleUndoClick}>↩ Revenir à la dernière carte</Btn>}<Btn fill onClick={onBack}>← Tableau de bord</Btn></div></div>;
   const col=pC(card.packetId),grp=GROUPS.find(g=>g.id===card.groupId);
   const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
   const cardProg=progress?.[card.id];
   const isNewCard=!cardProg||cardProg.state==="new";
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
-    <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"#fdf6e3",border:"1px solid #e6d3a3",color:"#b7791f"}}>🏆 +{sessionPts}</span>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span><button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button></div>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"var(--c-goldBg)",border:"1px solid #e6d3a3",color:"var(--c-gold)"}}>🏆 +{sessionPts}</span>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span>{canUndo&&<button onClick={handleUndoClick} title="Revenir à la carte précédente pour corriger sa note" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,display:"flex",alignItems:"center",gap:4}}>↩ Précédente</button>}<button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button></div>}/>
     <div style={{height:3,background:C.border}}><div style={{height:3,background:col,width:`${(idx/Math.max(1,localQ.length))*100}%`,transition:"width 0.3s"}}/></div>
-    {buryFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"#374151",color:"#fff",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🙈 Carte enfouie — plus dans tes révisions</div>}
-    {gainFlash&&<div key={gainFlash.id} style={{position:"fixed",top:88,right:24,zIndex:210,background:"#fdf6e3",border:"1.5px solid #b7791f",color:"#8a5a00",borderRadius:10,padding:"10px 16px",fontFamily:font,boxShadow:"0 6px 20px rgba(0,0,0,0.12)",animation:"pointsPop 0.35s ease",textAlign:"right"}}>
+    {undoFlash&&<div key={undoFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:"var(--c-toast)",color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease",textAlign:"center"}}>↩ Retour sur la carte précédente{undoFlash.points>0?` — ${undoFlash.points} point${undoFlash.points>1?"s":""} retiré${undoFlash.points>1?"s":""}`:""}</div>}
+    {buryFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--c-toast)",color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🙈 Carte enfouie — plus dans tes révisions</div>}
+    {gainFlash&&<div key={gainFlash.id} style={{position:"fixed",top:88,right:24,zIndex:210,background:"var(--c-goldBg)",border:"1.5px solid #b7791f",color:"var(--c-goldText)",borderRadius:10,padding:"10px 16px",fontFamily:font,boxShadow:"0 6px 20px rgba(0,0,0,0.12)",animation:"pointsPop 0.35s ease",textAlign:"right"}}>
       <div style={{fontFamily:serif,fontSize:22,fontWeight:600,lineHeight:1}}>+{gainFlash.points} pts</div>
-      <div style={{fontSize:10,color:"#a97c2a",marginTop:3}}>{AGE_LABELS[gainFlash.age]} {gainFlash.base} {gainFlash.bonus?`+ ${IMP_LABELS[gainFlash.packetId]||""} ${gainFlash.bonus}`:""} · {gainFlash.total} pts aujourd'hui</div>
+      <div style={{fontSize:10,color:"var(--c-goldTextSoft)",marginTop:3}}>{AGE_LABELS[gainFlash.age]} {gainFlash.base} {gainFlash.bonus?`+ ${IMP_LABELS[gainFlash.packetId]||""} ${gainFlash.bonus}`:""} · {gainFlash.total} pts aujourd'hui</div>
     </div>}
     <div className="mfc-page mfc-study" style={{maxWidth:560,margin:"0 auto",padding:"28px 24px 0"}}>
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18,alignItems:"center"}}>
-        {isNewCard&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",padding:"3px 8px",borderRadius:3,background:"#fef2f2",color:"#dc2626",border:"1px solid #fca5a5",fontWeight:700}}>Nouveau</span>}
+        {isNewCard&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",padding:"3px 8px",borderRadius:3,background:"var(--c-dangerBg)",color:"var(--c-danger)",border:"1px solid #fca5a5",fontWeight:700}}>Nouveau</span>}
         <Tag color={col} bg={pB(card.packetId)}>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
         <Tag color={C.accent} bg={C.accentBg}>{grp?.label}</Tag>
         <Tag color={C.textMed} bg={C.bg}>Cours {card.num}</Tag>
         {chName&&<Tag color={C.textMed} bg={C.bg}>Ch.{card.chapterId} {chName}</Tag>}
-        {card.isUserCard&&<Tag color={"#7c3aed"} bg={"#f5f3ff"}>✏️ Personnel</Tag>}
+        {card.isUserCard&&<Tag color={"var(--c-violet)"} bg={"var(--c-violetBg)"}>✏️ Personnel</Tag>}
         <Tag color={C.textLt} bg={C.bg}>{stateLabel(cardProg)}</Tag>
       </div>
       {isOcclusion(card)?(
@@ -3045,8 +3329,8 @@ function StudyView({label,queue,onRate,onBury,onChangePacket,onBack,settings,isA
           const learningCount=remaining.filter(c=>{const p=progress?.[c.id];return p&&(p.state==="learning"||p.state==="relearning");}).length;
           const reviewCount=remaining.filter(c=>{const p=progress?.[c.id];return p&&p.state==="review";}).length;
           return <div style={{display:"flex",justifyContent:"center",gap:18,marginTop:14,paddingTop:12,borderTop:`1px solid ${C.border}`}}>
-            <span style={{fontSize:11,color:"#1e88e5",fontWeight:600}}>{newCount} nouvelle{newCount!==1?"s":""}</span>
-            <span style={{fontSize:11,color:"#dc2626",fontWeight:600}}>{learningCount} en attente</span>
+            <span style={{fontSize:11,color:"var(--c-easy)",fontWeight:600}}>{newCount} nouvelle{newCount!==1?"s":""}</span>
+            <span style={{fontSize:11,color:"var(--c-danger)",fontWeight:600}}>{learningCount} en attente</span>
             <span style={{fontSize:11,color:C.good,fontWeight:600}}>{reviewCount} à réviser</span>
           </div>;
         })()}
@@ -3079,7 +3363,7 @@ function SettingsSection({title,children}){
 function SettingsSlider({k,label,desc,min,max,step,unit,s,setS}){
   return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px"}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4,gap:10}}><p style={{fontSize:13,fontWeight:500,margin:0}}>{label}</p><p style={{fontSize:18,fontWeight:300,color:C.accent,margin:0,whiteSpace:"nowrap"}}>{s[k]}<span style={{fontSize:11}}> {unit}</span></p></div><p style={{fontSize:11,color:C.textMed,margin:"0 0 8px"}}>{desc}</p><input type="range" min={min} max={max} step={step} value={s[k]} onChange={e=>setS(p=>({...p,[k]:Number(e.target.value)}))} style={{width:"100%"}}/></div>;
 }
-function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onResetProgress,onDeleteAccount,pseudo,onSavePseudo}){
+function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onResetProgress,onDeleteAccount,pseudo,onSavePseudo,theme,onToggleTheme}){
   const [s,setS]=useState(settings),[saved,setSaved]=useState(false);
   const [pseudoInput,setPseudoInput]=useState(pseudo||"");
   const [pseudoSaved,setPseudoSaved]=useState(false);
@@ -3097,7 +3381,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
   const [confirmDelAcc,setConfirmDelAcc]=useState(false),[delAccPwd,setDelAccPwd]=useState(""),[delAccErr,setDelAccErr]=useState(""),[delAccBusy,setDelAccBusy]=useState(false);
   const save=()=>{onSave(s);setSaved(true);setTimeout(()=>setSaved(false),2000);};
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
-    <Nav left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center="Paramètres" right={<Btn fill onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder"}</Btn>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center="Paramètres" right={<Btn fill onClick={save}>{saved?"✓ Sauvegardé":"Sauvegarder"}</Btn>}/>
     <div className="mfc-page" style={{maxWidth:600,margin:"0 auto",padding:"28px 24px"}}>
       <SettingsSection title="👤 Profil">
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
@@ -3107,14 +3391,14 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
             <Btn fill onClick={savePseudoClick} disabled={!pseudoInput.trim()} style={{flexShrink:0}}>{pseudoSaved?"✓ Enregistré":"Enregistrer"}</Btn>
           </div>
           <p style={{fontFamily:mono,fontSize:10,color:pseudoInput.length>=PSEUDO_MAX?C.imp:C.textLt,margin:0}}>{pseudoInput.length}/{PSEUDO_MAX} caractères</p>
-          <p style={{fontSize:11,color:C.again,margin:0,lineHeight:1.6,background:C.againBg,border:`1px solid ${C.again}30`,borderRadius:6,padding:"8px 10px"}}>⚠️ {PSEUDO_WARNING}</p>
+          <p style={{fontSize:11,color:C.again,margin:0,lineHeight:1.6,background:C.againBg,border:`1px solid var(--c-againSoft)`,borderRadius:6,padding:"8px 10px"}}>⚠️ {PSEUDO_WARNING}</p>
         </div>
       </SettingsSection>
       <SettingsSection title="⏱ Intervalles d'apprentissage">
-        <div style={{background:"#fef8e8",border:"1px solid #d9b23c50",borderRadius:8,padding:"10px 14px",marginBottom:10}}>
-          <p style={{fontSize:12,color:"#8b5e00",margin:0,lineHeight:1.6}}>⚠️ Il est déconseillé de modifier ces intervalles : ils sont optimisés au mieux par défaut pour la mémorisation à long terme.</p>
+        <div style={{background:"var(--c-impBg)",border:"1px solid var(--c-goldSoft)",borderRadius:8,padding:"10px 14px",marginBottom:10}}>
+          <p style={{fontSize:12,color:"var(--c-imp)",margin:0,lineHeight:1.6}}>⚠️ Il est déconseillé de modifier ces intervalles : ils sont optimisés au mieux par défaut pour la mémorisation à long terme.</p>
         </div>
-        <div style={{display:"flex",flexDirection:"column",gap:8}}><SettingsSlider k="againMin" s={s} setS={setS} label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><SettingsSlider k="hardMin" s={s} setS={setS} label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><SettingsSlider k="goodMin" s={s} setS={setS} label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><SettingsSlider k="easyDays" s={s} setS={setS} label="Facile" desc="Graduation immédiate." min={1} max={14} step={1} unit="jours"/></div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}><SettingsSlider k="againMin" s={s} setS={setS} label="À revoir" desc="Délai de réaffichage." min={1} max={10} step={1} unit="min"/><SettingsSlider k="hardMin" s={s} setS={setS} label="Difficile" desc="Délai carte presque sue." min={2} max={30} step={1} unit="min"/><SettingsSlider k="goodMin" s={s} setS={setS} label="Bien" desc="Avant graduation en révision." min={5} max={60} step={5} unit="min"/><SettingsSlider k="easyDays" s={s} setS={setS} label="Facile — 1re fois" desc="Intervalle maximum lorsqu'une carte jamais vue est graduée directement en « Facile »." min={1} max={21} step={1} unit="jours"/></div>
         <button onClick={()=>setS(p=>({...p,againMin:DEFAULT_SETTINGS.againMin,hardMin:DEFAULT_SETTINGS.hardMin,goodMin:DEFAULT_SETTINGS.goodMin,easyDays:DEFAULT_SETTINGS.easyDays}))} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",marginTop:10,cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>↺ Revenir aux valeurs par défaut</button>
       </SettingsSection>
       <SettingsSection title="📚 Session d'étude">
@@ -3164,9 +3448,9 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
           être cliquée par méprise. */}
       {onDeleteAccount&&currentUser?.role!=="admin"&&<div style={{marginTop:56,paddingTop:8}}>
         <SettingsSection title="⚠️ Zone de danger">
-          <div style={{background:C.againBg,border:`1.5px solid ${C.again}40`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{background:C.againBg,border:`1.5px solid var(--c-againSoft)`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
             <p style={{fontSize:12,color:C.again,margin:0,lineHeight:1.6}}><strong>Supprimer définitivement mon compte.</strong> Ton compte, tes flashcards personnelles, ta progression de révision et tes points sont effacés sans possibilité de retour en arrière. Ton abonnement n'est pas remboursé automatiquement.</p>
-            <button onClick={()=>{setConfirmDelAcc(true);setDelAccPwd("");setDelAccErr("");}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:"#fff",color:C.again,alignSelf:"flex-start"}}>🗑 Supprimer mon compte</button>
+            <button onClick={()=>{setConfirmDelAcc(true);setDelAccPwd("");setDelAccErr("");}} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.again}`,background:"var(--c-surface)",color:C.again,alignSelf:"flex-start"}}>🗑 Supprimer mon compte</button>
           </div>
         </SettingsSection>
       </div>}
@@ -3196,7 +3480,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
               {resetErr&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{resetErr}</p>}
               <div style={{display:"flex",gap:10,marginTop:18}}>
                 <button onClick={()=>setConfirmReset(false)} style={{flex:1,fontFamily:font,fontSize:13,padding:"10px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>Annuler</button>
-                <button onClick={doConfirm} disabled={!resetPwd||targetCards.length===0} style={{flex:1,fontFamily:font,fontSize:13,fontWeight:600,padding:"10px",cursor:resetPwd&&targetCards.length>0?"pointer":"default",borderRadius:7,border:"none",background:C.again,color:"#fff",opacity:resetPwd&&targetCards.length>0?1:0.5}}>Confirmer</button>
+                <button onClick={doConfirm} disabled={!resetPwd||targetCards.length===0} style={{flex:1,fontFamily:font,fontSize:13,fontWeight:600,padding:"10px",cursor:resetPwd&&targetCards.length>0?"pointer":"default",borderRadius:7,border:"none",background:C.again,color:"var(--c-onSolid)",opacity:resetPwd&&targetCards.length>0?1:0.5}}>Confirmer</button>
               </div>
             </>
           )}
@@ -3220,7 +3504,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
           {delAccErr&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{delAccErr}</p>}
           <div style={{display:"flex",gap:10,marginTop:18}}>
             <button onClick={()=>setConfirmDelAcc(false)} disabled={delAccBusy} style={{flex:1,fontFamily:font,fontSize:13,padding:"10px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>Annuler</button>
-            <button onClick={doConfirmDelete} disabled={!delAccPwd||delAccBusy} style={{flex:1,fontFamily:font,fontSize:13,fontWeight:600,padding:"10px",cursor:delAccPwd&&!delAccBusy?"pointer":"default",borderRadius:7,border:"none",background:C.again,color:"#fff",opacity:delAccPwd&&!delAccBusy?1:0.5}}>{delAccBusy?"Suppression…":"Supprimer définitivement"}</button>
+            <button onClick={doConfirmDelete} disabled={!delAccPwd||delAccBusy} style={{flex:1,fontFamily:font,fontSize:13,fontWeight:600,padding:"10px",cursor:delAccPwd&&!delAccBusy?"pointer":"default",borderRadius:7,border:"none",background:C.again,color:"var(--c-onSolid)",opacity:delAccPwd&&!delAccBusy?1:0.5}}>{delAccBusy?"Suppression…":"Supprimer définitivement"}</button>
           </div>
         </div>
       </div>;
@@ -3294,8 +3578,8 @@ function ForgettingCurve(){
     <text x="219" y="215" fontSize="12" fill={C.textMed}>1 semaine</text>
     <text x="304" y="215" fontSize="12" fill={C.textMed}>1 mois</text>
     <text x="379" y="215" fontSize="12" fill={C.textMed}>6 mois</text>
-    <path d="M 54 27 C 130 120, 255 162, 470 178" fill="none" stroke="#a8a39a" strokeWidth="2.6"/>
-    <polygon points="481,178 466,171 466,185" fill="#a8a39a"/>
+    <path d="M 54 27 C 130 120, 255 162, 470 178" fill="none" stroke="var(--c-curveGrey)" strokeWidth="2.6"/>
+    <polygon points="481,178 466,171 466,185" fill="var(--c-curveGrey)"/>
     <path d="M 54 27 C 74 35, 88 42, 100 48 L 100 34 C 128 41, 155 47, 175 54 L 175 39 C 200 45, 228 52, 250 59 L 250 44 C 275 50, 302 57, 325 64 L 325 49 C 350 55, 377 62, 400 68 L 400 53 C 424 58, 448 63, 455 65" fill="none" stroke={C.accent} strokeWidth="2.6"/>
     <polygon points="470,68 455,62 456,74" fill={C.accent}/>
     <circle cx="100" cy="34" r="3.4" fill={C.accent}/>
@@ -3311,14 +3595,15 @@ function ForgettingCurve(){
     <text x="514" y="136" fontSize="12.5" fontWeight="700" fill={C.accent}>rappels</text>
   </svg>;
 }
-function Landing({onBack,onRegister}){
+function Landing({onBack,onRegister,theme,onToggleTheme}){
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,padding:"16px 24px",maxWidth:960,margin:"0 auto",background:C.bg}}>
       <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
         <img src={LANDING_LOGO} style={{height:42,width:"auto"}} alt="MyFlashCard"/>
         <span style={{fontSize:18,fontWeight:700,color:C.accent,whiteSpace:"nowrap"}}>MyFlashCard</span>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:18,flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:14,flexShrink:0}}>
+        {onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme}/>}
         <span onClick={onBack} style={{fontSize:13,color:C.textMed,cursor:"pointer",whiteSpace:"nowrap"}}>Se connecter</span>
         <button onClick={onRegister} style={{fontFamily:font,fontSize:13,fontWeight:600,color:C.accent,border:`1.5px solid ${C.accent}`,padding:"8px 18px",borderRadius:8,background:"transparent",cursor:"pointer",whiteSpace:"nowrap"}}>Essayer gratuitement</button>
       </div>
@@ -3358,7 +3643,7 @@ function Landing({onBack,onRegister}){
       {(()=>{
         const a=LANDING_ARGS[0];
         const reverse=a.reverse;
-        const numBlock=<div key="n" className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
+        const numBlock=<div key="n" className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:"var(--c-accentSoft)",lineHeight:1}}>{a.num}</span></div>;
         const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold(a.text)}</p></div>;
         return <div key={a.num} className="mfc-arg-row" style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
           {reverse?[txtBlock,numBlock]:[numBlock,txtBlock]}
@@ -3366,7 +3651,7 @@ function Landing({onBack,onRegister}){
       })()}
       <div style={{padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
         <div className="mfc-arg-row" style={{display:"flex",gap:28,alignItems:"flex-start"}}>
-          <div className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>02</span></div>
+          <div className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:"var(--c-accentSoft)",lineHeight:1}}>02</span></div>
           <div style={{flex:1}}>
             <p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>La courbe de l'oubli</p>
             <p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold("Sans révision, la mémoire d'une information neuve chute très vite, jusqu'à **70% d'oubli dès le lendemain**. Chaque fois qu'elle est retravaillée au **bon moment**, la chute suivante est plus lente. C'est ce mécanisme, connu **depuis plus d'un siècle**, que suit chaque carte, pour rester **gravée** jusqu'au jour du concours.")}</p>
@@ -3376,7 +3661,7 @@ function Landing({onBack,onRegister}){
       </div>
       {LANDING_ARGS.slice(1).map((a)=>{
         const reverse=a.reverse;
-        const numBlock=<div key="n" className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:C.accent+"1f",lineHeight:1}}>{a.num}</span></div>;
+        const numBlock=<div key="n" className="mfc-arg-num" style={{flex:"0 0 90px",display:"flex",justifyContent:"center"}}><span style={{fontSize:40,fontWeight:700,color:"var(--c-accentSoft)",lineHeight:1}}>{a.num}</span></div>;
         const txtBlock=<div key="t" style={{flex:1}}><p style={{fontSize:19,fontWeight:600,color:C.text,margin:"0 0 10px"}}>{a.title}</p><p style={{fontSize:14.5,lineHeight:1.7,color:C.textMed,margin:0}}>{renderBold(a.text)}</p>{a.img==="badges"&&<PriorityBadges/>}</div>;
         return <div key={a.num} className="mfc-arg-row" style={{display:"flex",gap:28,alignItems:"flex-start",padding:"28px 0",borderBottom:`1px solid ${C.border}`}}>
           {reverse?[txtBlock,numBlock]:[numBlock,txtBlock]}
@@ -3387,7 +3672,7 @@ function Landing({onBack,onRegister}){
     <div style={{padding:"40px 24px",textAlign:"center"}}>
       <p style={{fontSize:22,fontWeight:600,margin:"0 0 12px"}}>Essayez gratuitement, sans engagement.</p>
       <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px"}}>Cinq matières offertes, en entier, pour vous faire votre propre avis.</p>
-      <button onClick={onRegister} style={{fontFamily:font,background:C.accent,color:"#fff",fontSize:14,fontWeight:600,padding:"12px 28px",borderRadius:8,display:"inline-block",border:"none",cursor:"pointer"}}>Commencer gratuitement</button>
+      <button onClick={onRegister} style={{fontFamily:font,background:C.accent,color:"var(--c-onSolid)",fontSize:14,fontWeight:600,padding:"12px 28px",borderRadius:8,display:"inline-block",border:"none",cursor:"pointer"}}>Commencer gratuitement</button>
     </div>
     <Footer/>
   </div>;
@@ -3396,6 +3681,28 @@ function Landing({onBack,onRegister}){
 function App(){
   const [supaError,setSupaError]=useState(null);
   const [view,setView]=useState("loading"),[currentUser,setCurrentUser]=useState(null),[cards,setCards]=useState([]),[prog,setProg]=useState({}),[settings,setSettings]=useState(DEFAULT_SETTINGS),[accounts,setAccounts]=useState([]),[studyCtx,setStudyCtx]=useState(null),[paymentStatus,setPaymentStatus]=useState(null);
+  // ─── Thème clair / sombre ───────────────────────────────────────────────────
+  const [theme,setTheme]=useState(initialTheme);
+  const toggleTheme=useCallback(()=>{
+    setTheme(prev=>{
+      const next=prev==="dark"?"light":"dark";
+      applyTheme(next);
+      try{ localStorage.setItem(THEME_KEY,next); }catch{}
+      return next;
+    });
+  },[]);
+  // Tant que l'utilisateur n'a rien choisi, on suit la préférence système si
+  // elle change (bascule automatique nuit/jour du téléphone).
+  useEffect(()=>{
+    if(getStoredTheme())return;
+    let mq;
+    try{ mq=window.matchMedia("(prefers-color-scheme: dark)"); }catch{ return; }
+    if(!mq)return;
+    const onChange=e=>{ if(getStoredTheme())return; const t=e.matches?"dark":"light"; applyTheme(t); setTheme(t); };
+    if(mq.addEventListener)mq.addEventListener("change",onChange);
+    else if(mq.addListener)mq.addListener(onChange);
+    return()=>{ if(mq.removeEventListener)mq.removeEventListener("change",onChange); else if(mq.removeListener)mq.removeListener(onChange); };
+  },[]);
   // ─── Pseudonyme (commun étudiants + admins) ─────────────────────────────────
   const [pseudo,setPseudo]=useState("");
   const refreshPseudoFromCloud=useCallback(async username=>{
@@ -4013,6 +4320,42 @@ function App(){
     }
     return gain?{...np,__gain:gain}:np;
   },[prog,saveProg,settings,currentUser,syncDailyPoints]);
+  // ─── Retour à la carte précédente ───────────────────────────────────────────
+  // Annule complètement la dernière notation : la progression FSRS revient à son
+  // état exact d'avant (y compris « jamais vue »), les points du jour gagnés sur
+  // cette carte sont retirés du classement, et les statistiques sont corrigées.
+  // La carte redevient notable : si elle est renotée, elle peut de nouveau
+  // rapporter des points — une seule fois, comme la règle anti-farming l'impose.
+  const handleUndoRate=useCallback((snapshot)=>{
+    if(!snapshot||!snapshot.cardId)return null;
+    const {cardId,prevProg,gain,elapsedMs,wasCorrect,wasNew}=snapshot;
+    setProg(prev=>{
+      const next={...prev};
+      // prevProg vaut undefined si la carte n'avait jamais été vue : on la
+      // retire alors complètement pour qu'elle redevienne « Nouveau ».
+      if(prevProg===undefined||prevProg===null)delete next[cardId];
+      else next[cardId]=prevProg;
+      if(currentUser)storage.set(`mx6-prog-${currentUser.username}`,next);
+      return next;
+    });
+    if(currentUser){
+      if(prevProg===undefined||prevProg===null){
+        supa.deleteProgressBatch(currentUser.username,[cardId]).catch(()=>{});
+      } else {
+        supa.upsertProgress(currentUser.username,cardId,prevProg);
+      }
+    }
+    let revoked=null;
+    if(currentUser&&currentUser.role!=="admin"){
+      revokeStat(currentUser.username,wasCorrect,elapsedMs,wasNew);
+      if(gain){
+        revoked=revokePoints(currentUser.username,cardId);
+        setPointsTick(t=>t+1);
+        syncDailyPoints(currentUser.username);
+      }
+    }
+    return revoked;
+  },[currentUser,syncDailyPoints]);
   const handleBury=useCallback((card)=>{
     const existing=prog[card.id]||{};
     saveProg({...prog,[card.id]:{...existing,buried:true}},card.id);
@@ -4035,21 +4378,21 @@ function App(){
     <img src={LANDING_LOGO} style={{height:44,width:"auto"}} alt="MyFlashCard"/>
     <p style={{fontFamily:serif,fontSize:28,letterSpacing:-0.5}}>MyFlashcard</p>
     <p style={{color:C.textLt,fontSize:13,display:"flex",alignItems:"center",gap:3}}>Chargement<span style={{animation:"dotPulse 1.4s infinite",animationDelay:"0s"}}>.</span><span style={{animation:"dotPulse 1.4s infinite",animationDelay:"0.2s"}}>.</span><span style={{animation:"dotPulse 1.4s infinite",animationDelay:"0.4s"}}>.</span></p>
-    {supaError&&<div style={{marginTop:12,maxWidth:400,background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:10,padding:"16px 20px",textAlign:"center"}}>
-      <p style={{fontSize:14,fontWeight:600,color:"#dc2626",margin:"0 0 8px"}}>⚠️ Supabase ne répond pas</p>
-      <p style={{fontSize:12,color:"#7f1d1d",margin:"0 0 12px",lineHeight:1.6}}>Erreur : <code>{supaError}</code><br/>Ton projet Supabase est peut-être <strong>en pause</strong> (plan gratuit).</p>
-      <a href="https://supabase.com/dashboard" target="_blank" style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",borderRadius:6,background:"#dc2626",color:"#fff",textDecoration:"none",display:"inline-block"}}>→ Ouvrir Supabase Dashboard</a>
-      <p style={{fontSize:11,color:"#7f1d1d",margin:"10px 0 0"}}>Cherche "Restore project" ou "Unpause" sur ton projet.</p>
+    {supaError&&<div style={{marginTop:12,maxWidth:400,background:"var(--c-dangerBg)",border:"1px solid #fca5a5",borderRadius:10,padding:"16px 20px",textAlign:"center"}}>
+      <p style={{fontSize:14,fontWeight:600,color:"var(--c-danger)",margin:"0 0 8px"}}>⚠️ Supabase ne répond pas</p>
+      <p style={{fontSize:12,color:"var(--c-dangerDeep)",margin:"0 0 12px",lineHeight:1.6}}>Erreur : <code>{supaError}</code><br/>Ton projet Supabase est peut-être <strong>en pause</strong> (plan gratuit).</p>
+      <a href="https://supabase.com/dashboard" target="_blank" style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",borderRadius:6,background:"var(--c-danger)",color:"var(--c-onSolid)",textDecoration:"none",display:"inline-block"}}>→ Ouvrir Supabase Dashboard</a>
+      <p style={{fontSize:11,color:"var(--c-dangerDeep)",margin:"10px 0 0"}}>Cherche "Restore project" ou "Unpause" sur ton projet.</p>
     </div>}
   </div>;
-  if(view==="landing")   return <Landing onBack={()=>setView("login")} onRegister={()=>setView("register")}/>;
-  if(view==="login")     return <LoginView onLogin={handleLogin} onShowLanding={()=>setView("landing")} onRegister={()=>setView("register")} accounts={accounts} onPasswordReset={(em,pwd)=>setAccounts(p=>p.map(a=>a.username===em?{...a,password:pwd}:a))}/>;
+  if(view==="landing")   return <Landing onBack={()=>setView("login")} onRegister={()=>setView("register")} theme={theme} onToggleTheme={toggleTheme}/>;
+  if(view==="login")     return <LoginView onLogin={handleLogin} onShowLanding={()=>setView("landing")} onRegister={()=>setView("register")} accounts={accounts} theme={theme} onToggleTheme={toggleTheme} onPasswordReset={(em,pwd)=>setAccounts(p=>p.map(a=>a.username===em?{...a,password:pwd}:a))}/>;
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
-  if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards}/>;
-  if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)}/>;
-  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog}/>;
-  if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")}/>;
-  if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo}/>;
+  if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards} theme={theme} onToggleTheme={toggleTheme}/>;
+  if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)} theme={theme} onToggleTheme={toggleTheme}/>;
+  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onBack={()=>setView("dashboard")} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate}/>;
+  if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")} theme={theme} onToggleTheme={toggleTheme}/>;
+  if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo} theme={theme} onToggleTheme={toggleTheme}/>;
   return null;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
