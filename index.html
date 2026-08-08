@@ -405,6 +405,87 @@ const supa = {
     }));
   },
   deleteCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
+  // ─── Enregistrement groupé des cartes ──────────────────────────────────────
+  // PostgREST accepte un tableau : on envoie donc UNE requête pour tout un lot
+  // au lieu d'une requête par carte. Les lots sont découpés pour rester sous les
+  // limites de taille, et chaque envoi est retenté en cas d'échec passager.
+  upsertCardsBatch: async (cards, {chunkSize=20, attempts=3, onProgress}={}) => {
+    const rows=cards.map(card=>({ id:card.id, front:card.front, back:card.back, group_id:card.groupId,
+      num:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId,
+      sort_order:card.sort_order??0, card_type:card.card_type||'text' }));
+    const chunks=[];
+    for(let i=0;i<rows.length;i+=chunkSize)chunks.push(rows.slice(i,i+chunkSize));
+    let done=0;
+    for(const chunk of chunks){
+      let lastErr=null, ok=false;
+      for(let a=1;a<=attempts;a++){
+        try{
+          const r=await fetch(`${SUPA_URL}/rest/v1/cards`,{
+            method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates,return=minimal"},
+            body:JSON.stringify(chunk),
+          });
+          if(r.ok){ ok=true; break; }
+          let msg=`HTTP ${r.status}`;
+          try{const t=await r.text();if(t)msg+=` — ${t.slice(0,200)}`;}catch{}
+          lastErr=new Error(msg);
+        }catch(e){ lastErr=e; }
+        // Attente progressive : 0,6 s puis 1,8 s. Absorbe les coupures brèves.
+        if(a<attempts)await new Promise(res=>setTimeout(res,600*Math.pow(3,a-1)));
+      }
+      if(!ok)throw lastErr||new Error("Enregistrement impossible");
+      done+=chunk.length;
+      if(onProgress)onProgress(done,rows.length);
+    }
+  },
+  // Vérifie lesquelles de ces cartes sont RÉELLEMENT présentes côté serveur.
+  // Sert après un échec : on ne retire de l'affichage que celles qui manquent
+  // vraiment, au lieu de tout supprimer par précaution.
+  checkCardsExist: async (ids) => {
+    const found=new Set();
+    const CHUNK=100;
+    for(let i=0;i<ids.length;i+=CHUNK){
+      const slice=ids.slice(i,i+CHUNK);
+      try{
+        const list=slice.map(id=>`"${id}"`).join(',');
+        const r=await fetch(`${SUPA_URL}/rest/v1/cards?select=id&id=in.(${list})`,{headers:H});
+        if(!r.ok)continue;
+        const d=await r.json();
+        if(Array.isArray(d))d.forEach(c=>found.add(c.id));
+      }catch{}
+    }
+    return found;
+  },
+  // ─── Images d'occlusion mutualisées (table optionnelle « occlusion_images ») ─
+  // Une image d'occlusion génère souvent 7 à 20 cartes. La stocker dans chaque
+  // carte multipliait son poids d'autant. Elle est désormais enregistrée UNE
+  // seule fois, et les cartes n'en gardent qu'une référence.
+  upsertOcclusionImage: async (id, dataUrl, attempts=3) => {
+    let lastErr=null;
+    for(let a=1;a<=attempts;a++){
+      try{
+        const r=await fetch(`${SUPA_URL}/rest/v1/occlusion_images`,{
+          method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates,return=minimal"},
+          body:JSON.stringify([{id,data:dataUrl,created_at:new Date().toISOString()}]),
+        });
+        if(r.ok)return true;
+        // 404 / 42P01 : la table n'existe pas encore → repli sur l'ancien format.
+        if(r.status===404)return false;
+        let msg=`HTTP ${r.status}`;
+        try{const t=await r.text();if(t){ if(/does not exist|42P01|PGRST205/i.test(t))return false; msg+=` — ${t.slice(0,200)}`; }}catch{}
+        lastErr=new Error(msg);
+      }catch(e){ lastErr=e; }
+      if(a<attempts)await new Promise(res=>setTimeout(res,600*Math.pow(3,a-1)));
+    }
+    throw lastErr||new Error("Enregistrement de l'image impossible");
+  },
+  getOcclusionImage: async (id) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/occlusion_images?id=eq.${encodeURIComponent(id)}&select=data`,{headers:H});
+      if(!r.ok)return null;
+      const d=await r.json();
+      return Array.isArray(d)&&d.length>0?d[0].data:null;
+    }catch{ return null; }
+  },
   getAccounts: async () => { try { const r=await fetch(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H}); return await r.json(); } catch { return []; } },
   // Admin: fetch full cards (with front+back) server-side filtered — used in AdminCards
   getCardsAdmin: async (filters={}) => {
@@ -1535,9 +1616,37 @@ function RegisterView({onRegister,onBack,accounts}){
 const isOcclusion = (card) => { if(card.card_type==='occlusion')return true; try { return JSON.parse(card.front)?.type==="occlusion"; } catch { return false; } };
 // Titre optionnel affiché au-dessus de l'image (ex: le nom du tableau), stocké dans le JSON du recto
 const getOcclusionTitle = (front) => { try { return JSON.parse(front)?.title || ""; } catch { return ""; } };
+// Cache mémoire des images d'occlusion mutualisées : une même image sert à toutes
+// les cartes qu'elle a générées, elle n'est donc téléchargée qu'une fois par session.
+const _occImgCache=new Map();
+const resolveOcclusionImage=async data=>{
+  if(!data)return null;
+  if(data.image)return data.image;              // ancien format : image incluse
+  if(!data.imageRef)return null;
+  if(_occImgCache.has(data.imageRef))return _occImgCache.get(data.imageRef);
+  const url=await supa.getOcclusionImage(data.imageRef);
+  if(url)_occImgCache.set(data.imageRef,url);
+  return url;
+};
 function OcclusionCanvas({cardFront,showBack,showOthers}){
   const canvasRef=useRef(null);
+  const [imgSrc,setImgSrc]=useState(null);
+  const [imgErr,setImgErr]=useState(false);
   useEffect(()=>{
+    let alive=true;
+    setImgErr(false);
+    (async()=>{
+      try{
+        const data=JSON.parse(cardFront);
+        const src=await resolveOcclusionImage(data);
+        if(!alive)return;
+        if(src)setImgSrc(src); else setImgErr(true);
+      }catch{ if(alive)setImgErr(true); }
+    })();
+    return()=>{alive=false;};
+  },[cardFront]);
+  useEffect(()=>{
+    if(!imgSrc)return;
     try{
       const data=JSON.parse(cardFront);const canvas=canvasRef.current;if(!canvas)return;
       const ctx=canvas.getContext("2d");const img=new Image();
@@ -1564,9 +1673,11 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
             }
           }
         });
-      };img.src=data.image;
+      };img.src=imgSrc;
     }catch(e){console.error("OcclusionCanvas:",e);}
-  },[cardFront,showBack,showOthers]);
+  },[cardFront,showBack,showOthers,imgSrc]);
+  if(imgErr)return <p style={{fontSize:12,color:C.again,textAlign:"center",margin:"12px 0"}}>⚠️ Image de cette carte introuvable.</p>;
+  if(!imgSrc)return <p style={{fontSize:12,color:C.textLt,textAlign:"center",margin:"12px 0"}}>⏳ Chargement de l'image…</p>;
   return <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>;
 }
 // ─── Card Editor ──────────────────────────────────────────────────────────────
@@ -1686,21 +1797,69 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
     window.addEventListener('keydown',onKey);
     return()=>window.removeEventListener('keydown',onKey);
   },[image,zones,selectedZoneId,histVer]);
-  // Load an image File (from file picker OR drag & drop) into the occlusion editor
-  const loadImageFile=file=>{
+  // Charge une image dans l'éditeur d'occlusion (sélecteur de fichier ou glisser-déposer).
+  //
+  // L'image est COMPRESSÉE dès le chargement, et surtout AVANT que la moindre zone
+  // ne soit tracée : les zones sont mémorisées en coordonnées pixel de l'image, donc
+  // compresser après coup les décalerait toutes. Sans cette compression, une photo
+  // de téléphone (3024×4032) partait telle quelle vers Supabase — plusieurs Mo par
+  // carte, multipliés par le nombre de zones.
+  const [imgLoading,setImgLoading]=useState(false);
+  const loadImageFile=async file=>{
     if(!file||!file.type?.startsWith("image/"))return;
-    const reader=new FileReader();
-    reader.onload=ev=>{setImage(ev.target.result);setZones([]);histRef.current={stack:[[]],idx:0};setHistVer(0);setSaved(false);};
-    reader.readAsDataURL(file);
+    setImgLoading(true);
+    try{
+      const raw=await new Promise((res,rej)=>{
+        const reader=new FileReader();
+        reader.onload=ev=>res(ev.target.result);
+        reader.onerror=()=>rej(new Error("Lecture du fichier impossible"));
+        reader.readAsDataURL(file);
+      });
+      // 1400 px de côté maximum : assez fin pour lire un tableau ou un schéma,
+      // tout en divisant le poids par ~40 par rapport à une photo brute.
+      const compressed=await compressImage(raw,1400,0.72);
+      setImage(compressed);
+      setZones([]);histRef.current={stack:[[]],idx:0};setHistVer(0);setSaved(false);
+    }catch(e){
+      console.error("loadImageFile failed:",e);
+      alert("Impossible de charger cette image. Réessaie avec un autre fichier.");
+    }finally{ setImgLoading(false); }
   };
   const handleFile=e=>{loadImageFile(e.target.files[0]);};
-  const handleSaveOcclusion=()=>{
-    if(!image||zones.length===0)return;
+  const [occSaving,setOccSaving]=useState(false);
+  const handleSaveOcclusion=async()=>{
+    if(!image||zones.length===0||occSaving)return;
     if(personalMode&&!personalCourseName.trim()){setPersonalErr(true);return;}
-    saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);
-    const pcName=personalMode?personalCourseName.trim():null;
-    const cards=zones.map((zone,i)=>({id:`occ-${Date.now()}-${i}`,front:JSON.stringify({type:"occlusion",image,imgW,imgH,zones,targetZone:zone.id,title:occlusionTitle}),back:"__occlusion__",groupId:form.groupId,num:pcName?null:form.num,chapterId:pcName?1:form.chapterId,packetId:zone.packetId||form.packetId,card_type:"occlusion",personalCourseName:pcName}));
-    onSave(cards);setSaved(true);
+    setOccSaving(true);
+    try{
+      saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);
+      const pcName=personalMode?personalCourseName.trim():null;
+      const stamp=Date.now();
+      // L'image est enregistrée UNE SEULE FOIS, puis simplement référencée par
+      // chacune des cartes générées. Avec 20 zones, on passe de 20 copies de
+      // l'image à une seule — c'est ce qui faisait échouer l'enregistrement.
+      const imageRef=`occimg-${stamp}-${Math.random().toString(36).slice(2,8)}`;
+      let shared=false;
+      try{ shared=await supa.upsertOcclusionImage(imageRef,image); }
+      catch(e){
+        console.error("upsertOcclusionImage failed:",e);
+        alert(`⚠️ L'IMAGE N'A PAS PU ÊTRE ENREGISTRÉE\n\n${e.message||e}\n\nAucune carte n'a été créée — recommence dans un instant.`);
+        setOccSaving(false);return;
+      }
+      // Si la table partagée n'existe pas encore côté Supabase, on retombe sur
+      // l'ancien format (image incluse dans chaque carte). L'image étant
+      // désormais compressée, cela reste largement gérable.
+      const base=shared?{type:"occlusion",imageRef}:{type:"occlusion",image};
+      const cards=zones.map((zone,i)=>({
+        id:`occ-${stamp}-${i}`,
+        front:JSON.stringify({...base,imgW,imgH,zones,targetZone:zone.id,title:occlusionTitle}),
+        back:"__occlusion__",groupId:form.groupId,num:pcName?null:form.num,
+        chapterId:pcName?1:form.chapterId,packetId:zone.packetId||form.packetId,
+        card_type:"occlusion",personalCourseName:pcName,
+      }));
+      await onSave(cards);
+      setSaved(true);
+    } finally { setOccSaving(false); }
   };
   // Change the packet (Prioritaire/Important/Utile) of a single zone — each masked
   // element on the same image can belong to a different packet.
@@ -1771,7 +1930,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
   // du contenu, pour rester atteignable sans faire défiler la page.
   const renderPacketPanel=()=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px",height:"fit-content"}}><div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={packetOptions} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div></div>);
   const renderClassPanel=(withPacket)=>(<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px",height:"fit-content"}}><p style={{fontFamily:serif,fontSize:16,margin:"0 0 20px"}}>Classification</p><div style={{display:"flex",flexDirection:"column",gap:20}}>{withPacket&&<div><ClassSelector label={cardType==="occlusion"?"Paquet par défaut (nouvelles zones)":"Paquet"} value={form.packetId} onChange={v=>setForm(p=>({...p,packetId:v}))} options={packetOptions} columns={1}/>{cardType==="occlusion"&&<p style={{fontSize:11,color:C.textLt,margin:"8px 0 0",lineHeight:1.5}}>Chaque zone peut ensuite avoir son propre paquet — modifie-le dans la liste des zones à droite.</p>}</div>}<div style={withPacket?{borderTop:`1px solid ${C.border}`,paddingTop:18}:undefined}><ClassSelector label="Matière" value={form.groupId} onChange={handleGroupChange} options={groupOptions}/></div>{renderModeToggle()}{personalMode?renderPersonalCoursePicker():<>{availNums.length===0?<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><p style={{fontSize:12,color:C.textLt,margin:0,lineHeight:1.6}}>Aucun cours officiel n'existe encore pour cette matière — passe en "Mon cours personnel" pour créer le tien.</p></div>:<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Cours" value={form.num} onChange={handleNumChange} options={numOptions} columns={Math.min(availNums.length,4)}/></div>}{availChapters.length>0&&(<div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}><ClassSelector label="Chapitre" value={form.chapterId} onChange={v=>setForm(p=>({...p,chapterId:v}))} options={chapterOptions} columns={1}/></div>)}</>}</div></div>);
-  return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
+  return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh"}}><Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onCancel} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={isNew?"Nouvelle flashcard":"Modifier"} right={cardType==="text"?<Btn fill onClick={handleSaveText}>{saved?"✓ Enregistré":isNew?"Créer":"Mettre à jour"}</Btn>:zones.length>0?<Btn fill onClick={handleSaveOcclusion} disabled={occSaving}>{occSaving?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Enregistrement…</>:saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>:null}/>
     <div className="mfc-page" style={{maxWidth:960,margin:"0 auto",padding:"28px 24px"}}>
       {isNew&&lastClass&&<div style={{background:C.accentBg,border:`1px solid var(--c-accentSoft)`,borderRadius:8,padding:"8px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:14}}>📌</span><p style={{fontSize:12,color:C.accent,margin:0}}>Classification pré-remplie depuis la dernière carte — modifie uniquement ce qui change.</p></div>}
       {isNew&&(<div style={{marginBottom:24}}><Lbl>Type de carte</Lbl><div style={{display:"flex",gap:8,marginTop:8}}>{[["text","📝 Texte","Recto / Verso classique"],["occlusion","🖼 Image Occlusion","Masquer des zones sur une image"]].map(([t,lbl,desc])=>(<button key={t} onClick={()=>setCardType(t)} style={{fontFamily:font,fontSize:13,fontWeight:cardType===t?600:400,padding:"12px 20px",cursor:"pointer",borderRadius:8,border:`2px solid ${cardType===t?C.accent:C.border}`,background:cardType===t?C.accentBg:C.surface,color:cardType===t?C.accent:C.textMed,display:"flex",flexDirection:"column",alignItems:"flex-start",gap:3}}><span>{cardType===t&&"✓ "}{lbl}</span><span style={{fontSize:11,fontWeight:400,color:cardType===t?C.accent:C.textLt}}>{desc}</span></button>))}</div></div>)}
@@ -1821,7 +1980,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
             onDrop={e=>{e.preventDefault();e.stopPropagation();setImgDrag(false);loadImageFile(e.dataTransfer.files[0]);}}
             style={{border:`2px dashed ${imgDrag?C.accent:C.border}`,borderRadius:12,padding:"60px 24px",textAlign:"center",background:imgDrag?C.accentBg:C.surface,transition:"all 0.15s"}}>
             <p style={{fontSize:40,margin:"0 0 12px"}}>🖼</p>
-            <p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>{imgDrag?"Dépose l'image ici":"Importer une image"}</p>
+            <p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>{imgLoading?"Préparation de l'image…":imgDrag?"Dépose l'image ici":"Importer une image"}</p>
             <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Glisse-dépose une image ou clique pour l'importer. Dessine ensuite des zones à masquer. Fonctionne sur tablette.</p>
             <label style={{fontFamily:font,fontSize:13,fontWeight:500,padding:"10px 20px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"inline-block"}}>Choisir une image<input type="file" accept="image/*" onChange={handleFile} style={{display:"none"}}/></label>
           </div>
@@ -1901,7 +2060,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
             </div>}
           </div>
           {renderClassPanel(true)}
-          {zones.length>0&&<Btn fill full onClick={handleSaveOcclusion}>{saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>}
+          {zones.length>0&&<Btn fill full onClick={handleSaveOcclusion} disabled={occSaving}>{occSaving?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Enregistrement…</>:saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>}
         </div>
       </div>)}
     </div>
@@ -2192,7 +2351,11 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
   const [cardKey,setCardKey]=useState(0);
   const [saveFlash,setSaveFlash]=useState(false);
   const handleSave=async(cardOrCards)=>{
-    await onSaveCard(cardOrCards);
+    // onSaveCard renvoie false si tout ou partie de l'enregistrement a échoué.
+    // Dans ce cas on NE réinitialise PAS l'éditeur : l'image et les zones déjà
+    // tracées restent à l'écran, prêtes à être renvoyées sans tout refaire.
+    const ok=await onSaveCard(cardOrCards);
+    if(ok===false)return;
     if(editCard===null){
       setSaveFlash(true);
       setTimeout(()=>setSaveFlash(false),2000);
@@ -4057,18 +4220,41 @@ function App(){
     // and a genuine failure rolls the optimistic change back instead of leaving
     // the UI claiming a card is saved when it isn't.
     beginPendingSave();
-    Promise.all(savedList.map(saved=>supa.upsertCard(saved)))
-      .catch(e=>{
-        console.error("upsertCard failed:",e);
+    // Enregistrement GROUPÉ (une requête par lot de 20) avec plusieurs tentatives,
+    // au lieu d'une requête par carte lancées toutes en parallèle : c'est ce qui
+    // saturait la connexion lors de la génération de 7 à 20 cartes d'occlusion.
+    return supa.upsertCardsBatch(savedList)
+      .then(()=>true)
+      .catch(async e=>{
+        console.error("upsertCardsBatch failed:",e);
+        // On ne suppose plus que TOUT a échoué : on demande au serveur quelles
+        // cartes sont réellement arrivées. Celles-ci restent en place ; seules
+        // les manquantes sont retirées et signalées.
+        let present=new Set();
+        try{ present=await supa.checkCardsExist(savedList.map(c=>c.id)); }catch{}
+        const missing=savedList.filter(c=>!present.has(c.id));
+        if(missing.length===0){
+          // Tout est bien enregistré malgré l'erreur réseau : rien à signaler.
+          console.warn("Erreur signalée mais toutes les cartes sont enregistrées.");
+          return true;
+        }
+        const missingIds=new Set(missing.map(c=>c.id));
         setCards(prev=>{
           let next=prev;
-          savedList.forEach(saved=>{
+          missing.forEach(saved=>{
             const orig=previousById[saved.id];
             next=orig?next.map(c=>c.id===saved.id?orig:c):next.filter(c=>c.id!==saved.id);
           });
           return sortCardsGlobally(next);
         });
-        alert(`⚠️ ÉCHEC DE L'ENREGISTREMENT\n\nLa carte n'a pas pu être sauvegardée sur le serveur :\n${e.message||e}\n\nElle a été retirée pour éviter toute confusion — recommence la saisie une fois la connexion rétablie.`);
+        const savedCount=savedList.length-missing.length;
+        alert(
+          `⚠️ ENREGISTREMENT INCOMPLET\n\n`+
+          `${savedCount} carte${savedCount>1?"s":""} sur ${savedList.length} ${savedCount>1?"ont":"a"} bien été enregistrée${savedCount>1?"s":""}.\n`+
+          `${missing.length} carte${missing.length>1?"s":""} n'${missing.length>1?"ont":"a"} pas pu l'être :\n${e.message||e}\n\n`+
+          `Seules les cartes manquantes ont été retirées de l'affichage — celles déjà enregistrées sont conservées.`
+        );
+        return false;
       })
       .finally(()=>{endPendingSave();});
   },[cards,beginPendingSave,endPendingSave]);
@@ -4177,15 +4363,30 @@ function App(){
     // the next successful save/reload.
     setUCache(currentUser.username,newCards);
     beginPendingSave();
-    Promise.all(list.map(card=>{
-      const c=newCards.find(x=>x.id===card.id)||card;
-      return supa.upsertUserCard(c);
-    }))
-      .catch(e=>{
-        console.error("upsertUserCard failed:",e);
-        alert(`⚠️ La carte personnelle est enregistrée sur cet appareil, mais la synchronisation avec le serveur a échoué :\n${e.message||e}\n\nElle se resynchronisera automatiquement dès que la connexion sera rétablie.`);
-      })
-      .finally(()=>{endPendingSave();});
+    // Envoi séquentiel avec reprise : une occlusion personnelle peut générer 20
+    // cartes d'un coup. Les envoyer toutes en parallèle saturait la connexion.
+    (async()=>{
+      const failed=[];
+      for(const card of list){
+        const c=newCards.find(x=>x.id===card.id)||card;
+        let ok=false,lastErr=null;
+        for(let a=1;a<=3;a++){
+          try{ await supa.upsertUserCard(c); ok=true; break; }
+          catch(e){ lastErr=e; if(a<3)await new Promise(r=>setTimeout(r,600*Math.pow(3,a-1))); }
+        }
+        if(!ok)failed.push({card:c,err:lastErr});
+      }
+      if(failed.length>0){
+        console.error("upsertUserCard failed:",failed[0].err);
+        const okCount=list.length-failed.length;
+        alert(
+          `⚠️ SYNCHRONISATION INCOMPLÈTE\n\n`+
+          `${okCount} carte${okCount>1?"s":""} sur ${list.length} synchronisée${okCount>1?"s":""} avec le serveur.\n`+
+          `${failed.length} n'${failed.length>1?"ont":"a"} pas pu l'être : ${failed[0].err?.message||failed[0].err}\n\n`+
+          `Toutes restent enregistrées sur cet appareil et se resynchroniseront automatiquement.`
+        );
+      }
+    })().finally(()=>{endPendingSave();});
     if(userCardEditor===false){
       setUserCardKey(k=>k+1);
     } else {
