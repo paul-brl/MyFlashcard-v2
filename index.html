@@ -1062,9 +1062,21 @@ const sortCardsGlobally = cards => [...cards].sort((a,b)=>{
 });
 const validateEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 const validatePassword = p => { const hasLen=p.length>=8, hasSpecial=/[!@#$%^&*()\-_=+\[\]{};:'",.<>?/\\|`~]/.test(p); return {ok:hasLen&&hasSpecial,hasLen,hasSpecial}; };
+// ─── Achats étudiants : interrupteur global ──────────────────────────────────
+// false  → tous les points d'entrée d'achat côté étudiant sont masqués :
+//          bouton « Changer d'abonnement », onglet « 🛒 Acheter par matière »,
+//          boutons « 🔒 Débloquer », bouton « 💳 S'abonner », modale d'achat.
+// true   → tout redevient visible immédiatement.
+// AUCUNE fonctionnalité n'est supprimée : la boutique, la modale d'abonnement,
+// les liens Stripe et la logique de déblocage restent intacts dans le code.
+// Pour réactiver la vente : passer cette constante à true (une seule ligne).
+const PURCHASES_ENABLED = false;
 // ─── Stripe ──────────────────────────────────────────────────────────────────
 const STRIPE_LINKS = { "sem1":"https://buy.stripe.com/5kQ7sN68i58ocCW0gDasg00","sem2":"https://buy.stripe.com/3cI14p8gq30gauO1kHasg01","both":"https://buy.stripe.com/5kQeVf0NY0S85au8N9asg02","g-cell-bio":"https://buy.stripe.com/14A5kFaoy8kA0UegfBasg0d","g-histo":"https://buy.stripe.com/6oUeVfbsCgR6dH03sPasg04","g-biochem":"https://buy.stripe.com/4gM00l68i0S8cCW8N9asg05","g-biomol":"https://buy.stripe.com/3cI3cxgMW58o6ey6F1asg06","g-biophys":"https://buy.stripe.com/cNiaEZ2W6cAQ6ey0gDasg07","g-biostat":"https://buy.stripe.com/5kQdRb8gqeIYeL49Rdasg08","g-anatomie":"https://buy.stripe.com/fZu3cxcwGdEUauO3sPasg09","g-physio":"https://buy.stripe.com/bJe8wR2W644kauOfbxasg0c","g-medic":"https://buy.stripe.com/dRmfZj0NY1WcgTc8N9asg0b","g-ssh":"https://buy.stripe.com/cNi6oJ2W68kA32mgfBasg0a" };
 function redirectToStripe(planId, username) {
+  // Filet de sécurité : tant que PURCHASES_ENABLED est à false, aucune
+  // redirection de paiement n'est déclenchée, même si un bouton était oublié.
+  if (!PURCHASES_ENABLED) return false;
   const base = STRIPE_LINKS[planId];
   if (!base||base.includes("REMPLACE_MOI")) { alert("Le paiement en ligne n'est pas encore configuré pour ce plan."); return false; }
   try { localStorage.setItem("mx6-pending-purchase", JSON.stringify({ planId, username, ts: Date.now() })); } catch {}
@@ -3302,7 +3314,9 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
       return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12,opacity:0.75}}>
         <div style={{padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
           <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.textMed}}>{group.label}</p>
-          <button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>🔒 Débloquer</button>
+          {PURCHASES_ENABLED
+            ?<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>🔒 Débloquer</button>
+            :<span style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>🔒 Verrouillé</span>}
         </div>
       </div>;
     }
@@ -3319,7 +3333,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
           const locked=!isAdmin&&!isCourseAccessible(group.id,n,userGroups,fullGroups);
           const active=activeCours===n;
           const due=locked?0:courseDueCount(allCards,progress,group.id,n);
-          return <button key={n} onClick={()=>locked?setShowUpgrade(true):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${locked?C.border:active?C.accent:due>0?C.good:C.border}`,background:locked?"transparent":active?C.accentBg:due>0?C.goodBg:"transparent",color:locked?C.textLt:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s",opacity:locked?0.7:1}}><span>Cours {n}</span>{locked?<span style={{fontSize:10}}>🔒</span>:<>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></>}</button>;
+          return <button key={n} onClick={()=>locked?(PURCHASES_ENABLED&&setShowUpgrade(true)):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${locked?C.border:active?C.accent:due>0?C.good:C.border}`,background:locked?"transparent":active?C.accentBg:due>0?C.goodBg:"transparent",color:locked?C.textLt:active?C.accent:due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s",opacity:locked?0.7:1}}><span>Cours {n}</span>{locked?<span style={{fontSize:10}}>🔒</span>:<>{due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{due}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></>}</button>;
         })}
       </div>
       {activeCours&&(
@@ -3404,7 +3418,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
             <Tag color={currentPlan?.price==="Gratuit"?C.util:C.accent} bg={currentPlan?.price==="Gratuit"?C.utilBg:C.accentBg} small>{currentPlan?.price||"Gratuit"}</Tag>
           </div>
         </div>
-        {!isAdmin&&<button className="mfc-planbtn" onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"flex",alignItems:"center",justifyContent:"center",gap:7,flexShrink:0,whiteSpace:"nowrap"}}>💳 Changer d'abonnement</button>}
+        {!isAdmin&&PURCHASES_ENABLED&&<button className="mfc-planbtn" onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"flex",alignItems:"center",justifyContent:"center",gap:7,flexShrink:0,whiteSpace:"nowrap"}}>💳 Changer d'abonnement</button>}
       </div>
       {resumeInfo&&resumeInfo.ids&&resumeInfo.ids.length>0&&(
         <div style={{background:"var(--c-violetBg)",border:"1.5px solid var(--c-violetSoft)",borderRadius:12,padding:"14px 18px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",animation:"fadeIn 0.2s ease"}}>
@@ -3440,7 +3454,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
             {tab.label}{!access&&<span style={{fontSize:9,marginLeft:6,color:C.textLt}}>🔒</span>}
           </button>;
         })}
-        {!isAdmin&&<button onClick={()=>setActiveTab("shop")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="shop"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="shop"?C.imp:C.border}`,background:activeTab==="shop"?C.impBg:"transparent",color:activeTab==="shop"?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>🛒 Acheter par matière</button>}
+        {!isAdmin&&PURCHASES_ENABLED&&<button onClick={()=>setActiveTab("shop")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="shop"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="shop"?C.imp:C.border}`,background:activeTab==="shop"?C.impBg:"transparent",color:activeTab==="shop"?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>🛒 Acheter par matière</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("mes-cartes")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="mes-cartes"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="mes-cartes"?"var(--c-violet)":C.border}`,background:activeTab==="mes-cartes"?"var(--c-violetBg)":"transparent",color:activeTab==="mes-cartes"?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:6}}>✏️ Mes flashcards{(userCards||[]).length>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"var(--c-violet)",color:"var(--c-onSolid)"}}>{(userCards||[]).length}</span>}</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("stats")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="stats"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="stats"?C.accent:C.border}`,background:activeTab==="stats"?C.accentBg:"transparent",color:activeTab==="stats"?C.accent:C.textMed,display:"flex",alignItems:"center",gap:6}}>📊 Statistiques</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("rank")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="rank"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="rank"?"var(--c-gold)":C.border}`,background:activeTab==="rank"?"var(--c-goldBg)":"transparent",color:activeTab==="rank"?"var(--c-gold)":C.textMed,display:"flex",alignItems:"center",gap:6}}>🏆 Rang{todayPts>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"var(--c-gold)",color:"var(--c-onSolid)"}}>{todayPts}</span>}</button>}
@@ -3454,7 +3468,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         <StatsTab username={currentUser.username} progress={progress} allCards={allCardsProp||[...cards,...(userCards||[]).filter(c=>c.integrated)]} onUnbury={onUnbury}/>
       ):activeTab==="mes-cartes"&&!isAdmin?(
         <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal}/>
-      ):activeTab==="shop"&&!isAdmin?(
+      ):activeTab==="shop"&&!isAdmin&&PURCHASES_ENABLED?(
         <ShopTab userGroups={userGroups} fullGroups={fullGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)}/>
       ):tabHasAccess?(
         <div>
@@ -3465,12 +3479,12 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
           <p style={{fontSize:32,margin:"0 0 12px"}}>🔒</p>
           <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>{TABS.find(t=>t.id===activeTab)?.label}</p>
-          <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>Cet abonnement n'est pas inclus dans ton offre actuelle.<br/>Débloque l'accès pour <strong>{TABS.find(t=>t.id===activeTab)?.price}</strong>.</p>
-          {!isAdmin&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>💳 S'abonner →</button>}
+          <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_ENABLED?<>Cet abonnement n'est pas inclus dans ton offre actuelle.<br/>Débloque l'accès pour <strong>{TABS.find(t=>t.id===activeTab)?.price}</strong>.</>:<>Cet abonnement n'est pas inclus dans ton offre actuelle.</>}</p>
+          {!isAdmin&&PURCHASES_ENABLED&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>💳 S'abonner →</button>}
         </div>
       )}
     </div>
-    {showUpgrade&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)}/>}
+    {showUpgrade&&PURCHASES_ENABLED&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)}/>}
     <Footer/>
   </div>;
 }
