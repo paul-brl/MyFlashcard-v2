@@ -334,6 +334,8 @@ const { useState, useEffect, useCallback, useMemo, useRef } = React;
 const SUPA_URL = "https://cytdlgvtwvofwrgqnkhe.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5dGRsZ3Z0d3ZvZndyZ3Fua2hlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTU4MTIsImV4cCI6MjA5NDU5MTgxMn0.QLQrzrkAjDjEY1x0VJwMguteUYdcGJ_pREX03VElyOs";
 const EDGE_URL = `${SUPA_URL}/functions/v1`;
+// Nom du bucket Supabase Storage qui héberge les PDF de cours.
+const LESSON_BUCKET = "cours";
 const H = { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${SUPA_KEY}` };
 const supa = {
   // Load metadata only — NO front/back. Fast even for 100k cards.
@@ -486,6 +488,64 @@ const supa = {
       return Array.isArray(d)&&d.length>0?d[0].data:null;
     }catch{ return null; }
   },
+  // ─── Cours au format PDF (table « lessons » + bucket Storage « cours ») ─────
+  // Le PDF lui-même n'est PAS stocké en base : il part dans le bucket Storage,
+  // et la table ne garde qu'une ligne de métadonnées (matière, cours, chapitre,
+  // nom du fichier, URL publique). Une ligne pèse ~200 octets, le chargement du
+  // catalogue complet reste donc instantané même avec plusieurs centaines de
+  // documents. Si la table n'existe pas encore, tout retourne vide sans casser
+  // l'application : la partie « Cours » s'affiche simplement comme non remplie.
+  getLessons: async () => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/lessons?select=id,group_id,num,chapter_id,title,file_name,file_path,url,size,updated_at`,{headers:H});
+      if(!r.ok)return [];
+      const d=await r.json();
+      if(!Array.isArray(d))return [];
+      return d.map(l=>({
+        id:l.id, groupId:l.group_id, num:l.num, chapterId:l.chapter_id,
+        title:l.title||"", fileName:l.file_name||"", filePath:l.file_path||"",
+        url:l.url||"", size:l.size||0, updatedAt:l.updated_at||null,
+      }));
+    }catch{ return []; }
+  },
+  // Envoi du fichier dans le bucket. `path` contient un jeton aléatoire, de sorte
+  // qu'une URL publique reste impossible à deviner à partir du nom de la matière.
+  uploadLessonFile: async (path, file) => {
+    const r=await fetch(`${SUPA_URL}/storage/v1/object/${LESSON_BUCKET}/${path}`,{
+      method:"POST",
+      headers:{ "apikey":SUPA_KEY, "Authorization":`Bearer ${SUPA_KEY}`, "Content-Type":file.type||"application/pdf", "x-upsert":"true" },
+      body:file,
+    });
+    if(!r.ok){
+      let t=""; try{ t=await r.text(); }catch{}
+      if(/Bucket not found/i.test(t))throw new Error(`Le bucket « ${LESSON_BUCKET} » n'existe pas encore dans Supabase (Storage → New bucket, nom « ${LESSON_BUCKET} », public).`);
+      if(r.status===403||/row-level security|Unauthorized/i.test(t))throw new Error("Envoi refusé par Supabase : les règles d'accès du bucket ne sont pas encore posées (voir le script SQL fourni).");
+      throw new Error(`Envoi du PDF impossible (HTTP ${r.status})${t?" — "+t.slice(0,160):""}`);
+    }
+    return `${SUPA_URL}/storage/v1/object/public/${LESSON_BUCKET}/${path}`;
+  },
+  deleteLessonFile: async (path) => {
+    if(!path)return;
+    try{ await fetch(`${SUPA_URL}/storage/v1/object/${LESSON_BUCKET}/${path}`,{method:"DELETE",headers:{apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`}}); }catch{}
+  },
+  upsertLesson: async (lesson) => {
+    const row={
+      id:lesson.id, group_id:lesson.groupId, num:lesson.num, chapter_id:lesson.chapterId,
+      title:lesson.title||"", file_name:lesson.fileName||"", file_path:lesson.filePath||"",
+      url:lesson.url||"", size:lesson.size||0, updated_at:new Date().toISOString(),
+    };
+    const r=await fetch(`${SUPA_URL}/rest/v1/lessons`,{
+      method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates,return=minimal"},
+      body:JSON.stringify([row]),
+    });
+    if(!r.ok){
+      let t=""; try{ t=await r.text(); }catch{}
+      if(/does not exist|42P01|PGRST205/i.test(t))throw new Error("La table « lessons » n'existe pas encore dans Supabase (voir le script SQL fourni).");
+      throw new Error(`Enregistrement impossible (HTTP ${r.status})${t?" — "+t.slice(0,160):""}`);
+    }
+    return true;
+  },
+  deleteLesson: async (id) => { try{ await fetch(`${SUPA_URL}/rest/v1/lessons?id=eq.${encodeURIComponent(id)}`,{method:"DELETE",headers:H}); }catch{} },
   getAccounts: async () => { try { const r=await fetch(`${SUPA_URL}/rest/v1/accounts?select=*`,{headers:H}); return await r.json(); } catch { return []; } },
   // Admin: fetch full cards (with front+back) server-side filtered — used in AdminCards
   getCardsAdmin: async (filters={}) => {
@@ -822,6 +882,40 @@ const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
   if (num === 1 && FREE_GROUP_IDS.includes(groupId) && (userGroups||[]).includes(groupId)) return true;
   return false;
 };
+// ─── Cours PDF : identifiants et petit magasin partagé ────────────────────────
+// Un cours est identifié par le triplet matière / cours / chapitre, exactement
+// comme une flashcard. Un même chapitre ne peut donc porter qu'un seul PDF :
+// réenvoyer un fichier remplace proprement le précédent.
+const lessonKey = (groupId, num, chapterId) => `${groupId}__${num}__${chapterId}`;
+const slugify = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g,"-").replace(/^-+|-+$/g,"").toLowerCase().slice(0,60) || "cours";
+const randomToken = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+const formatBytes = b => !b ? "" : b < 1024*1024 ? `${Math.round(b/1024)} Ko` : `${(b/(1024*1024)).toFixed(1)} Mo`;
+// Le catalogue est chargé une seule fois puis partagé entre le tableau de bord
+// étudiant et l'espace d'administration, pour éviter deux requêtes concurrentes.
+let LESSONS_CACHE = null;
+const lessonsSubs = new Set();
+async function refreshLessons(){
+  const rows = await supa.getLessons();
+  LESSONS_CACHE = rows;
+  lessonsSubs.forEach(fn => { try { fn(rows); } catch {} });
+  return rows;
+}
+function useLessons(){
+  const [lessons, setLessons] = useState(LESSONS_CACHE || []);
+  const [loading, setLoading] = useState(LESSONS_CACHE === null);
+  useEffect(() => {
+    lessonsSubs.add(setLessons);
+    if (LESSONS_CACHE === null) { refreshLessons().finally(() => setLoading(false)); }
+    else { setLessons(LESSONS_CACHE); setLoading(false); }
+    return () => { lessonsSubs.delete(setLessons); };
+  }, []);
+  const byKey = useMemo(() => {
+    const m = {};
+    (lessons||[]).forEach(l => { m[lessonKey(l.groupId, l.num, l.chapterId)] = l; });
+    return m;
+  }, [lessons]);
+  return { lessons, byKey, loading, refresh: refreshLessons };
+}
 // ─── Statistics helpers ───────────────────────────────────────────────────────
 const dateKey = (d=new Date()) => d.toISOString().slice(0,10);
 const getStats = u => { try { return JSON.parse(localStorage.getItem(`mx6-stats-${u}`)||"null")||{days:{},total:{cards:0,correct:0,seconds:0}}; } catch { return {days:{},total:{cards:0,correct:0,seconds:0}}; } };
@@ -2411,6 +2505,119 @@ function AdminUsers({accounts,onSave,onDelete}){
     {delUser&&<Modal onClose={()=>setDelUser(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer {delUser} ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>L'étudiant ne pourra plus se connecter.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delUser);setDelUser(null);}}>Supprimer</Btn><Btn onClick={()=>setDelUser(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
+// ─── Admin · Cours PDF ────────────────────────────────────────────────────────
+// L'administrateur dépose un PDF chapitre par chapitre, exactement là où se
+// trouvent les flashcards correspondantes. Le fichier part dans le bucket
+// Storage « cours » ; la base ne conserve qu'une ligne de métadonnées. Déposer
+// un nouveau fichier sur un chapitre déjà servi remplace l'ancien et supprime
+// le précédent du stockage, pour ne rien laisser traîner.
+const MAX_LESSON_BYTES = 50 * 1024 * 1024;
+function AdminLessons({cards}){
+  const {lessons,byKey,loading,refresh}=useLessons();
+  const [groupId,setGroupId]=useState(GROUPS[0].id);
+  const [num,setNum]=useState(1);
+  const [busy,setBusy]=useState(null);
+  const [flash,setFlash]=useState(null);
+  const [err,setErr]=useState(null);
+  const [confirmDel,setConfirmDel]=useState(null);
+  const [preview,setPreview]=useState(null);
+  const group=GROUPS.find(g=>g.id===groupId)||GROUPS[0];
+  const inputs=useRef({});
+  useEffect(()=>{ if(!group.nums.includes(num))setNum(group.nums[0]); },[groupId]);
+  const chapters=getLessonChapters(group.id,num,cards||[],lessons);
+  const showFlash=msg=>{ setFlash(msg); setErr(null); setTimeout(()=>setFlash(null),2600); };
+  const handleFile=async(chIdx,chName,file)=>{
+    if(!file)return;
+    setErr(null);
+    const isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name);
+    if(!isPdf){ setErr("Seuls les fichiers PDF sont acceptés."); return; }
+    if(file.size>MAX_LESSON_BYTES){ setErr(`Ce PDF pèse ${formatBytes(file.size)}. La limite est de 50 Mo — compresse-le avant de le renvoyer.`); return; }
+    const key=lessonKey(group.id,num,chIdx);
+    setBusy(key);
+    try{
+      const path=`${group.id}/${num}/${chIdx}-${slugify(chName)}-${randomToken()}.pdf`;
+      const url=await supa.uploadLessonFile(path,file);
+      const prev=byKey[key];
+      await supa.upsertLesson({
+        id:`${group.id}-${num}-${chIdx}`, groupId:group.id, num, chapterId:chIdx,
+        title:chName, fileName:file.name, filePath:path, url, size:file.size,
+      });
+      if(prev&&prev.filePath&&prev.filePath!==path)await supa.deleteLessonFile(prev.filePath);
+      await refresh();
+      showFlash(`✓ « ${chName} » est en ligne`);
+    }catch(e){ setErr(e.message||"Envoi impossible."); }
+    finally{ setBusy(null); }
+  };
+  const handleDelete=async lesson=>{
+    setBusy(lessonKey(lesson.groupId,lesson.num,lesson.chapterId));
+    setConfirmDel(null);
+    try{
+      await supa.deleteLesson(lesson.id);
+      await supa.deleteLessonFile(lesson.filePath);
+      await refresh();
+      showFlash("✓ Cours retiré");
+    }catch(e){ setErr(e.message||"Suppression impossible."); }
+    finally{ setBusy(null); }
+  };
+  const totalOnline=lessons.length;
+  const Sel=({value,onChange,children})=><select value={value} onChange={onChange} style={{fontFamily:font,fontSize:13,padding:"8px 10px",borderRadius:6,border:`1.5px solid ${C.border}`,background:C.surface,color:C.text,outline:"none"}}>{children}</select>;
+  return <div style={{maxWidth:760,margin:"0 auto",padding:24}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,flexWrap:"wrap",gap:10}}>
+      <p style={{fontFamily:serif,fontSize:18,margin:0}}>Cours au format PDF</p>
+      <span style={{fontFamily:mono,fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:C.textLt}}>{totalOnline} document{totalOnline>1?"s":""} en ligne</span>
+    </div>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 18px",lineHeight:1.6}}>Choisis la matière et le cours, puis dépose un PDF sur chaque chapitre. Les étudiants le voient immédiatement dans les onglets « Cours 1 » et « Cours 2 » — avec les mêmes règles d'accès que les flashcards.</p>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
+      <Sel value={groupId} onChange={e=>setGroupId(e.target.value)}>{GROUPS.map(g=><option key={g.id} value={g.id}>{groupLabel(g)}</option>)}</Sel>
+      <Sel value={num} onChange={e=>setNum(Number(e.target.value))}>{group.nums.map(n=><option key={n} value={n}>Cours {n}</option>)}</Sel>
+    </div>
+    {!isCourseAccessible(group.id,num,FREE_GROUP_IDS,[])&&
+      <div style={{background:C.impBg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 14px",marginBottom:14}}>
+        <p style={{fontSize:12,color:C.imp,margin:0,lineHeight:1.6}}>🔒 Ce cours est payant : seuls les étudiants ayant acheté « {group.label} » (ou le semestre) pourront ouvrir ces PDF.</p>
+      </div>}
+    {flash&&<div style={{background:C.goodBg,border:`1px solid var(--c-goodSoft)`,borderRadius:8,padding:"9px 14px",marginBottom:14}}><p style={{fontSize:12,color:C.good,margin:0}}>{flash}</p></div>}
+    {err&&<div style={{background:C.againBg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 14px",marginBottom:14}}><p style={{fontSize:12,color:C.again,margin:0,lineHeight:1.6}}>{err}</p></div>}
+    {loading?(
+      <p style={{fontSize:13,color:C.textLt,padding:"30px 0",textAlign:"center"}}><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Chargement…</p>
+    ):(
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
+        {chapters.map((chName,i)=>{
+          const chIdx=i+1;
+          const key=lessonKey(group.id,num,chIdx);
+          const lesson=byKey[key];
+          const isBusy=busy===key;
+          return <div key={chIdx} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderTop:i===0?"none":`1px solid ${C.border}`,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
+              <span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:18,flexShrink:0}}>{chIdx}</span>
+              <div style={{minWidth:0}}>
+                <p style={{fontFamily:font,fontSize:13,margin:0,color:C.text}}>{chName}</p>
+                <p style={{fontFamily:mono,fontSize:9,margin:"3px 0 0",color:lesson?C.good:C.textLt,overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {lesson?`${lesson.fileName}${lesson.size?" · "+formatBytes(lesson.size):""}`:"aucun PDF — affiché « bientôt disponible »"}
+                </p>
+              </div>
+            </div>
+            <input ref={el=>{inputs.current[key]=el;}} type="file" accept="application/pdf,.pdf" style={{display:"none"}} onChange={e=>{const f=e.target.files&&e.target.files[0];e.target.value="";handleFile(chIdx,chName,f);}}/>
+            <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+              {isBusy?(
+                <span style={{fontFamily:font,fontSize:11,color:C.textMed,padding:"6px 12px"}}><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> En cours…</span>
+              ):(<>
+                {lesson&&<Btn small onClick={()=>setPreview({lesson,subtitle:`${group.label} · Cours ${num} · ${chName}`})}>Aperçu</Btn>}
+                <Btn small onClick={()=>inputs.current[key]&&inputs.current[key].click()}>{lesson?"Remplacer":"+ Déposer un PDF"}</Btn>
+                {lesson&&<Btn small danger onClick={()=>setConfirmDel(lesson)}>Supprimer</Btn>}
+              </>)}
+            </div>
+          </div>;
+        })}
+      </div>
+    )}
+    {confirmDel&&<Modal onClose={()=>setConfirmDel(null)} width={340}>
+      <p style={{fontFamily:serif,fontSize:19,margin:"0 0 8px"}}>Retirer ce cours ?</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 22px",lineHeight:1.6}}>« {confirmDel.title} » ne sera plus visible par les étudiants et le PDF sera effacé du stockage.</p>
+      <div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>handleDelete(confirmDel)}>Supprimer</Btn><Btn onClick={()=>setConfirmDel(null)}>Annuler</Btn></div>
+    </Modal>}
+    {preview&&<PdfViewer lesson={preview.lesson} subtitle={preview.subtitle} onClose={()=>setPreview(null)}/>}
+  </div>;
+}
 function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUser,onSortCards,onBack,theme,onToggleTheme}){
   const [tab,setTab]=useState("cards"),[subView,setSubView]=useState("list"),[editCard,setEditCard]=useState(null);
   const [cardKey,setCardKey]=useState(0);
@@ -2438,8 +2645,9 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="users" label="👤 Étudiants"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>{setEditCard(null);setSubView("editor");}} onEdit={c=>{setEditCard(c);setSubView("editor");}} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
+    {tab==="lessons"&&<AdminLessons cards={cards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
   </div>;
 }
@@ -3276,6 +3484,145 @@ function ForumTab({currentUser,pseudo}){
     )}
   </div>;
 }
+// ─── Cours PDF : composants partagés ──────────────────────────────────────────
+// Liste des chapitres d'un cours pour la partie « Cours ». On repart de la même
+// table que les flashcards, étendue si un PDF a été déposé sur un chapitre qui
+// n'y figure pas encore. Une matière sans chapitres déclarés retombe sur une
+// entrée unique « Cours complet ».
+const getLessonChapters = (groupId, num, cards, lessons) => {
+  const base = getDisplayChapters(groupId, num, cards||[]);
+  const maxL = (lessons||[]).filter(l=>l.groupId===groupId&&l.num===num).reduce((m,l)=>Math.max(m,l.chapterId||1),0);
+  if (base.length === 0) return maxL > 1 ? Array.from({length:maxL},(_,i)=>`Partie ${i+1}`) : ["Cours complet"];
+  if (maxL <= base.length) return base;
+  const ext = [...base];
+  for (let i = base.length + 1; i <= maxL; i++) ext.push(`Chapitre ${i}`);
+  return ext;
+};
+// Message affiché quand le chapitre est bien accessible mais que le PDF n'a pas
+// encore été déposé par l'équipe.
+function ComingSoonModal({title,onClose}){
+  return <Modal onClose={onClose} width={400}>
+    <p style={{fontSize:30,margin:"0 0 10px",textAlign:"center"}}>✍️</p>
+    <p style={{fontFamily:serif,fontSize:20,margin:"0 0 10px",textAlign:"center"}}>Ce cours est en cours de rédaction</p>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 8px",lineHeight:1.7,textAlign:"center"}}>
+      <strong>{title}</strong> n'est pas encore en ligne. Il est en train d'être écrit et relu par nos étudiants, et il arrivera très bientôt dans ton espace — sans rien à faire de ta part, il apparaîtra tout seul ici.
+    </p>
+    <p style={{fontSize:12,color:C.textLt,margin:"0 0 22px",lineHeight:1.7,textAlign:"center"}}>
+      En attendant, les flashcards de ce chapitre sont déjà disponibles dans l'onglet du semestre.
+    </p>
+    <Btn fill full onClick={onClose}>J'ai compris</Btn>
+  </Modal>;
+}
+// Lecteur PDF intégré : le document s'ouvre par-dessus le site, sans quitter la
+// page. Échap ferme la visionneuse.
+function PdfViewer({lesson,subtitle,onClose}){
+  const [failed,setFailed]=useState(false);
+  useEffect(()=>{
+    const onKey=e=>{ if(e.key==="Escape")onClose(); };
+    window.addEventListener("keydown",onKey);
+    const prev=document.body.style.overflow;
+    document.body.style.overflow="hidden";
+    return ()=>{ window.removeEventListener("keydown",onKey); document.body.style.overflow=prev; };
+  },[onClose]);
+  if(!lesson)return null;
+  return <div style={{position:"fixed",inset:0,zIndex:1200,background:C.bg,display:"flex",flexDirection:"column"}}>
+    <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"10px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexShrink:0}}>
+      <div style={{minWidth:0,flex:"1 1 auto"}}>
+        <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lesson.title||lesson.fileName}</p>
+        {subtitle&&<p style={{fontFamily:mono,fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:C.textLt,margin:"3px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{subtitle}</p>}
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
+        <a href={lesson.url} target="_blank" rel="noopener noreferrer" download={lesson.fileName||"cours.pdf"} style={{fontFamily:font,fontSize:12,fontWeight:500,padding:"6px 12px",borderRadius:6,border:`1.5px solid ${C.border}`,color:C.textMed,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:6}}>⬇ Télécharger</a>
+        <button onClick={onClose} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>Fermer ✕</button>
+      </div>
+    </div>
+    <div style={{flex:1,minHeight:0,background:"var(--c-surfaceAlt)"}}>
+      {failed?(
+        <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14,padding:24,textAlign:"center"}}>
+          <p style={{fontSize:13,color:C.textMed,margin:0,lineHeight:1.7}}>L'aperçu intégré n'a pas pu s'afficher sur cet appareil.<br/>Le document reste consultable dans un nouvel onglet.</p>
+          <a href={lesson.url} target="_blank" rel="noopener noreferrer" style={{fontFamily:font,fontSize:13,fontWeight:600,padding:"10px 20px",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,textDecoration:"none"}}>Ouvrir le PDF →</a>
+        </div>
+      ):(
+        <iframe title={lesson.title||"Cours"} src={`${lesson.url}#view=FitH`} onError={()=>setFailed(true)} style={{width:"100%",height:"100%",border:"none",display:"block"}}/>
+      )}
+    </div>
+  </div>;
+}
+// ─── Onglet « Cours » (étudiant) ──────────────────────────────────────────────
+// Reprend exactement l'arborescence des flashcards : matière → Cours 1..N →
+// chapitres. Le verrouillage suit la même règle que les cartes : un chapitre
+// n'est lisible que si son cours est accessible (offert ou payé).
+function LessonsTab({semLabel,groups,lessonsByKey,lessons,loading,allCards,isAdmin,userGroups,fullGroups,onUpgrade,onOpen}){
+  const [comingSoon,setComingSoon]=useState(null);
+  function LessonGroupBlock({group}){
+    const [activeCours,setActiveCours]=useState(null);
+    const groupLocked=!isAdmin&&!group.nums.some(n=>isCourseAccessible(group.id,n,userGroups,fullGroups));
+    const availableCount=group.nums.reduce((acc,n)=>{
+      const chs=getLessonChapters(group.id,n,allCards,lessons);
+      return acc+chs.filter((_,i)=>lessonsByKey[lessonKey(group.id,n,i+1)]).length;
+    },0);
+    const totalCount=group.nums.reduce((acc,n)=>acc+getLessonChapters(group.id,n,allCards,lessons).length,0);
+    if(groupLocked){
+      return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12,opacity:0.75}}>
+        <div style={{padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+          <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.textMed}}>{group.label}</p>
+          {PURCHASES_ENABLED
+            ?<button onClick={onUpgrade} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>🔒 Débloquer</button>
+            :<span style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:5,whiteSpace:"nowrap",flexShrink:0}}>🔒 Verrouillé</span>}
+        </div>
+      </div>;
+    }
+    return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12}}>
+      <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+        <p style={{fontFamily:serif,fontSize:15,margin:0}}>{group.label}</p>
+        <span style={{fontFamily:mono,fontSize:9,letterSpacing:1,textTransform:"uppercase",color:availableCount>0?C.good:C.textLt,flexShrink:0}}>{availableCount}/{totalCount} en ligne</span>
+      </div>
+      <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",borderBottom:activeCours?`1px solid ${C.border}`:"none",background:C.surface}}>
+        {group.nums.map(n=>{
+          const locked=!isAdmin&&!isCourseAccessible(group.id,n,userGroups,fullGroups);
+          const active=activeCours===n;
+          const chs=getLessonChapters(group.id,n,allCards,lessons);
+          const ready=locked?0:chs.filter((_,i)=>lessonsByKey[lessonKey(group.id,n,i+1)]).length;
+          return <button key={n} onClick={()=>locked?(PURCHASES_ENABLED&&onUpgrade()):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${locked?C.border:active?C.accent:ready>0?C.good:C.border}`,background:locked?"transparent":active?C.accentBg:ready>0?C.goodBg:"transparent",color:locked?C.textLt:active?C.accent:ready>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7,transition:"all 0.15s",opacity:locked?0.7:1}}>
+            <span>Cours {n}</span>
+            {locked?<span style={{fontSize:10}}>🔒</span>:<>{ready>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{ready}</span>}<span style={{fontSize:10,opacity:0.6}}>{active?"▲":"▼"}</span></>}
+          </button>;
+        })}
+      </div>
+      {activeCours&&(
+        <div style={{animation:"fadeIn 0.18s ease"}}>
+          {getLessonChapters(group.id,activeCours,allCards,lessons).map((chName,i)=>{
+            const chIdx=i+1;
+            const lesson=lessonsByKey[lessonKey(group.id,activeCours,chIdx)];
+            const subtitle=`${group.label} · Cours ${activeCours} · ${chName}`;
+            return <div key={chIdx} style={{display:"flex",alignItems:"center",padding:"10px 18px",gap:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:170}}>
+                <span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:18,flexShrink:0}}>{chIdx}</span>
+                <span style={{fontFamily:font,fontSize:13,color:lesson?C.text:C.textMed,fontWeight:lesson?500:400}}>{chName}</span>
+                {lesson&&lesson.size>0&&<span style={{fontFamily:mono,fontSize:8,padding:"1px 5px",borderRadius:10,background:"var(--c-chipBg)",color:C.textMed,flexShrink:0}}>PDF · {formatBytes(lesson.size)}</span>}
+              </div>
+              <div style={{flexShrink:0}}>
+                {lesson
+                  ?<button onClick={()=>onOpen(lesson,subtitle)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:"1.5px solid var(--c-violet)",background:"var(--c-violetBg2)",color:"var(--c-violet)",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>📄 Lire le cours →</button>
+                  :<button onClick={()=>setComingSoon(subtitle)} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px dashed ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>✍️ Bientôt disponible</button>}
+              </div>
+            </div>;
+          })}
+        </div>
+      )}
+    </div>;
+  }
+  return <div>
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 6px"}}>Cours rédigés · {semLabel}</p>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Les cours au format PDF, rangés comme les flashcards : par matière, par cours, puis par chapitre. Un chapitre encore vide est en cours de rédaction.</p>
+    {loading?(
+      <div style={{border:`1px solid ${C.border}`,borderRadius:12,padding:"40px 24px",textAlign:"center",background:C.surface}}>
+        <p style={{fontSize:13,color:C.textLt,margin:0}}><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Chargement des cours…</p>
+      </div>
+    ):groups.map(g=><LessonGroupBlock key={g.id} group={g}/>)}
+    {comingSoon&&<ComingSoonModal title={comingSoon} onClose={()=>setComingSoon(null)}/>}
+  </div>;
+}
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlobalStudy,onAdmin,onSettings,onLogout,onNewUserCard,onEditUserCard,onDeleteUserCard,onToggleIntegration,onStudyUser,onStudyPersonal,onUnbury,allCards:allCardsProp,paymentStatus,onClosePaymentBanner,pointsTick,pseudo,theme,onToggleTheme,resumeInfo,onResume,onDismissResume}){
   const isAdmin=currentUser.role==="admin";
@@ -3286,10 +3633,25 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
   const [showUpgrade,setShowUpgrade]=useState(false);
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
+  // Les deux onglets « Cours » sont intercalés à côté du semestre auquel ils se
+  // rapportent : Semestre 1 · Cours 1 · Semestre 2 · Cours 2.
   const TABS=[
     {id:"sem1",label:"Semestre 1",sem:1,price:"99 €"},
+    {id:"cours1",label:"📘 Cours 1",sem:1,price:"99 €",kind:"lessons"},
     {id:"sem2",label:"Semestre 2",sem:2,price:"149 €"},
+    {id:"cours2",label:"📘 Cours 2",sem:2,price:"149 €",kind:"lessons"},
   ];
+  const {lessons,byKey:lessonsByKey,loading:lessonsLoading}=useLessons();
+  const [openLesson,setOpenLesson]=useState(null);
+  // Garde-fou : même en forçant l'appel, un cours non débloqué ne s'ouvre pas.
+  const openLessonSafe=useCallback((lesson,subtitle)=>{
+    if(!lesson||!lesson.url)return;
+    if(!isAdmin&&!isCourseAccessible(lesson.groupId,lesson.num,userGroups,fullGroups)){
+      if(PURCHASES_ENABLED)setShowUpgrade(true);
+      return;
+    }
+    setOpenLesson({lesson,subtitle});
+  },[isAdmin,userGroups,fullGroups]);
   const planId=currentUser.plan?.planId||"prerentree";
   const defaultTab=planId==="sem2"?"sem2":"sem1";
   const [activeTab,setActiveTab]=useState(defaultTab);
@@ -3473,6 +3835,29 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
         <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal}/>
       ):activeTab==="shop"&&!isAdmin&&PURCHASES_ENABLED?(
         <ShopTab userGroups={userGroups} fullGroups={fullGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)}/>
+      ):activeTab==="cours1"||activeTab==="cours2"?(
+        tabHasAccess?(
+          <LessonsTab
+            semLabel={activeTab==="cours1"?"Semestre 1":"Semestre 2"}
+            groups={tabGroups}
+            lessons={lessons}
+            lessonsByKey={lessonsByKey}
+            loading={lessonsLoading}
+            allCards={allCards}
+            isAdmin={isAdmin}
+            userGroups={userGroups}
+            fullGroups={fullGroups}
+            onUpgrade={()=>setShowUpgrade(true)}
+            onOpen={openLessonSafe}
+          />
+        ):(
+          <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
+            <p style={{fontSize:32,margin:"0 0 12px"}}>🔒</p>
+            <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>{TABS.find(t=>t.id===activeTab)?.label}</p>
+            <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_ENABLED?<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Débloque l'accès pour <strong>{TABS.find(t=>t.id===activeTab)?.price}</strong>.</>:<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.</>}</p>
+            {!isAdmin&&PURCHASES_ENABLED&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>💳 S'abonner →</button>}
+          </div>
+        )
       ):tabHasAccess?(
         <div>
           <p style={{fontFamily:serif,fontSize:18,margin:"0 0 14px"}}>Par matière · Cours · Chapitre</p>
@@ -3488,6 +3873,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onGlob
       )}
     </div>
     {showUpgrade&&PURCHASES_ENABLED&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)}/>}
+    {openLesson&&<PdfViewer lesson={openLesson.lesson} subtitle={openLesson.subtitle} onClose={()=>setOpenLesson(null)}/>}
     <Footer/>
   </div>;
 }
