@@ -1910,7 +1910,7 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
   return <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>;
 }
 // ─── Card Editor ──────────────────────────────────────────────────────────────
-function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,theme,onToggleTheme}){
+function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onSortCards,theme,onToggleTheme}){
   const availableGroups=userGroups?GROUPS.filter(g=>g.sem>0&&userGroups.includes(g.id)):GROUPS;
   const isNew=!card?.id;
   const initType=!isNew&&isOcclusion(card)?"occlusion":"text";
@@ -1949,6 +1949,18 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
   const COLORS=["#e74c3c","#3498db","#2ecc71","#f39c12","#9b59b6","#1abc9c","#e67e22","#e91e63","#00bcd4","#8bc34a"];
   const existingOcclusionTitle=!isNew&&isOcclusion(card)?getOcclusionTitle(card.front):"";
   const [occlusionTitle,setOcclusionTitle]=useState(existingOcclusionTitle);
+  // ─── Position d'insertion des cartes d'occlusion ─────────────────────────
+  // Permet de choisir directement, au moment de la génération, où les N
+  // cartes issues des N zones doivent atterrir dans le chapitre (au lieu de
+  // toujours les ajouter en fin de liste puis les remonter une à une). Les
+  // cartes existantes à partir de cette position sont décalées de N crans.
+  const [occPosition,setOccPosition]=useState("");
+  const chapterCardsForPosition=useMemo(()=>{
+    return (officialCards||[])
+      .filter(c=>c.groupId===form.groupId&&c.num===form.num&&c.chapterId===form.chapterId)
+      .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+  },[officialCards,form.groupId,form.num,form.chapterId]);
+  const canPositionOcclusion=!personalMode&&!!onSortCards;
   const [image,setImage]=useState(null),[imgW,setImgW]=useState(0),[imgH,setImgH]=useState(0);
   const [imgDrag,setImgDrag]=useState(false);
   const [zones,setZones]=useState([]),[drawing,setDrawing]=useState(false),[startPos,setStartPos]=useState(null),[currentRect,setCurrentRect]=useState(null);
@@ -2079,15 +2091,34 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
       // l'ancien format (image incluse dans chaque carte). L'image étant
       // désormais compressée, cela reste largement gérable.
       const base=shared?{type:"occlusion",imageRef}:{type:"occlusion",image};
+      // Si une position de départ a été demandée, on décale d'abord les cartes
+      // existantes du chapitre (à partir de cette position) de N crans — N étant
+      // le nombre de zones/cartes générées — puis on assigne aux nouvelles
+      // cartes les positions consécutives ainsi libérées. Le décalage est
+      // persisté séparément (onSortCards) AVANT la création des nouvelles
+      // cartes, pour ne jamais avoir deux cartes sur la même position.
+      let startPos=null;
+      const n=zones.length;
+      if(canPositionOcclusion&&occPosition&&parseInt(occPosition)>=1){
+        const existing=chapterCardsForPosition;
+        const maxStart=existing.length+1;
+        startPos=Math.min(parseInt(occPosition),maxStart);
+        const toShift=existing.filter(c=>(c.sort_order||0)>=startPos);
+        if(toShift.length>0){
+          await onSortCards(toShift.map(c=>({...c,sort_order:(c.sort_order||0)+n})));
+        }
+      }
       const cards=zones.map((zone,i)=>({
         id:`occ-${stamp}-${i}`,
         front:JSON.stringify({...base,imgW,imgH,zones,targetZone:zone.id,title:occlusionTitle}),
         back:"__occlusion__",groupId:form.groupId,num:pcName?null:form.num,
         chapterId:pcName?1:form.chapterId,packetId:zone.packetId||form.packetId,
         card_type:"occlusion",personalCourseName:pcName,
+        ...(startPos!=null?{sort_order:startPos+i}:{}),
       }));
       await onSave(cards);
       setSaved(true);
+      setOccPosition("");
     } finally { setOccSaving(false); }
   };
   // Change the packet (Prioritaire/Important/Utile) of a single zone — each masked
@@ -2289,6 +2320,22 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,the
             </div>}
           </div>
           {renderClassPanel(true)}
+          {canPositionOcclusion&&zones.length>0&&(
+            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:16}}>
+              <Lbl>Position dans le chapitre (optionnel)</Lbl>
+              <input
+                type="number" min={1} max={chapterCardsForPosition.length+1}
+                style={iLine} placeholder={`Laisser vide = à la fin (${chapterCardsForPosition.length+1})`}
+                value={occPosition}
+                onChange={e=>setOccPosition(e.target.value)}
+              />
+              <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>
+                {occPosition&&parseInt(occPosition)>=1
+                  ?`Les ${zones.length} carte${zones.length>1?"s":""} générée${zones.length>1?"s":""} prendront les positions ${Math.min(parseInt(occPosition),chapterCardsForPosition.length+1)} à ${Math.min(parseInt(occPosition),chapterCardsForPosition.length+1)+zones.length-1} — les cartes suivantes du chapitre (${chapterCardsForPosition.length} au total) seront décalées automatiquement.`
+                  :`Chapitre : ${chapterCardsForPosition.length} carte${chapterCardsForPosition.length>1?"s":""}. Indique un numéro pour insérer les nouvelles cartes à cet endroit précis (les suivantes sont décalées) au lieu de les ajouter à la fin.`}
+              </p>
+            </div>
+          )}
           {zones.length>0&&<Btn fill full onClick={handleSaveOcclusion} disabled={occSaving}>{occSaving?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Enregistrement…</>:saved?`✓ Créées !`:`Générer ${zones.length} carte${zones.length>1?"s":""} →`}</Btn>}
         </div>
       </div>)}
@@ -2711,7 +2758,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
     {tab==="cards"&&subView==="editor"&&(
       <div style={{position:"fixed",inset:0,zIndex:500,background:C.bg,overflowY:"auto"}}>
         {saveFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:600,background:C.good,color:"var(--c-onSolid)",borderRadius:8,padding:"12px 20px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",display:"flex",alignItems:"center",gap:8,animation:"fadeIn 0.2s ease"}}>✓ Carte enregistrée — formulaire prêt pour la suivante</div>}
-        <CardEditor key={cardKey} card={editCard} onSave={handleSave} onCancel={()=>setSubView("list")}/>
+        <CardEditor key={cardKey} card={editCard} onSave={handleSave} onCancel={()=>setSubView("list")} officialCards={cards} onSortCards={onSortCards}/>
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
