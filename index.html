@@ -1391,6 +1391,25 @@ const PACKETS = [
   { id:"important",   label:"Important"   },
   { id:"utile",       label:"Utile"        },
 ];
+// ─── Les trois méthodes de révision, appliquées aux cartes personnelles ──────
+// Ce sont exactement les mêmes que sur les cartes officielles (voir
+// ModeSwitcher) : seule la file construite au lancement change, jamais les
+// données. Un étudiant peut donc travailler ses propres cartes en Anki, en
+// méthode des J ou en révision personnalisée, comme le reste du cours.
+const MYCARD_METHODS = [
+  { id:"anki",  icon:"🔁", label:"Anki",
+    help:"Répétition espacée : chaque carte revient à l'échéance calculée par l'algorithme." },
+  { id:"j",     icon:"📅", label:"Méthode des J",
+    help:"Planning fixe (J0, J1, J3, J7…) : seules les cartes dont un J tombe aujourd'hui sont proposées. Le plan appliqué est celui de la matière et du paquet, ou le plan par défaut de ton compte." },
+  { id:"perso", icon:"🎯", label:"Personnalisée",
+    help:"Aucune échéance : les cartes les moins maîtrisées d'abord, librement répétables. Ne reprogramme ni l'échéance Anki, ni le planning des J." },
+];
+const METHOD_PREFIX = { anki:"🔁", j:"📅", perso:"🎯" };
+const METHOD_EMPTY_MSG = {
+  anki:  "Aucune carte personnelle à réviser dans cette sélection !",
+  j:     "Aucun J ne tombe aujourd'hui dans cette sélection.",
+  perso: "Aucune carte dans cette sélection.",
+};
 const FREE_GROUP_IDS = ["cell-bio","histo","biochem","biomol","biophys"]; // accès gratuit : 5 matières du semestre 1
 const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
 const SEM2 = GROUPS.filter(g=>g.sem===2).map(g=>g.id);
@@ -2047,6 +2066,16 @@ function buildPersoQueue(cardList,prog,{limit=30,threshold=null}={}){
   const out=pool.map(x=>x.c);
   if(out.length<limit)out.push(...fresh.map(x=>x.c).slice(0,limit-out.length));
   return out.slice(0,limit);
+}
+// ─── File de révision d'une sélection, selon la méthode choisie ─────────────
+// Point d'entrée unique utilisé par l'onglet « Mes cartes » : la sélection de
+// cartes est la même, seule la façon de la mettre en file change. Renvoie aussi
+// le mode à passer à StudyView, qui gère déjà les trois affichages (boutons de
+// notation Anki, gestes de la méthode des J, maîtrise en révision libre).
+function buildQueueForMethod(cardList,method,prog,settings,plans){
+  if(method==="j")    return { queue:buildJQueue(cardList,prog,plans||{}), mode:"j" };
+  if(method==="perso")return { queue:buildPersoQueue(cardList,prog,{limit:Math.max(30,Math.min(cardList.length,100))}), mode:"perso" };
+  return { queue:buildQueue(cardList,prog,settings), mode:"anki" };
 }
 // Moyenne de maîtrise sur une sélection de paquets (pondérée par le nombre de
 // cartes travaillées, sinon un paquet de 3 cartes pèserait autant qu'un de 200).
@@ -3799,7 +3828,7 @@ function StatsTab({username,progress,allCards,onUnbury,onStudyPerso}){
   );
 }
 // ─── MyCardsTab ──────────────────────────────────────────────────────────────
-function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progress,onStudyUser,onStudyPersonal}){
+function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progress,onStudyUser,onStudyPersonal,jplans}){
   const [delId,setDelId]=useState(null);
   // Cartes sur un cours officiel (numéroté, créé par un administrateur) vs
   // cartes sur un cours personnel (nommé librement, visible uniquement par
@@ -3812,7 +3841,23 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
   const personalCourseNames=useMemo(()=>
     [...new Set(personalUserCards.map(c=>c.personalCourseName))].sort((a,b)=>a.localeCompare(b,"fr"))
   ,[personalUserCards]);
-  const totalDue=userCards.filter(c=>isDue(progress[c.id])).length;
+  // ─── Méthode de révision choisie pour les cartes personnelles ──────────────
+  // Le choix ne modifie aucune donnée : il change la file construite au
+  // lancement, et donc ce que « à réviser » veut dire dans les compteurs
+  // ci-dessous. En Anki c'est l'échéance FSRS, en méthode des J c'est le J du
+  // jour, en révision personnalisée il n'y a pas d'échéance du tout : toute
+  // carte non enterrée est disponible.
+  const [method,setMethod]=useState("anki");
+  const countFor=useCallback((list,m)=>list.filter(c=>{
+    const p=progress[c.id];
+    if(p?.buried)return false;
+    if(m==="perso")return true;
+    if(m==="j")return jIsDue(p,jPlanFor(jplans||{},c.groupId,c.num,c.chapterId,effPkt(c,progress)));
+    return isDue(p);
+  }).length,[progress,jplans]);
+  const dueIn=useCallback(list=>countFor(list,method),[countFor,method]);
+  const cardDueIn=useCallback(c=>countFor([c],method)>0,[countFor,method]);
+  const totalDue=dueIn(userCards);
   const integratedCount=officialUserCards.filter(c=>c.integrated).length;
   function GroupPanel({group}){
     const [activeCours,setActiveCours]=useState(null);
@@ -3823,11 +3868,11 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
     const chapterIds=[...new Set(courseCards.map(c=>c.chapterId))].sort((a,b)=>a-b);
     function UserPktBtn({chapterId,pk}){
       const pkCards=courseCards.filter(c=>c.chapterId===chapterId&&c.packetId===pk.id);
-      const due=pkCards.filter(c=>isDue(progress[c.id])).length;
+      const due=dueIn(pkCards);
       const total=pkCards.length;
       const col=pC(pk.id),bg=pB(pk.id);
       const hasDue=due>0,upToDate=total>0&&!hasDue;
-      return<button onClick={()=>hasDue&&onStudyUser(group.id,activeCours,chapterId,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
+      return<button onClick={()=>hasDue&&onStudyUser(group.id,activeCours,chapterId,pk.id,method)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
         <span style={{fontSize:9}}>{pk.label}</span>
         <span style={{fontSize:9,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}`:upToDate?"✓ à jour":"vide"}</span>
       </button>;
@@ -3843,7 +3888,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",borderBottom:activeCours?`1px solid ${C.border}`:"none",background:C.surface}}>
         {availNums.map(n=>{
           const active=activeCours===n;
-          const due=groupCards.filter(c=>c.num===n&&isDue(progress[c.id])).length;
+          const due=dueIn(groupCards.filter(c=>c.num===n));
           return<button key={n} onClick={()=>{setActiveCours(active?null:n);setExpandedCh(null);}} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?"var(--c-violet)":due>0?C.good:C.border}`,background:active?"var(--c-violetBg2)":due>0?C.goodBg:"transparent",color:active?"var(--c-violet)":due>0?C.good:C.textMed,display:"flex",alignItems:"center",gap:7}}>
             <span>Cours {n}</span>
             {due>0&&!active&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:C.good,color:"var(--c-onSolid)"}}>{due}</span>}
@@ -3855,7 +3900,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
         {chapterIds.length===0?<div style={{padding:"14px 18px"}}><p style={{fontSize:12,color:C.textLt,margin:0}}>Aucun chapitre défini pour ce cours.</p></div>:
         chapterIds.map(chId=>{
           const chCards=courseCards.filter(c=>c.chapterId===chId);
-          const chDue=chCards.filter(c=>isDue(progress[c.id])).length;
+          const chDue=dueIn(chCards);
           const chName=getChapters(group.id,activeCours)[chId-1]||`Chapitre ${chId}`;
           const expanded=expandedCh===chId;
           return<div key={chId}>
@@ -3867,7 +3912,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
               </div>
               <div style={{display:"flex",gap:5,flexShrink:0}}>
                 {PACKETS.map(pk=><UserPktBtn key={pk.id} chapterId={chId} pk={pk}/>)}
-                {chDue>0&&<button onClick={()=>onStudyUser(group.id,activeCours,chId,null)} style={{fontFamily:font,fontSize:10,fontWeight:600,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"var(--c-violetBg2)",color:"var(--c-violet)",minWidth:52,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9}}>Tout</span><span style={{fontSize:9,fontWeight:400}}>{chDue} carte{chDue>1?"s":""}</span></button>}
+                {chDue>0&&<button onClick={()=>onStudyUser(group.id,activeCours,chId,null,method)} style={{fontFamily:font,fontSize:10,fontWeight:600,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:"1.5px solid #7c3aed",background:"var(--c-violetBg2)",color:"var(--c-violet)",minWidth:52,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}><span style={{fontSize:9}}>Tout</span><span style={{fontSize:9,fontWeight:400}}>{chDue} carte{chDue>1?"s":""}</span></button>}
                 <button onClick={()=>setExpandedCh(expanded?null:chId)} style={{fontFamily:font,fontSize:10,padding:"5px 8px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:expanded?C.bg:"transparent",color:C.textMed}}>{expanded?"▲ Masquer":`▼ Voir (${chCards.length})`}</button>
               </div>
             </div>
@@ -3875,7 +3920,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
               {chCards.map(card=>{
                 const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
                 const isIntegrated=card.integrated;
-                const dueCard=isDue(progress[card.id]);
+                const dueCard=cardDueIn(card);
                 return<div key={card.id} style={{borderTop:`1px solid ${C.border}`,padding:"10px 18px 10px 46px",display:"flex",alignItems:"flex-start",gap:12}}>
                   <div style={{width:3,height:"100%",background:pC(card.packetId),borderRadius:2,flexShrink:0,marginTop:2}}/>
                   <div style={{flex:1,minWidth:0}}>
@@ -3912,16 +3957,16 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
     const subjectLabels=subjectIds.map(gid=>GROUPS.find(g=>g.id===gid)?.label).filter(Boolean);
     function PersonalPktBtn({pk}){
       const pkCards=courseCards.filter(c=>c.packetId===pk.id);
-      const due=pkCards.filter(c=>isDue(progress[c.id])).length;
+      const due=dueIn(pkCards);
       const total=pkCards.length;
       const col=pC(pk.id),bg=pB(pk.id);
       const hasDue=due>0,upToDate=total>0&&!hasDue;
-      return<button onClick={()=>hasDue&&onStudyPersonal(courseName,pk.id)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
+      return<button onClick={()=>hasDue&&onStudyPersonal(courseName,pk.id,method)} style={{fontFamily:font,fontSize:10,fontWeight:500,padding:"5px 8px",cursor:hasDue?"pointer":"default",borderRadius:6,border:`1.5px solid ${hasDue?col:upToDate?C.border:"var(--c-borderSoft)"}`,background:hasDue?bg:C.surface,color:hasDue?col:upToDate?C.textLt:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:1,minWidth:64}}>
         <span style={{fontSize:9}}>{pk.label}</span>
         <span style={{fontSize:9,fontWeight:400}}>{total===0?"vide":hasDue?`${due} carte${due>1?"s":""}`:upToDate?"✓ à jour":"vide"}</span>
       </button>;
     }
-    const courseDue=courseCards.filter(c=>isDue(progress[c.id])).length;
+    const courseDue=dueIn(courseCards);
     return<div style={{background:C.surface,border:"1px solid var(--c-violetSoft)",borderRadius:10,overflow:"hidden",marginBottom:12}}>
       <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:"var(--c-violetBg)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -3938,7 +3983,7 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       {expanded&&<div style={{background:"var(--c-listBg)"}}>
         {courseCards.map(card=>{
           const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
-          const dueCard=isDue(progress[card.id]);
+          const dueCard=cardDueIn(card);
           return<div key={card.id} style={{borderTop:`1px solid ${C.border}`,padding:"10px 18px",display:"flex",alignItems:"flex-start",gap:12}}>
             <div style={{width:3,height:"100%",background:pC(card.packetId),borderRadius:2,flexShrink:0,marginTop:2}}/>
             <div style={{flex:1,minWidth:0}}>
@@ -3968,6 +4013,20 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       </div>
       <Btn fill onClick={onNew} style={{flexShrink:0}}>+ Créer une carte</Btn>
     </div>
+    {userCards.length>0&&<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"13px 16px",marginBottom:16}}>
+      <p style={{fontFamily:mono,fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:C.textLt,margin:"0 0 9px"}}>Méthode de révision</p>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {MYCARD_METHODS.map(m=>{
+          const active=method===m.id;
+          const n=countFor(userCards,m.id);
+          return<button key={m.id} onClick={()=>setMethod(m.id)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?"var(--c-violet)":C.border}`,background:active?"var(--c-violetBg2)":"transparent",color:active?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:7}}>
+            <span>{m.icon} {m.label}</span>
+            <span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 5px",borderRadius:10,background:n>0?(active?"var(--c-violet)":C.border):"transparent",color:n>0?(active?"var(--c-onSolid)":C.textMed):C.textLt}}>{n}</span>
+          </button>;
+        })}
+      </div>
+      <p style={{fontSize:11,color:C.textLt,margin:"9px 0 0",lineHeight:1.5}}>{MYCARD_METHODS.find(m=>m.id===method)?.help}</p>
+    </div>}
     {integratedCount>0&&<div style={{background:C.goodBg,border:`1px solid var(--c-goodSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:8}}><span>🔗</span><p style={{fontSize:12,color:C.good,margin:0}}><strong>{integratedCount} carte{integratedCount>1?"s":""} intégrée{integratedCount>1?"s":""}</strong> — apparaissent dans les onglets Semestre 1/2 aux côtés des cartes officielles</p></div>}
     {userCards.length===0?<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
       <p style={{fontSize:36,margin:"0 0 12px"}}>✏️</p>
@@ -5540,7 +5599,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
       ):activeTab==="stats"&&!isAdmin?(
         <StatsTab username={currentUser.username} progress={progress} allCards={allCardsProp||[...cards,...(userCards||[]).filter(c=>c.integrated)]} onUnbury={onUnbury} onStudyPerso={onStudyPerso}/>
       ):activeTab==="mes-cartes"&&!isAdmin?(
-        <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal}/>
+        <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal} jplans={jplans}/>
       ):activeTab==="shop"&&!isAdmin&&PURCHASES_VISIBLE?(
         <ShopTab userGroups={userGroups} fullGroups={fullGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)} promo={promo}/>
       ):activeTab==="cours1"||activeTab==="cours2"?(
@@ -7039,29 +7098,32 @@ function App(){
     });
     supa.upsertUserCard(updated).catch(e=>console.error("upsertUserCard failed:",e));
   },[currentUser]);
-  const startUserCardStudy=useCallback((gid,num,chapterId,pkId)=>{
+  // Les cartes personnelles se révisent avec les trois mêmes méthodes que les
+  // cartes officielles. « method » vient du sélecteur de l'onglet Mes cartes ;
+  // sans lui, on retombe sur Anki — le comportement d'avant.
+  const startUserCardStudy=useCallback((gid,num,chapterId,pkId,method="anki")=>{
     const filtered=userCards.filter(c=>
       c.groupId===gid&&c.num===num&&
       (chapterId===null||c.chapterId===chapterId)&&
       (pkId===null||c.packetId===pkId)
     );
-    const queue=buildQueue(filtered,prog,settings);
-    if(!queue.length){alert("Aucune carte personnelle à réviser dans cette sélection !");return;}
+    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
+    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
     const grp=GROUPS.find(g=>g.id===gid);
     const chName=chapterId?getChapters(gid,num)[chapterId-1]:"";
     const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
-    const label=`Personnel · ${grp?.label} · Cours ${num}${chName?" · "+chName:""}${pkLabel?" · "+pkLabel:""}`;
-    setStudyCtx({label,queue});
+    const label=`${METHOD_PREFIX[mode]} Personnel · ${grp?.label} · Cours ${num}${chName?" · "+chName:""}${pkLabel?" · "+pkLabel:""}`;
+    setStudyCtx({label,queue,mode});
     setView("study");
-  },[userCards,prog,settings]);
-  const startPersonalCourseStudy=useCallback((courseName,pkId)=>{
+  },[userCards,prog,settings,jplans]);
+  const startPersonalCourseStudy=useCallback((courseName,pkId,method="anki")=>{
     const filtered=userCards.filter(c=>c.personalCourseName===courseName&&(pkId===null||c.packetId===pkId));
-    const queue=buildQueue(filtered,prog,settings);
-    if(!queue.length){alert("Aucune carte à réviser dans ce cours personnel !");return;}
+    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
+    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
     const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
-    setStudyCtx({label:`Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`,queue});
+    setStudyCtx({label:`${METHOD_PREFIX[mode]} Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`,queue,mode});
     setView("study");
-  },[userCards,prog,settings]);
+  },[userCards,prog,settings,jplans]);
   const allCards=useMemo(()=>[
     ...cards,
     ...userCards.filter(c=>c.integrated)
