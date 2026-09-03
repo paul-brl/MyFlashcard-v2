@@ -181,6 +181,7 @@
     @keyframes fadeIn  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
     @keyframes dotPulse { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
     @keyframes pointsPop { 0% { opacity:0; transform:translateY(-10px) scale(0.9); } 60% { transform:translateY(0) scale(1.04); } 100% { opacity:1; transform:translateY(0) scale(1); } }
+    @keyframes mfcPulse { 0%,100% { opacity:1; } 50% { opacity:0.55; } }
 
     /* ─── Système responsive ───────────────────────────────────────────────
        L'application est stylée en inline-styles ; ces classes utilitaires
@@ -363,9 +364,10 @@ const supa = {
       return allRows.map(c=>({id:c.id,groupId:c.group_id,num:c.num,chapterId:c.chapter_id||1,packetId:c.packet_id,sort_order:c.sort_order??null,card_type:c.card_type||'text',front:null,back:null}));
     } catch(e){console.warn("getCardsMeta error:",e);return null;}
   },
-  // Load front+back for specific card IDs only (called when starting a study session).
-  // All chunks are fetched in parallel rather than awaited one after another.
-  getCardsContent: async (ids) => {
+  // Téléchargement brut du recto/verso, sans passer par le cache.
+  // Réservé aux appels internes : le reste de l'application utilise
+  // getCardsContent, qui sert d'abord ce qui est déjà sur l'appareil.
+  fetchCardsContentRaw: async (ids) => {
     if(!ids||ids.length===0)return {};
     const CHUNK=100; // PostgREST URL length limit
     const result={};
@@ -378,7 +380,49 @@ const supa = {
         const d=await r.json();
         if(r.ok&&Array.isArray(d))d.forEach(c=>{result[c.id]={front:c.front,back:c.back};});
       }));
-    } catch(e){console.warn("getCardsContent error:",e);}
+    } catch(e){console.warn("fetchCardsContentRaw error:",e);}
+    return result;
+  },
+  // Recto/verso des cartes, servis d'abord depuis le cache disque.
+  //
+  // Le contenu d'une carte illustrée pèse plusieurs centaines de kilo-octets :
+  // c'est ce qui rendait l'attente si longue avant chaque session. Désormais une
+  // carte déjà vue est servie DEPUIS L'APPAREIL, donc instantanément, et n'est
+  // retéléchargée que si sa copie locale a plus de 6 heures — et dans ce cas, en
+  // arrière-plan, sans jamais faire patienter l'étudiant. Une correction faite
+  // par un administrateur apparaît donc à la session suivante.
+  getCardsContent: async (ids) => {
+    if(!ids||ids.length===0)return {};
+    const uniq=[...new Set(ids)];
+    const cached=await idbGetMany("content",uniq);
+    const now=Date.now();
+    const result={};
+    const missing=[];
+    const stale=[];
+    uniq.forEach(id=>{
+      const hit=cached[id];
+      if(hit&&hit.front!==undefined){
+        result[id]={front:hit.front,back:hit.back};
+        if(now-(hit.ts||0)>CONTENT_TTL)stale.push(id);
+      } else missing.push(id);
+    });
+    if(missing.length>0){
+      const fresh=await supa.fetchCardsContentRaw(missing);
+      Object.assign(result,fresh);
+      const entries=Object.entries(fresh).map(([id,c])=>[id,{front:c.front,back:c.back,ts:now}]);
+      if(entries.length)idbSetMany("content",entries);
+    }
+    // Revalidation silencieuse : elle ne bloque rien et met le cache à jour pour
+    // la prochaine fois. On la plafonne pour ne pas relancer 500 cartes d'un coup.
+    if(stale.length>0){
+      const toCheck=stale.slice(0,120);
+      setTimeout(()=>{
+        supa.fetchCardsContentRaw(toCheck).then(fresh=>{
+          const entries=Object.entries(fresh).map(([id,c])=>[id,{front:c.front,back:c.back,ts:Date.now()}]);
+          if(entries.length)idbSetMany("content",entries);
+        }).catch(()=>{});
+      },1500);
+    }
     return result;
   },
   getCards: async () => { return null; }, // deprecated — use getCardsMeta
@@ -392,6 +436,11 @@ const supa = {
       try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}
       throw new Error(msg);
     }
+    // La copie locale de cette carte vient d'être rendue obsolète par
+    // l'administrateur : on la réécrit tout de suite pour que la version
+    // corrigée s'affiche dès la prochaine session, sans attendre le délai
+    // de revalidation.
+    idbSet("content",card.id,{front:card.front,back:card.back,ts:Date.now()});
   },
   batchUpdateSort: async (updates) => {
     // All PATCH requests fire in parallel — Supabase/PostgREST handles this fine,
@@ -435,6 +484,9 @@ const supa = {
         if(a<attempts)await new Promise(res=>setTimeout(res,600*Math.pow(3,a-1)));
       }
       if(!ok)throw lastErr||new Error("Enregistrement impossible");
+      // Même logique que pour une carte seule : le lot qui vient d'être publié
+      // remplace immédiatement la copie locale correspondante.
+      idbSetMany("content",chunk.map(c=>[c.id,{front:c.front,back:c.back,ts:Date.now()}]));
       done+=chunk.length;
       if(onProgress)onProgress(done,rows.length);
     }
@@ -649,6 +701,53 @@ const supa = {
   deleteUserCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/user_cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
   // Suppression totale (utilisée uniquement quand un étudiant supprime son compte).
   deleteAllUserCards: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {} },
+  // ─── Adaptations personnelles des cartes officielles ────────────────────────
+  // Table optionnelle « card_overrides ». Un étudiant peut reformuler une
+  // question, enrichir une réponse ou ajouter une image sur une carte officielle.
+  // Sa version est enregistrée ICI, dans une ligne qui lui appartient — la carte
+  // d'origine dans « cards » n'est JAMAIS touchée. Deux étudiants peuvent donc
+  // adapter la même carte chacun à sa façon sans se voir l'un l'autre, et
+  // l'administrateur garde la maîtrise de la version officielle.
+  //
+  // Clé primaire : « username__card_id », ce qui garantit une seule adaptation
+  // par carte et par étudiant, et rend l'enregistrement idempotent.
+  // Si la table n'existe pas encore, tout échoue silencieusement et les
+  // adaptations restent purement locales à l'appareil (voir cache localStorage).
+  getCardOverrides: async (username) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/card_overrides?username=eq.${encodeURIComponent(username)}&select=card_id,front,back,updated_at`,{headers:H});
+      if(!r.ok)return null;
+      const d=await r.json();
+      if(!Array.isArray(d))return null;
+      const map={};
+      d.forEach(o=>{ map[o.card_id]={front:o.front,back:o.back,updatedAt:o.updated_at}; });
+      return map;
+    } catch { return null; }
+  },
+  upsertCardOverride: async (username, cardId, front, back, attempts=3) => {
+    let lastErr=null;
+    for(let a=1;a<=attempts;a++){
+      try{
+        const r=await fetch(`${SUPA_URL}/rest/v1/card_overrides?on_conflict=id`,{
+          method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates,return=minimal"},
+          body:JSON.stringify([{id:`${username}__${cardId}`,username,card_id:cardId,front,back,updated_at:new Date().toISOString()}]),
+        });
+        if(r.ok)return true;
+        if(r.status===404)return false; // table absente → repli local uniquement
+        let msg=`HTTP ${r.status}`;
+        try{const t=await r.text();if(t){ if(/does not exist|42P01|PGRST205/i.test(t))return false; msg+=` — ${t.slice(0,200)}`; }}catch{}
+        lastErr=new Error(msg);
+      }catch(e){ lastErr=e; }
+      if(a<attempts)await new Promise(res=>setTimeout(res,600*Math.pow(3,a-1)));
+    }
+    throw lastErr||new Error("Enregistrement de l'adaptation impossible");
+  },
+  deleteCardOverride: async (username, cardId) => {
+    try { await fetch(`${SUPA_URL}/rest/v1/card_overrides?id=eq.${encodeURIComponent(`${username}__${cardId}`)}`,{method:"DELETE",headers:H}); } catch {}
+  },
+  deleteAllCardOverrides: async (username) => {
+    try { await fetch(`${SUPA_URL}/rest/v1/card_overrides?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {}
+  },
   deleteAllProgress: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {} },
   getProgress: async (username) => {
     // Same pattern as getCardsMeta: first page gives the total count, then every
@@ -826,6 +925,103 @@ const storage = {
   get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
   set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
   del: k => { try { localStorage.removeItem(k); } catch {} },
+};
+// ─── Cache persistant sur disque (IndexedDB) ──────────────────────────────────
+// localStorage plafonne à ~5 Mo et bloque le fil d'exécution : impossible d'y
+// garder des images. IndexedDB accepte plusieurs centaines de Mo et travaille en
+// arrière-plan. C'est ce qui permet qu'une image déjà vue une fois s'affiche
+// INSTANTANÉMENT à toutes les révisions suivantes, y compris après un
+// rechargement de la page ou le lendemain matin.
+//
+// Deux magasins :
+//   • "img"     — images d'occlusion, identifiées par leur imageRef. Ces
+//                 références sont uniques et ne sont jamais réutilisées : une
+//                 image mise en cache est donc valable pour toujours.
+//   • "content" — recto/verso des cartes (texte + images illustratives). Celui-ci
+//                 peut vieillir si un administrateur corrige une carte, il est
+//                 donc rafraîchi en arrière-plan au-delà de CONTENT_TTL (1 h).
+//                 Une correction publiée depuis l'interface admin réécrit en plus
+//                 la copie locale sur-le-champ : le délai d'1 h ne concerne donc
+//                 que les appareils qui détenaient déjà l'ancienne version.
+const IDB_NAME="mfc-cache", IDB_VERSION=1;
+const CONTENT_TTL=1*3600*1000; // au-delà d'1 h, on revalide en arrière-plan
+let _idbPromise=null;
+const idbOpen=()=>{
+  if(_idbPromise)return _idbPromise;
+  _idbPromise=new Promise(resolve=>{
+    try{
+      if(!window.indexedDB){resolve(null);return;}
+      const req=indexedDB.open(IDB_NAME,IDB_VERSION);
+      req.onupgradeneeded=()=>{
+        const db=req.result;
+        if(!db.objectStoreNames.contains("img"))db.createObjectStore("img");
+        if(!db.objectStoreNames.contains("content"))db.createObjectStore("content");
+      };
+      req.onsuccess=()=>resolve(req.result);
+      req.onerror=()=>resolve(null);
+      // Navigation privée ou quota refusé : on renvoie null et l'application
+      // fonctionne exactement comme avant, simplement sans cache disque.
+      setTimeout(()=>resolve(req.readyState==="done"?req.result:null),3000);
+    }catch{ resolve(null); }
+  });
+  return _idbPromise;
+};
+const idbGet=async(store,key)=>{
+  const db=await idbOpen(); if(!db)return null;
+  return new Promise(resolve=>{
+    try{
+      const tx=db.transaction(store,"readonly");
+      const rq=tx.objectStore(store).get(key);
+      rq.onsuccess=()=>resolve(rq.result??null);
+      rq.onerror=()=>resolve(null);
+    }catch{ resolve(null); }
+  });
+};
+const idbGetMany=async(store,keys)=>{
+  const db=await idbOpen(); if(!db)return {};
+  return new Promise(resolve=>{
+    const out={};
+    try{
+      const tx=db.transaction(store,"readonly");
+      const os=tx.objectStore(store);
+      let left=keys.length;
+      if(!left){resolve(out);return;}
+      keys.forEach(k=>{
+        const rq=os.get(k);
+        rq.onsuccess=()=>{ if(rq.result!==undefined&&rq.result!==null)out[k]=rq.result; if(--left===0)resolve(out); };
+        rq.onerror=()=>{ if(--left===0)resolve(out); };
+      });
+    }catch{ resolve(out); }
+  });
+};
+const idbSet=async(store,key,value)=>{
+  const db=await idbOpen(); if(!db)return false;
+  return new Promise(resolve=>{
+    try{
+      const tx=db.transaction(store,"readwrite");
+      tx.objectStore(store).put(value,key);
+      tx.oncomplete=()=>resolve(true);
+      tx.onerror=()=>resolve(false);
+      tx.onabort=()=>resolve(false);
+    }catch{ resolve(false); }
+  });
+};
+const idbSetMany=async(store,entries)=>{
+  const db=await idbOpen(); if(!db)return false;
+  return new Promise(resolve=>{
+    try{
+      const tx=db.transaction(store,"readwrite");
+      const os=tx.objectStore(store);
+      entries.forEach(([k,v])=>{ try{ os.put(v,k); }catch{} });
+      tx.oncomplete=()=>resolve(true);
+      tx.onerror=()=>resolve(false);
+      tx.onabort=()=>resolve(false);
+    }catch{ resolve(false); }
+  });
+};
+const idbClear=async store=>{
+  const db=await idbOpen(); if(!db)return;
+  try{ const tx=db.transaction(store,"readwrite"); tx.objectStore(store).clear(); }catch{}
 };
 // ─── Version de l'application ─────────────────────────────────────────────────
 // À INCRÉMENTER À CHAQUE MISE EN LIGNE, en même temps que le fichier version.json
@@ -1230,6 +1426,32 @@ const mergeIntegrated = (cards, username) => {
 };
 const getUCache = u => { try { return JSON.parse(localStorage.getItem(`mx6-ucache-${u}`)||'[]'); } catch { return []; } };
 const setUCache = (u, cards) => { try { localStorage.setItem(`mx6-ucache-${u}`, JSON.stringify(cards)); } catch {} };
+// ─── Adaptations personnelles des cartes officielles ──────────────────────────
+// Un étudiant peut reformuler une question, compléter une réponse ou ajouter une
+// image sur une carte officielle. Sa version vit dans un espace qui n'appartient
+// qu'à lui : la carte d'origine n'est jamais modifiée, et les autres étudiants
+// continuent de voir la version officielle.
+//
+// Le cache local sert de miroir hors-ligne : l'adaptation est visible tout de
+// suite et survit à une coupure réseau, la table Supabase assure la reprise sur
+// les autres appareils.
+const OVR_KEY=u=>`mx6-overrides-${u}`;
+const getOverridesCache = u => { try { return JSON.parse(localStorage.getItem(OVR_KEY(u))||'{}')||{}; } catch { return {}; } };
+const setOverridesCache = (u,map) => { try { localStorage.setItem(OVR_KEY(u),JSON.stringify(map)); } catch {} };
+// Applique l'adaptation d'un étudiant à une carte, si elle existe.
+// « originalFront / originalBack » conservent la version officielle : c'est ce
+// qui permet de comparer, et de revenir en arrière à tout moment.
+const applyOverride = (card,overrides) => {
+  if(!card||!overrides)return card;
+  const o=overrides[card.id];
+  if(!o)return card;
+  return {...card,
+    front:o.front!==undefined&&o.front!==null?o.front:card.front,
+    back:o.back!==undefined&&o.back!==null?o.back:card.back,
+    isEdited:true,
+    originalFront:card.front,
+    originalBack:card.back};
+};
 const getCardTimestamp=id=>{const p=(id||'').split('-');return parseInt(p[1])||0;};
 const sortCardsGlobally = cards => [...cards].sort((a,b)=>{
   const gi=GROUPS.findIndex(g=>g.id===a.groupId)-GROUPS.findIndex(g=>g.id===b.groupId);
@@ -2394,68 +2616,163 @@ function RegisterView({onRegister,onBack,accounts}){
 const isOcclusion = (card) => { if(card.card_type==='occlusion')return true; try { return JSON.parse(card.front)?.type==="occlusion"; } catch { return false; } };
 // Titre optionnel affiché au-dessus de l'image (ex: le nom du tableau), stocké dans le JSON du recto
 const getOcclusionTitle = (front) => { try { return JSON.parse(front)?.title || ""; } catch { return ""; } };
-// Cache mémoire des images d'occlusion mutualisées : une même image sert à toutes
-// les cartes qu'elle a générées, elle n'est donc téléchargée qu'une fois par session.
-const _occImgCache=new Map();
+// ─── Chaîne d'affichage des images d'occlusion ────────────────────────────────
+// Trois niveaux de cache, du plus rapide au plus lent :
+//
+//   1. _occBitmapCache — l'image DÉCODÉE, prête à être peinte. C'est elle qui
+//      supprime le temps d'attente au retournement : avant, chaque bascule
+//      question/réponse recréait un objet Image et attendait son décodage.
+//   2. IndexedDB ("img") — l'image conservée sur l'appareil. Une image déjà vue
+//      s'affiche instantanément, même après rechargement ou le lendemain. Les
+//      références d'image étant uniques et jamais réutilisées, cette copie est
+//      valable indéfiniment.
+//   3. Le réseau — uniquement à la toute première rencontre.
+//
+// Une même requête réseau n'est jamais lancée deux fois en parallèle : les appels
+// simultanés sur une même image partagent la même promesse (_occInflight).
+const _occImgCache=new Map();     // imageRef → dataURL
+const _occBitmapCache=new Map();  // dataURL  → HTMLImageElement décodé
+const _occInflight=new Map();     // imageRef → Promise en cours
+const OCC_BITMAP_MAX=24;          // garde-fou mémoire : ~24 images décodées
+
 const resolveOcclusionImage=async data=>{
   if(!data)return null;
   if(data.image)return data.image;              // ancien format : image incluse
-  if(!data.imageRef)return null;
-  if(_occImgCache.has(data.imageRef))return _occImgCache.get(data.imageRef);
-  const url=await supa.getOcclusionImage(data.imageRef);
-  if(url)_occImgCache.set(data.imageRef,url);
-  return url;
+  const ref=data.imageRef;
+  if(!ref)return null;
+  if(_occImgCache.has(ref))return _occImgCache.get(ref);
+  if(_occInflight.has(ref))return _occInflight.get(ref);
+  const p=(async()=>{
+    try{
+      const local=await idbGet("img",ref);
+      if(local){ _occImgCache.set(ref,local); return local; }
+      const url=await supa.getOcclusionImage(ref);
+      if(url){ _occImgCache.set(ref,url); idbSet("img",ref,url); }
+      return url;
+    } finally { _occInflight.delete(ref); }
+  })();
+  _occInflight.set(ref,p);
+  return p;
 };
+// Renvoie une image DÉCODÉE et immédiatement peignable. Si elle l'est déjà, la
+// réponse est synchrone (via getDecodedOcclusionSync) et l'affichage ne clignote pas.
+const decodeOcclusionImage=async src=>{
+  if(!src)return null;
+  const hit=_occBitmapCache.get(src);
+  if(hit)return hit;
+  const img=new Image();
+  img.decoding="async";
+  img.src=src;
+  try{
+    if(img.decode)await img.decode();
+    else await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;});
+  }catch{
+    if(!img.complete||!img.naturalWidth)return null;
+  }
+  if(_occBitmapCache.size>=OCC_BITMAP_MAX){
+    const oldest=_occBitmapCache.keys().next().value;
+    _occBitmapCache.delete(oldest);
+  }
+  _occBitmapCache.set(src,img);
+  return img;
+};
+const getDecodedOcclusionSync=src=>{
+  if(!src)return null;
+  const img=_occBitmapCache.get(src);
+  return img&&img.complete&&img.naturalWidth?img:null;
+};
+// Préchargement d'une carte d'occlusion : télécharge puis décode son image, en
+// silence. Appelé sur les cartes SUIVANTES pendant que l'étudiant travaille la
+// carte courante — quand il y arrive, l'image est déjà prête.
+const prefetchOcclusionCard=async front=>{
+  try{
+    if(!front)return;
+    const data=JSON.parse(front);
+    if(data?.type!=="occlusion")return;
+    const src=await resolveOcclusionImage(data);
+    if(src)await decodeOcclusionImage(src);
+  }catch{}
+};
+// Préchargement d'une image illustrative classique (carte texte + image).
+const prefetchPlainImage=src=>{
+  if(!src)return;
+  try{ const i=new Image(); i.decoding="async"; i.src=src; }catch{}
+};
+// Peinture de l'image et de ses zones. Fonction pure, appelée avec une image
+// DÉJÀ décodée : elle ne fait qu'écrire dans le canvas, sans jamais attendre.
+function paintOcclusion(canvas,img,data,showBack,showOthers){
+  if(!canvas||!img||!data?.zones)return;
+  const ctx=canvas.getContext("2d");
+  if(canvas.width!==img.naturalWidth||canvas.height!==img.naturalHeight){
+    canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+  }
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(img,0,0);
+  data.zones.forEach((z,i)=>{
+    const isTarget=z.id===data.targetZone;
+    if(showBack){
+      if(isTarget){
+        ctx.strokeStyle="#15803d";ctx.lineWidth=3;ctx.strokeRect(z.x-1,z.y-1,z.w+2,z.h+2);
+        ctx.fillStyle="#15803d22";ctx.fillRect(z.x,z.y,z.w,z.h);
+      } else {
+        ctx.fillStyle="#000000";ctx.fillRect(z.x,z.y,z.w,z.h);
+        ctx.fillStyle="white";ctx.font=`bold ${Math.min(z.h*0.45,18)}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(i+1),z.x+z.w/2,z.y+z.h/2);
+      }
+    } else {
+      if(isTarget){
+        ctx.fillStyle="#dc2626";ctx.fillRect(z.x,z.y,z.w,z.h);
+        ctx.strokeStyle="#991b1b";ctx.lineWidth=2;ctx.strokeRect(z.x,z.y,z.w,z.h);
+        ctx.fillStyle="white";const fs=Math.min(z.h*0.5,30);ctx.font=`bold ${fs}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("?",z.x+z.w/2,z.y+z.h/2);
+      } else if(!showOthers){
+        ctx.fillStyle="#000000";ctx.fillRect(z.x,z.y,z.w,z.h);
+        ctx.strokeStyle="#222222";ctx.lineWidth=1;ctx.strokeRect(z.x,z.y,z.w,z.h);
+        ctx.fillStyle="white";ctx.font=`bold ${Math.min(z.h*0.45,18)}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(i+1),z.x+z.w/2,z.y+z.h/2);
+      }
+    }
+  });
+}
 function OcclusionCanvas({cardFront,showBack,showOthers}){
   const canvasRef=useRef(null);
-  const [imgSrc,setImgSrc]=useState(null);
+  const data=useMemo(()=>{ try{ return JSON.parse(cardFront); }catch{ return null; } },[cardFront]);
+  // Image déjà décodée en mémoire ? On la prend TOUT DE SUITE, dès le premier
+  // rendu : ni écran de chargement, ni clignotement au retournement de la carte.
+  const known=useMemo(()=>{
+    if(!data)return null;
+    if(data.image)return getDecodedOcclusionSync(data.image);
+    if(data.imageRef&&_occImgCache.has(data.imageRef))return getDecodedOcclusionSync(_occImgCache.get(data.imageRef));
+    return null;
+  },[data]);
+  const [img,setImg]=useState(known);
   const [imgErr,setImgErr]=useState(false);
   useEffect(()=>{
     let alive=true;
     setImgErr(false);
+    if(known){ setImg(known); return; }
+    setImg(null);
     (async()=>{
       try{
-        const data=JSON.parse(cardFront);
         const src=await resolveOcclusionImage(data);
+        if(!src){ if(alive)setImgErr(true); return; }
+        const decoded=await decodeOcclusionImage(src);
         if(!alive)return;
-        if(src)setImgSrc(src); else setImgErr(true);
+        if(decoded)setImg(decoded); else setImgErr(true);
       }catch{ if(alive)setImgErr(true); }
     })();
     return()=>{alive=false;};
-  },[cardFront]);
-  useEffect(()=>{
-    if(!imgSrc)return;
-    try{
-      const data=JSON.parse(cardFront);const canvas=canvasRef.current;if(!canvas)return;
-      const ctx=canvas.getContext("2d");const img=new Image();
-      img.onload=()=>{canvas.width=img.width;canvas.height=img.height;ctx.drawImage(img,0,0);
-        data.zones.forEach((z,i)=>{
-          const isTarget=z.id===data.targetZone;
-          if(showBack){
-            if(isTarget){
-              ctx.strokeStyle="#15803d";ctx.lineWidth=3;ctx.strokeRect(z.x-1,z.y-1,z.w+2,z.h+2);
-              ctx.fillStyle="#15803d22";ctx.fillRect(z.x,z.y,z.w,z.h);
-            } else {
-              ctx.fillStyle="#000000";ctx.fillRect(z.x,z.y,z.w,z.h);
-              ctx.fillStyle="white";ctx.font=`bold ${Math.min(z.h*0.45,18)}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(i+1),z.x+z.w/2,z.y+z.h/2);
-            }
-          } else {
-            if(isTarget){
-              ctx.fillStyle="#dc2626";ctx.fillRect(z.x,z.y,z.w,z.h);
-              ctx.strokeStyle="#991b1b";ctx.lineWidth=2;ctx.strokeRect(z.x,z.y,z.w,z.h);
-              ctx.fillStyle="white";const fs=Math.min(z.h*0.5,30);ctx.font=`bold ${fs}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("?",z.x+z.w/2,z.y+z.h/2);
-            } else if(!showOthers){
-              ctx.fillStyle="#000000";ctx.fillRect(z.x,z.y,z.w,z.h);
-              ctx.strokeStyle="#222222";ctx.lineWidth=1;ctx.strokeRect(z.x,z.y,z.w,z.h);
-              ctx.fillStyle="white";ctx.font=`bold ${Math.min(z.h*0.45,18)}px sans-serif`;ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(i+1),z.x+z.w/2,z.y+z.h/2);
-            }
-          }
-        });
-      };img.src=imgSrc;
-    }catch(e){console.error("OcclusionCanvas:",e);}
-  },[cardFront,showBack,showOthers,imgSrc]);
+  },[data,known]);
+  // Peinture synchrone (useLayoutEffect) : le canvas est rempli avant que le
+  // navigateur ne dessine la frame, donc l'utilisateur ne voit jamais de blanc.
+  React.useLayoutEffect(()=>{
+    if(!img||!data)return;
+    try{ paintOcclusion(canvasRef.current,img,data,showBack,showOthers); }
+    catch(e){ console.error("OcclusionCanvas:",e); }
+  },[img,data,showBack,showOthers]);
   if(imgErr)return <p style={{fontSize:12,color:C.again,textAlign:"center",margin:"12px 0"}}>⚠️ Image de cette carte introuvable.</p>;
-  if(!imgSrc)return <p style={{fontSize:12,color:C.textLt,textAlign:"center",margin:"12px 0"}}>⏳ Chargement de l'image…</p>;
+  // Pendant le tout premier chargement, on réserve la place au lieu de la laisser
+  // vide : la carte ne « saute » pas quand l'image arrive.
+  if(!img)return <div style={{height:220,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,border:`1px solid ${C.border}`}}>
+    <span style={{fontSize:12,color:C.textLt,fontFamily:mono,letterSpacing:1}}>chargement de l'image…</span>
+  </div>;
   return <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>;
 }
 // ─── Card Editor ──────────────────────────────────────────────────────────────
@@ -5663,8 +5980,111 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
     <Footer/>
   </div>;
 }
+// ─── Adaptation personnelle d'une carte ───────────────────────────────────────
+// Ouverte depuis la session de révision. L'étudiant retouche la formulation de
+// la question, complète la réponse, ajoute ou remplace une image — et ces
+// changements n'existent QUE pour lui. La carte officielle n'est pas touchée,
+// les autres étudiants ne voient rien, et l'administrateur reste seul maître de
+// la version d'origine.
+//
+// Cas particulier des cartes à image occlusion : le titre et la réponse sont
+// modifiables, mais pas le découpage des zones sur l'image. Redécouper une image
+// mutualisée entre plusieurs cartes serait à la fois lourd et hasardeux ; le
+// besoin réel — reformuler ou annoter — est couvert par les deux champs offerts.
+function CardAdaptModal({card,onSave,onReset,onClose}){
+  const occ=isOcclusion(card);
+  const origFront=card.originalFront!==undefined?card.originalFront:card.front;
+  const origBack=card.originalBack!==undefined?card.originalBack:card.back;
+  const fc=parseContent(card.front), bc=parseContent(card.back);
+  const occData=useMemo(()=>{ if(!occ)return null; try{ return JSON.parse(card.front); }catch{ return null; } },[occ,card.front]);
+  const [frontText,setFrontText]=useState(occ?(occData?.title||""):fc.text);
+  const [backText,setBackText]=useState(bc.text);
+  const [frontImg,setFrontImg]=useState(occ?null:fc.img);
+  const [backImg,setBackImg]=useState(bc.img);
+  const [saving,setSaving]=useState(false);
+  const [confirmReset,setConfirmReset]=useState(false);
+  const isEdited=!!card.isEdited;
+  const handleSave=async()=>{
+    if(saving)return;
+    setSaving(true);
+    let newFront;
+    if(occ){
+      // On réécrit uniquement le titre dans le JSON d'occlusion : zones,
+      // référence d'image et zone cible sont recopiées telles quelles.
+      newFront=JSON.stringify({...(occData||{}),title:frontText});
+    } else {
+      newFront=serializeContent(frontText,frontImg);
+    }
+    const newBack=serializeContent(backText,backImg);
+    await onSave(card.id,newFront,newBack);
+    setSaving(false);
+    onClose();
+  };
+  const handleReset=async()=>{
+    setSaving(true);
+    await onReset(card.id);
+    setSaving(false);
+    onClose();
+  };
+  const origFc=parseContent(origFront), origBc=parseContent(origBack);
+  return <Modal onClose={onClose} width={560}>
+    <p style={{fontFamily:serif,fontSize:21,margin:"0 0 6px"}}>Adapter cette carte</p>
+    <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 4px",lineHeight:1.65}}>
+      Reformule la question, complète la réponse, ajoute une image — comme tu veux.
+    </p>
+    <p style={{fontSize:12,color:C.textLt,margin:"0 0 20px",lineHeight:1.65}}>
+      🔒 Ta version reste <strong>privée</strong> et ne remplace la carte que pour toi.
+      Tu la retrouveras telle quelle à chaque révision, sur tous tes appareils.
+      La carte officielle et les révisions des autres étudiants ne changent pas.
+    </p>
+    {isEdited&&<div style={{background:"var(--c-violetBg)",border:"1px solid var(--c-violetSoft)",borderRadius:8,padding:"9px 13px",marginBottom:18}}>
+      <p style={{fontSize:12,color:"var(--c-violet)",margin:0,lineHeight:1.55}}>✏️ Tu as déjà adapté cette carte. Tu peux continuer à la modifier, ou revenir à la version d'origine.</p>
+    </div>}
+    <div style={{marginBottom:18}}>
+      <Lbl>{occ?"Titre affiché au-dessus de l'image":"Question (recto)"}</Lbl>
+      <textarea value={frontText} onChange={e=>setFrontText(e.target.value)} rows={occ?2:3}
+        placeholder={occ?"Titre de l'image (optionnel)":"La question, formulée à ta façon"}
+        style={{...iBox,fontFamily:serif,fontSize:15}}/>
+      {!occ&&origFc.text&&origFc.text!==frontText&&<details style={{marginTop:7}}>
+        <summary style={{fontSize:11,color:C.textLt,cursor:"pointer"}}>Voir la formulation d'origine</summary>
+        <p style={{fontSize:12.5,color:C.textMed,margin:"7px 0 0",lineHeight:1.6,fontFamily:serif,whiteSpace:"pre-wrap",padding:"9px 12px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>{origFc.text}</p>
+      </details>}
+      {!occ&&<div style={{marginTop:11}}><ImageDropZone value={frontImg} onChange={setFrontImg} label="Image du recto (optionnelle)"/></div>}
+      {occ&&<p style={{fontSize:11.5,color:C.textLt,margin:"9px 0 0",lineHeight:1.6}}>🖼 Les zones masquées de l'image ne sont pas modifiables ici : elles sont communes à toutes les cartes issues de cette image.</p>}
+    </div>
+    <div style={{marginBottom:22}}>
+      <Lbl>Réponse (verso)</Lbl>
+      <textarea value={backText} onChange={e=>setBackText(e.target.value)} rows={4}
+        placeholder="La réponse, avec tes propres repères, moyens mnémotechniques…"
+        style={{...iBox,fontSize:14}}/>
+      {origBc.text&&origBc.text!==backText&&<details style={{marginTop:7}}>
+        <summary style={{fontSize:11,color:C.textLt,cursor:"pointer"}}>Voir la réponse d'origine</summary>
+        <p style={{fontSize:12.5,color:C.textMed,margin:"7px 0 0",lineHeight:1.6,whiteSpace:"pre-wrap",padding:"9px 12px",background:C.bg,borderRadius:6,border:`1px solid ${C.border}`}}>{origBc.text}</p>
+      </details>}
+      <div style={{marginTop:11}}><ImageDropZone value={backImg} onChange={setBackImg} label="Image du verso (optionnelle)"/></div>
+    </div>
+    <p style={{fontSize:11.5,color:C.textLt,margin:"0 0 16px",lineHeight:1.6}}>
+      Ta progression sur cette carte (intervalles, historique, points) est conservée : tu l'adaptes sans repartir de zéro.
+    </p>
+    {confirmReset?(
+      <div style={{background:C.againBg,border:`1px solid ${C.again}`,borderRadius:8,padding:"13px 15px"}}>
+        <p style={{fontSize:13,color:C.again,margin:"0 0 12px",lineHeight:1.6,fontWeight:500}}>Effacer ton adaptation et revenir à la version officielle ? Tes modifications seront perdues.</p>
+        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+          <Btn small fill danger onClick={handleReset} disabled={saving}>Revenir à l'origine</Btn>
+          <Btn small onClick={()=>setConfirmReset(false)}>Annuler</Btn>
+        </div>
+      </div>
+    ):(
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <Btn fill onClick={handleSave} disabled={saving}>{saving?"Enregistrement…":"Enregistrer ma version"}</Btn>
+        <Btn onClick={onClose} disabled={saving}>Annuler</Btn>
+        {isEdited&&<button onClick={()=>setConfirmReset(true)} disabled={saving} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",padding:0,marginLeft:"auto"}}>Revenir à la version d'origine</button>}
+      </div>
+    )}
+  </Modal>;
+}
 // ─── Study ────────────────────────────────────────────────────────────────────
-function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onBack,settings,isAdmin,progress,theme,onToggleTheme,onUndo,onQueueChange}){
+function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,theme,onToggleTheme,onUndo,onQueueChange}){
   // ─── Cartes mises en attente (méthodes des J et personnalisée) ──────────────
   // Une carte reportée ne quitte pas la session : elle attend ici que sa minuterie
   // expire, puis revient d'elle-même en fin de file — sans jamais interrompre la
@@ -5675,24 +6095,49 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
   const [wTick,setWTick]=useState(0);
   const [recallFlash,setRecallFlash]=useState(null);
   const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0),[confirmDelCard,setConfirmDelCard]=useState(null),[delFlash,setDelFlash]=useState(false);
+  // Adaptation personnelle de la carte affichée.
+  const [adaptCard,setAdaptCard]=useState(null),[adaptFlash,setAdaptFlash]=useState(null);
+  // ─── Préchargement glissant ────────────────────────────────────────────────
+  // Pendant que l'étudiant lit la carte affichée, les SUIVANTES sont préparées
+  // en silence : leur contenu est récupéré si besoin, et surtout leurs images
+  // sont téléchargées PUIS DÉCODÉES à l'avance. Quand il arrive dessus, il n'y a
+  // plus rien à attendre. C'est ce qui remplace l'ancien écran « Chargement de
+  // l'image… », qui ne se déclenchait qu'une fois la carte déjà à l'écran.
+  const prefetchedRef=useRef(new Set());
   useEffect(()=>{
-    const card=localQ[idx];
-    if(card&&!card.front&&card.card_type==='occlusion'){
-      supa.getCardsContent([card.id]).then(content=>{
-        if(content[card.id]){
-          setLocalQ(q=>q.map((c,i)=>i===idx?{...c,...content[c.id]}:c));
-        }
+    let alive=true;
+    const PREFETCH_AHEAD=4;
+    const win=localQ.slice(idx,idx+PREFETCH_AHEAD+1).filter(Boolean);
+    if(!win.length)return;
+    // 1. Contenu encore absent (recto d'une occlusion, carte texte pas encore chargée).
+    //    On n'accepte que les réponses réellement remplies : une carte disparue du
+    //    serveur renverrait un recto vide, et la réécrire à chaque passage
+    //    relancerait cet effet en boucle sans fin.
+    const need=win.filter(c=>!c.front).map(c=>c.id);
+    if(need.length){
+      supa.getCardsContent(need).then(content=>{
+        if(!alive||!content)return;
+        const usable={};
+        Object.entries(content).forEach(([id,c])=>{ if(c&&c.front)usable[id]=c; });
+        if(!Object.keys(usable).length)return;
+        // L'adaptation personnelle est réappliquée ici aussi : sans cela, seules
+        // les premières cartes de la file afficheraient la version de l'étudiant,
+        // et les suivantes retomberaient sur le texte officiel.
+        setLocalQ(q=>q.map(c=>(!c.front&&usable[c.id])?applyOverride({...c,...usable[c.id]},overrides):c));
       }).catch(()=>{});
     }
-    const next=localQ[idx+1];
-    if(next&&!next.front&&next.card_type==='occlusion'){
-      supa.getCardsContent([next.id]).then(content=>{
-        if(content[next.id]){
-          setLocalQ(q=>q.map(c=>c.id===next.id&&!c.front?{...c,...content[c.id]}:c));
-        }
-      }).catch(()=>{});
-    }
-  },[idx]);
+    // 2. Images des cartes dont le contenu est déjà disponible. La carte courante
+    //    est traitée en premier, les suivantes ensuite.
+    win.forEach(c=>{
+      if(!c.front||prefetchedRef.current.has(c.id))return;
+      prefetchedRef.current.add(c.id);
+      if(isOcclusion(c)){ prefetchOcclusionCard(c.front); return; }
+      const fc=parseContent(c.front), bc=parseContent(c.back);
+      prefetchPlainImage(fc.img);
+      prefetchPlainImage(bc.img);
+    });
+    return()=>{alive=false;};
+  },[idx,localQ,overrides]);
   // Le battement qui fait revenir les cartes en attente. Cinq secondes : assez fin
   // pour un report d'une minute, assez lâche pour ne rien coûter.
   useEffect(()=>{
@@ -5741,11 +6186,15 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
   const [canUndo,setCanUndo]=useState(false);
   const [undoFlash,setUndoFlash]=useState(null);
   const card=localQ[idx];
-  if(card&&!card.front&&card.card_type==='occlusion'){
-    return<div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12}}>
-      <p style={{fontSize:32}}>🖼</p>
-      <p style={{fontFamily:serif,fontSize:18}}>Chargement de l'image…</p>
-      <p style={{fontSize:13,color:C.textLt}}>Image occlusion en cours de téléchargement</p>
+  // Filet de sécurité : avec le préchargement glissant, le contenu d'une carte
+  // est pratiquement toujours prêt avant qu'elle ne s'affiche. Ce squelette ne
+  // sert donc plus qu'aux cas extrêmes (réseau très lent sur la toute première
+  // carte). Il reste volontairement discret, sans emoji ni gros titre : c'est
+  // une attente d'une fraction de seconde, pas un événement.
+  if(card&&!card.front){
+    return<div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14}}>
+      <div style={{width:"min(520px,88vw)",height:260,borderRadius:12,background:C.surface,border:`1.5px solid ${C.border}`,animation:"mfcPulse 1.2s ease-in-out infinite"}}/>
+      <p style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:0}}>préparation de la carte…</p>
     </div>;
   }
   const handleRate=async rating=>{
@@ -5877,6 +6326,34 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     const q=[...localQ];q.splice(idx,1);
     setLocalQ(q);if(!q.length||idx>=q.length){setDone(true);return;}setShowBack(false);setShowOthers(false);
   };
+  // ─── Adaptation personnelle ────────────────────────────────────────────────
+  // La carte est mise à jour dans la file EN COURS, donc le changement est
+  // visible immédiatement, sans quitter la session ni perdre sa place. La
+  // version d'origine est conservée sur la carte pour pouvoir y revenir.
+  const handleSaveAdapt=async(cardId,newFront,newBack)=>{
+    if(!onSaveOverride)return;
+    await onSaveOverride(cardId,newFront,newBack);
+    setLocalQ(q=>q.map(c=>c.id===cardId?{...c,
+      front:newFront,back:newBack,isEdited:true,
+      originalFront:c.originalFront!==undefined?c.originalFront:c.front,
+      originalBack:c.originalBack!==undefined?c.originalBack:c.back}:c));
+    setAdaptFlash({id:Date.now(),kind:"saved"});
+    setTimeout(()=>setAdaptFlash(f=>(f&&f.kind==="saved")?null:f),2400);
+  };
+  const handleResetAdapt=async cardId=>{
+    if(!onResetOverride)return;
+    await onResetOverride(cardId);
+    setLocalQ(q=>q.map(c=>{
+      if(c.id!==cardId)return c;
+      const restored={...c,
+        front:c.originalFront!==undefined?c.originalFront:c.front,
+        back:c.originalBack!==undefined?c.originalBack:c.back};
+      delete restored.isEdited;delete restored.originalFront;delete restored.originalBack;
+      return restored;
+    }));
+    setAdaptFlash({id:Date.now(),kind:"reset"});
+    setTimeout(()=>setAdaptFlash(f=>(f&&f.kind==="reset")?null:f),2400);
+  };
   // ─── Fin de file alors que des cartes attendent encore ──────────────────────
   // Cet écran ne dure qu'un battement : l'effet ci-dessus remet immédiatement les
   // cartes en attente dans la file. Il existe pour qu'aucune image de « paquet
@@ -5921,13 +6398,15 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     return d>=1?Math.round(d):0;
   })();
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
-    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"var(--c-goldBg)",border:"1px solid #e6d3a3",color:"var(--c-gold)"}}>🏆 +{sessionPts}</span>}{mode!=="anki"&&waiting.length>0&&<button onClick={pullWaiting} title="Ces cartes reviendront d'elles-mêmes — clique pour les reprendre tout de suite" style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",borderRadius:10,background:C.hardBg,border:`1px solid ${C.hard}`,color:C.hard}}>⏳ {waiting.length} en attente</button>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span>{canUndo&&<button onClick={handleUndoClick} title="Revenir à la carte précédente pour corriger sa note" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,display:"flex",alignItems:"center",gap:4}}>↩ Précédente</button>}{!isAdmin&&card.isUserCard&&onDeleteUserCard&&<button onClick={()=>setConfirmDelCard(card)} title="Supprimer définitivement cette carte que tu as créée" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,display:"flex",alignItems:"center",gap:4}}>🗑 Supprimer ma carte</button>}{<button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button>}</div>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"var(--c-goldBg)",border:"1px solid #e6d3a3",color:"var(--c-gold)"}}>🏆 +{sessionPts}</span>}{mode!=="anki"&&waiting.length>0&&<button onClick={pullWaiting} title="Ces cartes reviendront d'elles-mêmes — clique pour les reprendre tout de suite" style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",borderRadius:10,background:C.hardBg,border:`1px solid ${C.hard}`,color:C.hard}}>⏳ {waiting.length} en attente</button>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span>{canUndo&&<button onClick={handleUndoClick} title="Revenir à la carte précédente pour corriger sa note" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,display:"flex",alignItems:"center",gap:4}}>↩ Précédente</button>}{!isAdmin&&!card.isUserCard&&onSaveOverride&&<button onClick={()=>setAdaptCard(card)} title="Reformuler cette carte pour toi — ta version reste privée et ne change rien pour les autres" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${card.isEdited?"var(--c-violet)":C.border}`,background:card.isEdited?"var(--c-violetBg)":"transparent",color:card.isEdited?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:4}}>✏️ {card.isEdited?"Ma version":"Adapter"}</button>}{!isAdmin&&card.isUserCard&&onDeleteUserCard&&<button onClick={()=>setConfirmDelCard(card)} title="Supprimer définitivement cette carte que tu as créée" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,display:"flex",alignItems:"center",gap:4}}>🗑 Supprimer ma carte</button>}{<button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button>}</div>}/>
     <div style={{height:3,background:C.border}}><div style={{height:3,background:col,width:`${(idx/Math.max(1,localQ.length))*100}%`,transition:"width 0.3s"}}/></div>
     {cram&&<div style={{background:"var(--c-violetBg)",borderBottom:"1px solid var(--c-violetSoft)",padding:"8px 24px",textAlign:"center"}}><p style={{fontSize:12,color:"var(--c-violet)",margin:0,fontWeight:500}}>🗓️ Révision en avance — ces cartes comptent normalement, avec un gain réduit à la hauteur de l'avance prise</p></div>}
     {undoFlash&&<div key={undoFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:"var(--c-toast)",color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease",textAlign:"center"}}>↩ Retour sur la carte précédente{undoFlash.points>0?` — ${undoFlash.points} point${undoFlash.points>1?"s":""} retiré${undoFlash.points>1?"s":""}`:""}</div>}
     {recallFlash&&<div key={recallFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:C.hardBg,border:`1.5px solid ${C.hard}`,color:C.hard,borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",animation:"fadeIn 0.2s ease",textAlign:"center",maxWidth:"92vw"}}>↻ Fin du paquet — {recallFlash.n} carte{recallFlash.n>1?"s":""} en attente {recallFlash.n>1?"remises":"remise"} en jeu</div>}
     {buryFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--c-toast)",color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🙈 Carte enfouie — plus dans tes révisions</div>}
     {delFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:C.again,color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🗑 Ta carte a été supprimée</div>}
+    {adaptCard&&<CardAdaptModal card={localQ.find(c=>c.id===adaptCard.id)||adaptCard} onSave={handleSaveAdapt} onReset={handleResetAdapt} onClose={()=>setAdaptCard(null)}/>}
+    {adaptFlash&&<div key={adaptFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:adaptFlash.kind==="saved"?"var(--c-violetBg)":C.bg,border:`1.5px solid ${adaptFlash.kind==="saved"?"var(--c-violet)":C.border}`,color:adaptFlash.kind==="saved"?"var(--c-violet)":C.textMed,borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",animation:"fadeIn 0.2s ease",textAlign:"center",maxWidth:"92vw"}}>{adaptFlash.kind==="saved"?"✏️ Ta version est enregistrée — elle s'affichera à chaque révision":"↺ Version d'origine rétablie"}</div>}
     {confirmDelCard&&<Modal onClose={()=>setConfirmDelCard(null)} width={360}>
       <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer ta carte ?</p>
       <p style={{fontSize:13,color:C.textMed,margin:"0 0 8px",lineHeight:1.6}}>Cette carte que tu as créée sera définitivement effacée de ton compte, ainsi que sa place dans tes révisions.</p>
@@ -5946,6 +6425,7 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
         <Tag color={C.textMed} bg={C.bg}>Cours {card.num}</Tag>
         {chName&&<Tag color={C.textMed} bg={C.bg}>Ch.{card.chapterId} {chName}</Tag>}
         {card.isUserCard&&<Tag color={"var(--c-violet)"} bg={"var(--c-violetBg)"}>✏️ Personnel</Tag>}
+        {!card.isUserCard&&card.isEdited&&<Tag color={"var(--c-violet)"} bg={"var(--c-violetBg)"}>✏️ Ta version</Tag>}
         <Tag color={C.textLt} bg={C.bg}>{mode==="j"?(jInfo?(jInfo.isNew?"Méthode des J · première ouverture":`Méthode des J · ${jLabel(jInfo.j)}${jInfo.late>0?` (+${jInfo.late} j)`:""}`):"Méthode des J"):mode==="perso"?(persoM===null?"Jamais travaillée ici":`Maîtrise ${Math.round(persoM*100)} %`):stateLabel(cardProg)}</Tag>
       </div>
       {isOcclusion(card)?(
@@ -6091,6 +6571,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
   const [s,setS]=useState(settings),[saved,setSaved]=useState(false);
   const [pseudoInput,setPseudoInput]=useState(pseudo||"");
   const [pseudoSaved,setPseudoSaved]=useState(false);
+  const [cacheCleared,setCacheCleared]=useState(false);
   useEffect(()=>{setPseudoInput(pseudo||"");},[pseudo]);
   const savePseudoClick=()=>{
     const trimmed=pseudoInput.trim().slice(0,PSEUDO_MAX);
@@ -6142,6 +6623,21 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
               {s.newCardOrder==="every"&&<div style={{marginLeft:8}}><SettingsSlider k="newCardEvery" s={s} setS={setS} label="Fréquence d'intercalage" desc="Une nouvelle carte toutes les X révisions." min={2} max={20} step={1} unit="révisions"/></div>}
             </div>
           </div>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="⚡ Images et rapidité d'affichage">
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          <p style={{fontSize:12,color:C.textMed,margin:0,lineHeight:1.65}}>
+            Les images de tes cartes sont conservées sur cet appareil après leur première consultation. C'est ce qui les fait apparaître instantanément lors des révisions suivantes, même hors connexion.
+          </p>
+          <p style={{fontSize:11.5,color:C.textLt,margin:0,lineHeight:1.6}}>
+            Vider cette réserve n'efface aucune de tes cartes, ni ta progression, ni tes adaptations personnelles : tout est conservé sur le serveur. Les images seront simplement retéléchargées à la prochaine révision. À n'utiliser que si une image s'affiche mal ou semble périmée.
+          </p>
+          <button onClick={()=>{ idbClear("img");idbClear("content");setCacheCleared(true);setTimeout(()=>setCacheCleared(false),2600); }}
+            style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"8px 16px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed,alignSelf:"flex-start"}}>
+            ↻ Vider la réserve d'images
+          </button>
+          {cacheCleared&&<p style={{fontSize:12,color:C.good,margin:0,fontWeight:600}}>✓ Réserve vidée — les images seront rechargées à la prochaine révision.</p>}
         </div>
       </SettingsSection>
       {onResetProgress&&<SettingsSection title="🗑 Réinitialiser des révisions">
@@ -6563,6 +7059,8 @@ function App(){
     });
   },[uname]);
   const [userCards,setUserCards]=useState([]);
+  // Adaptations personnelles des cartes officielles : { cardId → {front,back} }.
+  const [overrides,setOverrides]=useState({});
   const [userCardEditor,setUserCardEditor]=useState(null);
   const [userCardKey,setUserCardKey]=useState(0);
   // ─── Unsaved-writes safety net ──────────────────────────────────────────────
@@ -6768,7 +7266,7 @@ function App(){
     }
     return false;
   };
-  const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
+  const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
   const refreshProgressFromCloud=useCallback(async username=>{
     const remote=await supa.getProgress(username);
     if(remote===null)return;
@@ -6931,6 +7429,7 @@ function App(){
         supa.deleteDailyPoints(username),
         supa.deleteAllJPlans?supa.deleteAllJPlans(username):Promise.resolve(),
         supa.deleteProfile?supa.deleteProfile(username):Promise.resolve(),
+        supa.deleteAllCardOverrides(username),
       ]);
     }catch(e){ console.error("handleDeleteAccount failed:",e); }
     [
@@ -6938,10 +7437,14 @@ function App(){
       `mx6-extra-${username}`,`mx6-integrated-${username}`,`mx6-ucache-${username}`,
       `mx6-rankprefs-${username}`,`mx6-pseudo-${username}`,
       `mx6-jplan-${username}`,`mx6-mode-${username}`,`mx6-modestats-${username}`,
+      OVR_KEY(username),
     ].forEach(k=>storage.del(k));
+    // Le cache disque (images et contenu des cartes) est vidé lui aussi : rien
+    // de ce compte ne doit subsister sur l'appareil après sa suppression.
+    idbClear("img");idbClear("content");
     setAccounts(p=>p.filter(a=>a.username!==username));
     storage.del("mx6-session");
-    setCurrentUser(null);setProg({});setUserCards([]);setPseudo("");setView("login");
+    setCurrentUser(null);setProg({});setUserCards([]);setOverrides({});setPseudo("");setView("login");
   },[currentUser]);
   const handleRegister=useCallback(async newAcc=>{
     await supa.upsertAccount(newAcc);
@@ -6972,6 +7475,60 @@ function App(){
       setUCache(currentUser.username,merged);
     });
   },[currentUser?.username]);
+  // ─── Chargement des adaptations personnelles ────────────────────────────────
+  // Le cache local est appliqué immédiatement (affichage instantané, et
+  // fonctionnement hors-ligne), puis la version du serveur vient compléter — ce
+  // qui récupère les adaptations faites depuis un autre appareil.
+  useEffect(()=>{
+    if(!currentUser||currentUser.role==="admin"){setOverrides({});return;}
+    const cached=getOverridesCache(currentUser.username);
+    if(Object.keys(cached).length)setOverrides(cached);
+    supa.getCardOverrides(currentUser.username).then(remote=>{
+      if(!remote)return; // table absente ou réseau indisponible → le local suffit
+      // En cas de divergence, la version la plus récente l'emporte. Une
+      // adaptation encore non synchronisée n'est donc jamais écrasée.
+      const merged={...remote};
+      Object.entries(cached).forEach(([id,loc])=>{
+        const rem=remote[id];
+        if(!rem||new Date(loc.updatedAt||0)>new Date(rem.updatedAt||0))merged[id]=loc;
+      });
+      setOverrides(merged);
+      setOverridesCache(currentUser.username,merged);
+      // Les adaptations locales plus récentes que le serveur sont renvoyées.
+      Object.entries(merged).forEach(([id,o])=>{
+        const rem=remote[id];
+        if(!rem||new Date(o.updatedAt||0)>new Date(rem.updatedAt||0))
+          supa.upsertCardOverride(currentUser.username,id,o.front,o.back).catch(()=>{});
+      });
+    }).catch(()=>{});
+  },[currentUser?.username]);
+  // ─── Enregistrement d'une adaptation ────────────────────────────────────────
+  // Écrit d'abord en local (donc visible immédiatement, même hors connexion),
+  // puis pousse vers Supabase. Si l'envoi échoue, l'adaptation reste en place sur
+  // l'appareil et sera renvoyée au prochain démarrage.
+  const handleSaveOverride=useCallback(async(cardId,front,back)=>{
+    if(!currentUser||currentUser.role==="admin"||!cardId)return false;
+    const entry={front,back,updatedAt:new Date().toISOString()};
+    setOverrides(prev=>{
+      const next={...prev,[cardId]:entry};
+      setOverridesCache(currentUser.username,next);
+      return next;
+    });
+    try{ await supa.upsertCardOverride(currentUser.username,cardId,front,back); }
+    catch(e){ console.warn("upsertCardOverride failed — conservée en local:",e); }
+    return true;
+  },[currentUser]);
+  // Retour à la version officielle : l'adaptation est effacée des deux côtés.
+  const handleResetOverride=useCallback(async cardId=>{
+    if(!currentUser||!cardId)return;
+    setOverrides(prev=>{
+      const next={...prev};
+      delete next[cardId];
+      setOverridesCache(currentUser.username,next);
+      return next;
+    });
+    supa.deleteCardOverride(currentUser.username,cardId).catch(()=>{});
+  },[currentUser]);
   const handleSaveUserCard=useCallback((cardOrCards)=>{
     const list=Array.isArray(cardOrCards)?cardOrCards:[cardOrCards];
     const isCreatingNew=!list[0]?.id||list[0]?.id?.startsWith("u-");
@@ -7132,14 +7689,39 @@ function App(){
     if(!currentUser||currentUser.role==="admin")return 0;
     return getStats(currentUser.username).days[dateKey()]?.newShown||0;
   },[currentUser]);
+  // ─── Préparation d'une session ──────────────────────────────────────────────
+  // Avant, on attendait le contenu de TOUTES les cartes avant d'ouvrir la
+  // session : sur un paquet illustré, cela représentait plusieurs mégaoctets et
+  // de longues secondes d'écran figé. Désormais on ne charge que les premières
+  // cartes — de quoi commencer immédiatement — et le reste arrive en arrière-plan
+  // pendant que l'étudiant travaille, sans jamais l'interrompre.
+  const HEAD_BATCH=8;
   const enrichCards=useCallback(async(queue)=>{
-    const textIds=queue.filter(c=>c.card_type!=='occlusion'&&!c.front).map(c=>c.id);
-    const textContent=textIds.length>0?await supa.getCardsContent(textIds):{};
-    const firstOcc=queue.find(c=>c.card_type==='occlusion'&&!c.front);
-    const firstOccContent=firstOcc?await supa.getCardsContent([firstOcc.id]):{};
-    const allContent={...textContent,...firstOccContent};
-    return queue.map(c=>c.front?c:{...c,...(allContent[c.id]||{front:null,back:null})});
-  },[]);
+    const need=queue.filter(c=>!c.front);
+    const head=need.slice(0,HEAD_BATCH).map(c=>c.id);
+    const headContent=head.length?await supa.getCardsContent(head):{};
+    // L'adaptation personnelle est posée PAR-DESSUS le contenu officiel, juste
+    // après son chargement. La version d'origine reste attachée à la carte, ce
+    // qui permet à l'étudiant de la consulter et d'y revenir quand il veut.
+    const out=queue
+      .map(c=>c.front?c:{...c,...(headContent[c.id]||{front:null,back:null})})
+      .map(c=>c.front?applyOverride(c,overrides):c);
+    // Les images des deux premières cartes sont décodées AVANT l'ouverture :
+    // la première carte s'affiche donc complète, sans transition de chargement.
+    try{
+      await Promise.all(out.slice(0,2).map(async c=>{
+        if(!c.front)return;
+        if(isOcclusion(c))await prefetchOcclusionCard(c.front);
+        else { prefetchPlainImage(parseContent(c.front).img); prefetchPlainImage(parseContent(c.back).img); }
+      }));
+    }catch{}
+    // Le reste de la file part se charger en arrière-plan dès que la session est
+    // ouverte : l'étudiant révise pendant ce temps, et comme le cache est
+    // persistant, la prochaine session sur ce paquet s'ouvrira instantanément.
+    const rest=out.filter(c=>!c.front).map(c=>c.id);
+    if(rest.length)setTimeout(()=>{ supa.getCardsContent(rest).catch(()=>{}); },600);
+    return out;
+  },[overrides]);
   // ─── Reprise de session ─────────────────────────────────────────────────────
   // Appelé par StudyView à chaque carte notée : on ne garde que les identifiants
   // des cartes restantes, ce qui reste minuscule même sur une session de 500 cartes.
@@ -7427,7 +8009,7 @@ function App(){
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
   if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onStudyCram={startCramStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)} theme={theme} onToggleTheme={toggleTheme} resumeInfo={resumeInfo} onResume={resumeStudySession} onDismissResume={dismissResume} studyMode={studyMode} onChangeMode={changeStudyMode} jplans={jplans} onSaveJPlan={handleSaveJPlan} onStudyJ={startJStudy} onStudyPerso={startPersoStudy} promo={promo}/>;
-  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue}/>;
+  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo} theme={theme} onToggleTheme={toggleTheme}/>;
   return null;
