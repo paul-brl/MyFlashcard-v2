@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Mentions légales — MyFlashcard</title>
+<meta name="description" content="Mentions légales de MyFlashcard, édité par MFC SAS."/>
+<meta name="robots" content="index, follow"/>
+<style>
+/* Les couleurs, la typographie et les points de rupture sont ceux de
+   l'application : une page légale ne doit pas donner l'impression d'avoir
+   quitté MyFlashcard. */
+:root {
+  --bg:#f5f3ee; --surface:#ffffff; --border:#d0ccc4; --line:#e8e5e0;
+  --text:#1a1917; --textMed:#4e4a46; --textLt:#7a7672;
+  --accent:#2c4a7c; --accentBg:#eef3fb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c1b22; --surface:#26252e; --border:#3f3d4b; --line:#34323e;
+    --text:#f4f3f7; --textMed:#b9b7c6; --textLt:#8a8798;
+    --accent:#8ab4f8; --accentBg:#1e2a3f;
+    color-scheme: dark;
+  }
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:16px; line-height:1.75;
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+
+/* Barre supérieure : le retour au site est la seule action, elle reste
+   atteignable au pouce sur mobile. */
+header.bar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10;
+}
+header.bar > div {
+  max-width:780px; margin:0 auto; padding:14px 24px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.brand { font-family:Georgia,'Times New Roman',serif; font-size:19px; color:var(--text); text-decoration:none; }
+.back { font-size:13.5px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+.back:hover, .back:focus-visible { text-decoration:underline; }
+
+main { max-width:780px; margin:0 auto; padding:44px 24px 8px; }
+h1 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:clamp(26px,5vw,34px); line-height:1.25; letter-spacing:-.4px;
+  margin-bottom:10px;
+}
+.version { font-size:13.5px; color:var(--textLt); margin-bottom:38px; }
+
+article { max-width:66ch; }
+h2 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:21px; line-height:1.35; color:var(--text);
+  margin:44px 0 14px; padding-top:22px; border-top:1px solid var(--line);
+  scroll-margin-top:76px;
+}
+h2:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+h3 { font-size:15.5px; font-weight:600; margin:26px 0 8px; color:var(--text); }
+p { margin-bottom:15px; color:var(--textMed); }
+p.block { color:var(--text); line-height:1.6; margin:4px 0 18px; }
+ul, ol { margin:0 0 16px 22px; color:var(--textMed); }
+li { margin-bottom:7px; }
+a { color:var(--accent); }
+strong { color:var(--text); font-weight:600; }
+
+/* Les mentions « [À COMPLÉTER] » sont signalées visuellement : elles doivent
+   sauter aux yeux tant qu'elles n'ont pas été renseignées. */
+.todo {
+  background:var(--accentBg); color:var(--accent);
+  padding:1px 7px; border-radius:4px; font-size:.92em; font-weight:600;
+  white-space:nowrap;
+}
+
+nav.docs {
+  max-width:780px; margin:0 auto; padding:34px 24px 56px;
+  border-top:1px solid var(--line);
+}
+nav.docs p { font-size:13px; color:var(--textLt); margin-bottom:12px; }
+nav.docs div { display:flex; flex-wrap:wrap; gap:8px; }
+nav.docs a, nav.docs span {
+  font-size:13.5px; padding:7px 14px; border-radius:7px;
+  border:1.5px solid var(--border); text-decoration:none; color:var(--textMed);
+}
+nav.docs a:hover, nav.docs a:focus-visible { border-color:var(--accent); color:var(--accent); }
+nav.docs span { border-color:var(--accent); background:var(--accentBg); color:var(--accent); font-weight:600; }
+
+footer.legal {
+  border-top:1px solid var(--line); background:var(--surface);
+}
+footer.legal div {
+  max-width:780px; margin:0 auto; padding:22px 24px 30px;
+  font-size:12.5px; color:var(--textLt);
+}
+
+a:focus-visible, span:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+
+@media (max-width:640px) {
+  header.bar > div { padding:12px 16px; }
+  main { padding:30px 16px 8px; }
+  nav.docs { padding:28px 16px 44px; }
+  footer.legal div { padding:20px 16px 26px; }
+  body { font-size:15.5px; }
+}
+
+@media print {
+  header.bar, nav.docs { display:none; }
+  body { background:#fff; color:#000; font-size:11pt; }
+  h2 { page-break-after:avoid; }
+  main { padding:0; max-width:none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div>
+    <a class="brand" href="/">MyFlashcard</a>
+    <a class="back" href="/">Retour au site</a>
+  </div>
+</header>
+
+<main>
+  <h1>MENTIONS LÉGALES — MYFLASHCARD</h1>
+  <p class="version">Version en vigueur au 13 septembre 2026</p>
+  <article>
+    <h2 id="1-editeur-du-site">1 — Éditeur du site</h2>
+    <p class="block">Le site myflashcard.fr est édité par :</p>
+    <p class="block">MFC SAS<br/>Société par actions simplifiée au capital social de 1 500 euros<br/>Siège social : 4 rue Jean Moulin, 38640 Claix, France<br/>SIREN : <span class="todo">[À COMPLÉTER]</span><br/>RCS : <span class="todo">[À COMPLÉTER]</span></p>
+    <p class="block">Adresse électronique : <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p class="block">Téléphone :<br/>07 68 49 87 04<br/>07 66 11 91 11</p>
+    <h2 id="2-directeur-de-la-publication">2 — Directeur de la publication</h2>
+    <p class="block">Le directeur de la publication est :</p>
+    <p>Paul BOUREL, en qualité de Président de MFC SAS.</p>
+    <h2 id="3-hebergement-du-site">3 — Hébergement du site</h2>
+    <p class="block">Le site est hébergé par :</p>
+    <p>GitHub, Inc. Service : GitHub Pages 88 Colin P. Kelly Jr. Street San Francisco, CA 94107 États-Unis</p>
+    <p class="block">Téléphone : +1 877 448 4820</p>
+    <h2 id="4-propriete-intellectuelle">4 — Propriété intellectuelle</h2>
+    <p>Le site MyFlashCard ainsi que les contenus qui y sont diffusés sont protégés, selon leur nature, par la législation applicable en matière de propriété intellectuelle.</p>
+    <p>Sont notamment concernés les textes, cours, flashcards, questions et réponses, illustrations, schémas, éléments graphiques, logos, signes distinctifs, bases de données, interfaces, logiciels, codes, photographies, vidéos et autres contenus édités par MyFlashCard.</p>
+    <p>Sauf mention contraire, les contenus originaux diffusés par MyFlashCard sont la propriété de MFC SAS ou sont exploités par celle-ci avec les droits nécessaires.</p>
+    <p>Lorsque MyFlashCard utilise un contenu appartenant à un tiers, notamment une image, une illustration, une photographie ou un texte, la source ou l&#x27;attribution requise est indiquée lorsque cela est nécessaire et le contenu est utilisé dans le respect des droits de son auteur ou titulaire.</p>
+    <p>L&#x27;accès au Site, y compris à des contenus proposés gratuitement, n&#x27;emporte aucun transfert de droits de propriété intellectuelle au bénéfice de l&#x27;Utilisateur.</p>
+    <p>Les conditions détaillées d&#x27;utilisation, de reproduction, d&#x27;extraction et de diffusion des contenus sont précisées dans les Conditions Générales d&#x27;Utilisation de MyFlashCard.</p>
+    <h2 id="5-donnees-personnelles">5 — Données personnelles</h2>
+    <p>MFC SAS traite certaines données à caractère personnel dans le cadre du fonctionnement de MyFlashCard.</p>
+    <p>Les informations relatives aux données traitées, à leurs finalités, à leurs bases juridiques, à leurs destinataires, à leur durée de conservation ainsi qu&#x27;aux droits des personnes concernées figurent dans la Politique de confidentialité de MyFlashCard.</p>
+    <p class="block">Pour toute demande relative aux données personnelles :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <h2 id="6-cookies-et-autres-traceurs">6 — Cookies et autres traceurs</h2>
+    <p>Les informations relatives aux cookies, au stockage local et aux autres technologies utilisées lors de l&#x27;utilisation de MyFlashCard figurent dans la Politique relative aux cookies et autres traceurs de MyFlashCard.</p>
+    <h2 id="7-conditions-d-utilisation-et-de-vente">7 — Conditions d&#x27;utilisation et de vente</h2>
+    <p>L&#x27;utilisation de MyFlashCard est régie par les Conditions Générales d&#x27;Utilisation (CGU).</p>
+    <p>Les achats réalisés auprès de MyFlashCard sont régis par les Conditions Générales de Vente (CGV).</p>
+    <h2 id="8-contact">8 — Contact</h2>
+    <p class="block">MFC SAS<br/>4 rue Jean Moulin<br/>38640 Claix<br/>France</p>
+    <p class="block">E-mail : <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p class="block">Téléphone :<br/>07 68 49 87 04<br/>07 66 11 91 11</p>
+    <p>Dernière mise à jour : 13 septembre 2026.</p>
+  </article>
+</main>
+
+<nav class="docs" aria-label="Documents légaux">
+  <p>Les autres documents</p>
+  <div>
+        <a href="cgu.html">CGU</a>
+        <a href="cgv.html">CGV</a>
+        <a href="confidentialite.html">Confidentialité</a>
+        <a href="cookies.html">Cookies</a>
+        <span aria-current="page">Mentions légales</span>
+  </div>
+</nav>
+
+<footer class="legal">
+  <div>MFC SAS · 4 rue Jean Moulin, 38640 Claix · <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Cookies et traceurs — MyFlashcard</title>
+<meta name="description" content="Cookies et traceurs de MyFlashcard, édité par MFC SAS."/>
+<meta name="robots" content="index, follow"/>
+<style>
+/* Les couleurs, la typographie et les points de rupture sont ceux de
+   l'application : une page légale ne doit pas donner l'impression d'avoir
+   quitté MyFlashcard. */
+:root {
+  --bg:#f5f3ee; --surface:#ffffff; --border:#d0ccc4; --line:#e8e5e0;
+  --text:#1a1917; --textMed:#4e4a46; --textLt:#7a7672;
+  --accent:#2c4a7c; --accentBg:#eef3fb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c1b22; --surface:#26252e; --border:#3f3d4b; --line:#34323e;
+    --text:#f4f3f7; --textMed:#b9b7c6; --textLt:#8a8798;
+    --accent:#8ab4f8; --accentBg:#1e2a3f;
+    color-scheme: dark;
+  }
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:16px; line-height:1.75;
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+
+/* Barre supérieure : le retour au site est la seule action, elle reste
+   atteignable au pouce sur mobile. */
+header.bar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10;
+}
+header.bar > div {
+  max-width:780px; margin:0 auto; padding:14px 24px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.brand { font-family:Georgia,'Times New Roman',serif; font-size:19px; color:var(--text); text-decoration:none; }
+.back { font-size:13.5px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+.back:hover, .back:focus-visible { text-decoration:underline; }
+
+main { max-width:780px; margin:0 auto; padding:44px 24px 8px; }
+h1 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:clamp(26px,5vw,34px); line-height:1.25; letter-spacing:-.4px;
+  margin-bottom:10px;
+}
+.version { font-size:13.5px; color:var(--textLt); margin-bottom:38px; }
+
+article { max-width:66ch; }
+h2 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:21px; line-height:1.35; color:var(--text);
+  margin:44px 0 14px; padding-top:22px; border-top:1px solid var(--line);
+  scroll-margin-top:76px;
+}
+h2:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+h3 { font-size:15.5px; font-weight:600; margin:26px 0 8px; color:var(--text); }
+p { margin-bottom:15px; color:var(--textMed); }
+p.block { color:var(--text); line-height:1.6; margin:4px 0 18px; }
+ul, ol { margin:0 0 16px 22px; color:var(--textMed); }
+li { margin-bottom:7px; }
+a { color:var(--accent); }
+strong { color:var(--text); font-weight:600; }
+
+/* Les mentions « [À COMPLÉTER] » sont signalées visuellement : elles doivent
+   sauter aux yeux tant qu'elles n'ont pas été renseignées. */
+.todo {
+  background:var(--accentBg); color:var(--accent);
+  padding:1px 7px; border-radius:4px; font-size:.92em; font-weight:600;
+  white-space:nowrap;
+}
+
+nav.docs {
+  max-width:780px; margin:0 auto; padding:34px 24px 56px;
+  border-top:1px solid var(--line);
+}
+nav.docs p { font-size:13px; color:var(--textLt); margin-bottom:12px; }
+nav.docs div { display:flex; flex-wrap:wrap; gap:8px; }
+nav.docs a, nav.docs span {
+  font-size:13.5px; padding:7px 14px; border-radius:7px;
+  border:1.5px solid var(--border); text-decoration:none; color:var(--textMed);
+}
+nav.docs a:hover, nav.docs a:focus-visible { border-color:var(--accent); color:var(--accent); }
+nav.docs span { border-color:var(--accent); background:var(--accentBg); color:var(--accent); font-weight:600; }
+
+footer.legal {
+  border-top:1px solid var(--line); background:var(--surface);
+}
+footer.legal div {
+  max-width:780px; margin:0 auto; padding:22px 24px 30px;
+  font-size:12.5px; color:var(--textLt);
+}
+
+a:focus-visible, span:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+
+@media (max-width:640px) {
+  header.bar > div { padding:12px 16px; }
+  main { padding:30px 16px 8px; }
+  nav.docs { padding:28px 16px 44px; }
+  footer.legal div { padding:20px 16px 26px; }
+  body { font-size:15.5px; }
+}
+
+@media print {
+  header.bar, nav.docs { display:none; }
+  body { background:#fff; color:#000; font-size:11pt; }
+  h2 { page-break-after:avoid; }
+  main { padding:0; max-width:none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div>
+    <a class="brand" href="/">MyFlashcard</a>
+    <a class="back" href="/">Retour au site</a>
+  </div>
+</header>
+
+<main>
+  <h1>POLITIQUE RELATIVE AUX COOKIES ET AUTRES TRACEURS — MYFLASHCARD</h1>
+  <p class="version">Version en vigueur au 13 septembre 2026</p>
+  <article>
+    <p>La présente Politique explique l&#x27;utilisation de cookies et autres technologies de stockage ou de suivi lors de l&#x27;utilisation du site myflashcard.fr, édité par MFC SAS.</p>
+    <p>Elle complète la Politique de confidentialité de MyFlashCard.</p>
+    <h2 id="article-1-responsable">Article 1 — Responsable</h2>
+    <p class="block">Le Site est édité par :</p>
+    <p class="block">MFC SAS<br/>Société par actions simplifiée au capital de 1 500 euros<br/>Siège social : 4 rue Jean Moulin, 38640 Claix<br/>SIREN / RCS : <span class="todo">[À COMPLÉTER]</span></p>
+    <p class="block">Contact :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <h2 id="article-2-qu-est-ce-qu-un-cookie-ou-un-traceur">Article 2 — Qu&#x27;est-ce qu&#x27;un cookie ou un traceur ?</h2>
+    <p>Un cookie est une information susceptible d&#x27;être enregistrée sur le terminal d&#x27;un Utilisateur lors de la consultation d&#x27;un site ou de l&#x27;utilisation d&#x27;un service en ligne.</p>
+    <p>D&#x27;autres technologies peuvent remplir des fonctions similaires sans être techniquement des cookies, notamment le stockage local du navigateur (« localStorage »).</p>
+    <p>Dans la présente Politique, le terme « traceurs » désigne de manière générale ces différentes technologies lorsqu&#x27;elles permettent de stocker ou de lire des informations sur le terminal de l&#x27;Utilisateur.</p>
+    <h2 id="article-3-traceurs-strictement-necessaires">Article 3 — Traceurs strictement nécessaires</h2>
+    <p>MyFlashCard peut utiliser des traceurs strictement nécessaires au fonctionnement du Site ou à la fourniture d&#x27;un service expressément demandé par l&#x27;Utilisateur.</p>
+    <p class="block">Ils peuvent notamment permettre :</p>
+    <ul><li>l&#x27;authentification de l&#x27;Utilisateur</li><li>le maintien de sa session</li><li>la sécurisation de son Compte</li><li>le fonctionnement technique du Site</li><li>la réalisation et la sécurisation d&#x27;un paiement</li><li>la prévention de la fraude</li><li>la mémorisation de certains choix strictement nécessaires à une fonctionnalité demandée</li></ul>
+    <p>Lorsque ces traceurs sont strictement nécessaires à la fourniture du Service demandé ou ont pour finalité exclusive de permettre ou faciliter la communication par voie électronique, ils peuvent être utilisés sans consentement préalable lorsque la réglementation le permet.</p>
+    <p>L&#x27;Utilisateur en est néanmoins informé par la présente Politique.</p>
+    <h2 id="article-4-authentification-et-supabase">Article 4 — Authentification et Supabase</h2>
+    <p>MyFlashCard utilise Supabase notamment pour l&#x27;authentification des Utilisateurs, la gestion des Comptes et certaines fonctionnalités techniques du Service.</p>
+    <p>Selon la configuration technique utilisée, les informations nécessaires au maintien d&#x27;une session peuvent notamment être conservées dans le stockage local du navigateur ou au moyen d&#x27;une technologie équivalente.</p>
+    <p class="block">Ces informations permettent notamment :</p>
+    <ul><li>de reconnaître une session authentifiée</li><li>de maintenir l&#x27;Utilisateur connecté lorsque cette fonctionnalité est utilisée</li><li>de sécuriser les échanges avec le système d&#x27;authentification</li><li>de permettre l&#x27;accès aux fonctionnalités réservées au Compte</li></ul>
+    <p>Ces mécanismes sont utilisés dans la mesure nécessaire au fonctionnement du Compte et du Service.</p>
+    <h2 id="article-5-paiement-et-stripe">Article 5 — Paiement et Stripe</h2>
+    <p>MyFlashCard utilise Stripe pour permettre et sécuriser les paiements.</p>
+    <p>Lors de l&#x27;utilisation des fonctionnalités de paiement, Stripe peut utiliser des cookies ou technologies similaires nécessaires notamment :</p>
+    <ul><li>au fonctionnement du processus de paiement</li><li>à la sécurisation des transactions</li><li>à l&#x27;authentification lorsque celle-ci est nécessaire</li><li>à la prévention et à la détection de la fraude</li></ul>
+    <p>La nature exacte des traceurs utilisés peut varier selon les fonctionnalités Stripe effectivement sollicitées lors du paiement.</p>
+    <p>Stripe traite également certaines informations dans le cadre de ses propres obligations et de la fourniture de ses services.</p>
+    <p>MyFlashCard ne conserve pas directement les données complètes de carte bancaire utilisées pour réaliser le paiement.</p>
+    <h2 id="article-6-hebergement-et-github-pages">Article 6 — Hébergement et GitHub Pages</h2>
+    <p>Le Site MyFlashCard est actuellement mis à disposition au moyen de GitHub Pages.</p>
+    <p>L&#x27;accès au Site peut entraîner le traitement de certaines informations techniques par GitHub, notamment dans le cadre du fonctionnement et de la sécurité de son infrastructure.</p>
+    <p>Ces traitements techniques ne constituent pas, à eux seuls, l&#x27;utilisation par MyFlashCard d&#x27;un dispositif de suivi publicitaire de ses Utilisateurs.</p>
+    <p>Les informations relatives au traitement des données techniques sont également précisées dans la Politique de confidentialité de MyFlashCard.</p>
+    <h2 id="article-7-mesure-d-audience-et-publicite">Article 7 — Mesure d&#x27;audience et publicité</h2>
+    <p>À la date de la présente Politique, MyFlashCard n&#x27;utilise pas sur myflashcard.fr :</p>
+    <ul><li>Google Analytics</li><li>Meta Pixel</li><li>TikTok Pixel</li><li>de traceur publicitaire destiné à suivre les Utilisateurs à des fins de publicité personnalisée</li><li>d&#x27;autre outil d&#x27;analyse comportementale déclaré comme tel</li></ul>
+    <p>Le fait que MyFlashCard dispose de comptes sur Instagram ou TikTok ne signifie pas, à lui seul, que les traceurs de ces plateformes sont installés sur myflashcard.fr.</p>
+    <p>Cette situation pourra évoluer si MyFlashCard décide ultérieurement d&#x27;utiliser de nouveaux outils.</p>
+    <h2 id="article-8-traceurs-soumis-au-consentement">Article 8 — Traceurs soumis au consentement</h2>
+    <p>Lorsque MyFlashCard souhaite utiliser un traceur nécessitant légalement le consentement préalable de l&#x27;Utilisateur, ce traceur ne doit pas être activé avant que l&#x27;Utilisateur ait exprimé son choix.</p>
+    <p>Lorsque cela est nécessaire, MyFlashCard met en place un dispositif permettant notamment :</p>
+    <ul><li>d&#x27;informer l&#x27;Utilisateur des finalités concernées</li><li>d&#x27;accepter les traceurs concernés</li><li>de les refuser aussi facilement que de les accepter</li><li>de modifier ou retirer ultérieurement son choix</li></ul>
+    <p>Le refus des traceurs non nécessaires ne doit pas empêcher l&#x27;accès aux fonctionnalités du Site qui ne nécessitent pas ces traceurs.</p>
+    <p>MyFlashCard adapte son dispositif de gestion des traceurs lorsqu&#x27;une évolution du Site ou l&#x27;ajout d&#x27;un nouveau service rend le recueil du consentement nécessaire.</p>
+    <h2 id="article-9-reseaux-sociaux">Article 9 — Réseaux sociaux</h2>
+    <p>MyFlashCard dispose notamment de comptes sur Instagram et TikTok.</p>
+    <p>Lorsque l&#x27;Utilisateur quitte myflashcard.fr pour accéder directement à l&#x27;une de ces plateformes, les cookies et autres traceurs utilisés sur la plateforme concernée relèvent de son propre environnement.</p>
+    <p>Les interactions réalisées directement sur Instagram ou TikTok sont soumises aux paramètres et politiques applicables à ces services.</p>
+    <p>Si MyFlashCard intègre ultérieurement directement sur son Site un composant, contenu ou bouton provenant d&#x27;un réseau social susceptible de déposer ou lire des traceurs soumis au consentement, celui-ci sera géré conformément aux règles applicables.</p>
+    <h2 id="article-10-duree-des-traceurs">Article 10 — Durée des traceurs</h2>
+    <p>La durée de conservation des cookies, informations de session et autres traceurs dépend de leur fonction et du service technique concerné.</p>
+    <p>Les traceurs strictement nécessaires ne doivent être conservés que pendant la durée nécessaire à leur finalité.</p>
+    <p>Certains éléments d&#x27;authentification peuvent notamment être renouvelés ou supprimés lors de l&#x27;expiration de la session, de la déconnexion ou selon les paramètres techniques du Service.</p>
+    <p>Les durées applicables aux technologies exploitées directement par des prestataires peuvent dépendre de leurs configurations et politiques respectives.</p>
+    <p>Lorsqu&#x27;un traceur soumis au consentement est utilisé, MyFlashCard applique les durées et règles de conservation du choix prévues par la réglementation applicable.</p>
+    <h2 id="article-11-gestion-des-traceurs">Article 11 — Gestion des traceurs</h2>
+    <p>Les traceurs strictement nécessaires au fonctionnement d&#x27;un service demandé ne peuvent pas toujours être désactivés sans affecter le fonctionnement de ce service.</p>
+    <p>L&#x27;Utilisateur peut également utiliser les fonctionnalités de son navigateur pour consulter, bloquer ou supprimer certaines informations enregistrées sur son terminal.</p>
+    <p>La suppression de données nécessaires à l&#x27;authentification peut notamment entraîner la déconnexion du Compte.</p>
+    <p>Si MyFlashCard utilise à l&#x27;avenir des traceurs soumis au consentement, une fonctionnalité permettant de gérer les choix concernés sera mise à disposition directement sur le Site lorsque cela est requis.</p>
+    <h2 id="article-12-evolution-de-la-politique">Article 12 — Évolution de la Politique</h2>
+    <p class="block">La présente Politique peut être modifiée notamment en cas :</p>
+    <ul><li>d&#x27;ajout ou de suppression d&#x27;un outil technique</li><li>d&#x27;évolution du système d&#x27;authentification</li><li>de changement du système de paiement</li><li>d&#x27;ajout d&#x27;un outil de mesure d&#x27;audience</li><li>d&#x27;ajout d&#x27;un dispositif publicitaire</li><li>d&#x27;intégration de fonctionnalités provenant de réseaux sociaux</li><li>d&#x27;évolution de la réglementation applicable</li></ul>
+    <p>La version en vigueur est accessible sur le Site.</p>
+    <p>Dernière mise à jour : 13 septembre 2026.</p>
+  </article>
+</main>
+
+<nav class="docs" aria-label="Documents légaux">
+  <p>Les autres documents</p>
+  <div>
+        <a href="cgu.html">CGU</a>
+        <a href="cgv.html">CGV</a>
+        <a href="confidentialite.html">Confidentialité</a>
+        <span aria-current="page">Cookies</span>
+        <a href="mentions-legales.html">Mentions légales</a>
+  </div>
+</nav>
+
+<footer class="legal">
+  <div>MFC SAS · 4 rue Jean Moulin, 38640 Claix · <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></div>
+</footer>
+</body>
+</html>

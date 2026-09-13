@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Conditions Générales d&#x27;Utilisation — MyFlashcard</title>
+<meta name="description" content="Conditions Générales d&#x27;Utilisation de MyFlashcard, édité par MFC SAS."/>
+<meta name="robots" content="index, follow"/>
+<style>
+/* Les couleurs, la typographie et les points de rupture sont ceux de
+   l'application : une page légale ne doit pas donner l'impression d'avoir
+   quitté MyFlashcard. */
+:root {
+  --bg:#f5f3ee; --surface:#ffffff; --border:#d0ccc4; --line:#e8e5e0;
+  --text:#1a1917; --textMed:#4e4a46; --textLt:#7a7672;
+  --accent:#2c4a7c; --accentBg:#eef3fb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c1b22; --surface:#26252e; --border:#3f3d4b; --line:#34323e;
+    --text:#f4f3f7; --textMed:#b9b7c6; --textLt:#8a8798;
+    --accent:#8ab4f8; --accentBg:#1e2a3f;
+    color-scheme: dark;
+  }
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:16px; line-height:1.75;
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+
+/* Barre supérieure : le retour au site est la seule action, elle reste
+   atteignable au pouce sur mobile. */
+header.bar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10;
+}
+header.bar > div {
+  max-width:780px; margin:0 auto; padding:14px 24px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.brand { font-family:Georgia,'Times New Roman',serif; font-size:19px; color:var(--text); text-decoration:none; }
+.back { font-size:13.5px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+.back:hover, .back:focus-visible { text-decoration:underline; }
+
+main { max-width:780px; margin:0 auto; padding:44px 24px 8px; }
+h1 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:clamp(26px,5vw,34px); line-height:1.25; letter-spacing:-.4px;
+  margin-bottom:10px;
+}
+.version { font-size:13.5px; color:var(--textLt); margin-bottom:38px; }
+
+article { max-width:66ch; }
+h2 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:21px; line-height:1.35; color:var(--text);
+  margin:44px 0 14px; padding-top:22px; border-top:1px solid var(--line);
+  scroll-margin-top:76px;
+}
+h2:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+h3 { font-size:15.5px; font-weight:600; margin:26px 0 8px; color:var(--text); }
+p { margin-bottom:15px; color:var(--textMed); }
+p.block { color:var(--text); line-height:1.6; margin:4px 0 18px; }
+ul, ol { margin:0 0 16px 22px; color:var(--textMed); }
+li { margin-bottom:7px; }
+a { color:var(--accent); }
+strong { color:var(--text); font-weight:600; }
+
+/* Les mentions « [À COMPLÉTER] » sont signalées visuellement : elles doivent
+   sauter aux yeux tant qu'elles n'ont pas été renseignées. */
+.todo {
+  background:var(--accentBg); color:var(--accent);
+  padding:1px 7px; border-radius:4px; font-size:.92em; font-weight:600;
+  white-space:nowrap;
+}
+
+nav.docs {
+  max-width:780px; margin:0 auto; padding:34px 24px 56px;
+  border-top:1px solid var(--line);
+}
+nav.docs p { font-size:13px; color:var(--textLt); margin-bottom:12px; }
+nav.docs div { display:flex; flex-wrap:wrap; gap:8px; }
+nav.docs a, nav.docs span {
+  font-size:13.5px; padding:7px 14px; border-radius:7px;
+  border:1.5px solid var(--border); text-decoration:none; color:var(--textMed);
+}
+nav.docs a:hover, nav.docs a:focus-visible { border-color:var(--accent); color:var(--accent); }
+nav.docs span { border-color:var(--accent); background:var(--accentBg); color:var(--accent); font-weight:600; }
+
+footer.legal {
+  border-top:1px solid var(--line); background:var(--surface);
+}
+footer.legal div {
+  max-width:780px; margin:0 auto; padding:22px 24px 30px;
+  font-size:12.5px; color:var(--textLt);
+}
+
+a:focus-visible, span:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+
+@media (max-width:640px) {
+  header.bar > div { padding:12px 16px; }
+  main { padding:30px 16px 8px; }
+  nav.docs { padding:28px 16px 44px; }
+  footer.legal div { padding:20px 16px 26px; }
+  body { font-size:15.5px; }
+}
+
+@media print {
+  header.bar, nav.docs { display:none; }
+  body { background:#fff; color:#000; font-size:11pt; }
+  h2 { page-break-after:avoid; }
+  main { padding:0; max-width:none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div>
+    <a class="brand" href="/">MyFlashcard</a>
+    <a class="back" href="/">Retour au site</a>
+  </div>
+</header>
+
+<main>
+  <h1>CONDITIONS GÉNÉRALES D&#x27;UTILISATION DE MYFLASHCARD</h1>
+  <p class="version">Version en vigueur au 13 septembre 2026</p>
+  <article>
+    <h2 id="article-1-objet">Article 1 — Objet</h2>
+    <p>Les présentes Conditions Générales d&#x27;Utilisation (ci-après les « CGU ») ont pour objet de définir les conditions d&#x27;accès et d&#x27;utilisation du site myflashcard.fr (ci-après le « Site ») et des services proposés sous la marque MyFlashCard.</p>
+    <p>MyFlashCard est une plateforme numérique destinée à accompagner les étudiants dans leur apprentissage et leurs révisions, notamment au moyen de flashcards, cours, ressources pédagogiques, outils de suivi de progression et fonctionnalités d&#x27;échange entre Utilisateurs.</p>
+    <p>Cette description est générale et les Services proposés par MyFlashCard sont susceptibles d&#x27;évoluer dans les conditions prévues par les présentes CGU.</p>
+    <p>Le Site est édité par MFC SAS, société par actions simplifiée au capital de 1 500 euros, dont le siège social est situé 4 rue Jean Moulin, 38640 Claix, immatriculée au Registre du commerce et des sociétés sous le numéro <span class="todo">[SIREN/RCS À COMPLÉTER]</span>.</p>
+    <p class="block">MyFlashCard peut être contactée :</p>
+    <ul><li>par courrier : MFC SAS, 4 rue Jean Moulin, 38640 Claix</li><li>par courrier électronique : <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></li><li>par téléphone : 07 68 49 87 04 ou 07 66 11 91 11</li></ul>
+    <p>Les présentes CGU régissent l&#x27;utilisation du Site et de ses fonctionnalités, qu&#x27;elles soient gratuites ou accessibles dans le cadre d&#x27;une offre payante.</p>
+    <p>Les conditions relatives à l&#x27;achat des offres payantes, notamment leur prix, leur durée, leur paiement, le droit de rétractation et les garanties légales applicables, sont définies dans les Conditions Générales de Vente de MyFlashCard.</p>
+    <h2 id="article-2-acceptation-des-cgu">Article 2 — Acceptation des CGU</h2>
+    <p>La création d&#x27;un Compte MyFlashCard est subordonnée à la prise de connaissance et à l&#x27;acceptation des présentes CGU.</p>
+    <p>Lors de son inscription, l&#x27;Utilisateur doit accepter expressément les CGU au moyen du dispositif prévu à cet effet.</p>
+    <p>L&#x27;acceptation des CGU ne peut résulter d&#x27;une case précochée.</p>
+    <p>MyFlashCard peut conserver les éléments permettant d&#x27;établir l&#x27;acceptation des CGU, notamment leur version et la date de leur acceptation.</p>
+    <p>Les CGU applicables sont celles en vigueur au moment de leur acceptation, sous réserve des modifications ultérieures réalisées conformément à l&#x27;article 19.</p>
+    <h2 id="article-3-definitions">Article 3 — Définitions</h2>
+    <p class="block">Pour l&#x27;application des présentes CGU :</p>
+    <p>« MyFlashCard » désigne les services proposés sous la marque MyFlashCard et, selon le contexte, leur éditeur MFC SAS.</p>
+    <p>« Site » désigne le site myflashcard.fr et les fonctionnalités qui y sont proposées.</p>
+    <p>« Utilisateur » désigne toute personne physique utilisant le Site.</p>
+    <p>« Compte » désigne l&#x27;espace personnel créé par un Utilisateur afin d&#x27;accéder aux fonctionnalités de MyFlashCard.</p>
+    <p>« Services » désigne l&#x27;ensemble des fonctionnalités gratuites ou payantes proposées par MyFlashCard.</p>
+    <p>« Contenus MyFlashCard » désigne notamment les flashcards, cours, PDF, textes, questions, réponses, exercices, illustrations, schémas, éléments graphiques, photographies, vidéos et autres ressources pédagogiques proposées sur le Site.</p>
+    <p>« Contenus Utilisateur » désigne les messages, questions, réponses et autres contenus publiés ou transmis par un Utilisateur au moyen des fonctionnalités interactives du Site, notamment le forum.</p>
+    <h2 id="article-4-acces-au-site-et-aux-services">Article 4 — Accès au Site et aux Services</h2>
+    <p>L&#x27;accès à certaines fonctionnalités de MyFlashCard nécessite la création d&#x27;un Compte.</p>
+    <p>Certaines ressources peuvent être accessibles gratuitement, tandis que d&#x27;autres sont réservées aux Utilisateurs disposant de l&#x27;offre correspondante.</p>
+    <p>L&#x27;accès gratuit à une ressource ne confère aucun droit de propriété intellectuelle sur celle-ci et ne signifie pas qu&#x27;elle peut être librement reproduite, transmise ou redistribuée.</p>
+    <p>L&#x27;Utilisateur doit disposer d&#x27;un appareil, d&#x27;une connexion Internet et d&#x27;un environnement technique compatibles avec le Site.</p>
+    <p>Les frais relatifs à l&#x27;équipement, à la connexion Internet ou aux télécommunications nécessaires à l&#x27;utilisation de MyFlashCard restent à la charge de l&#x27;Utilisateur.</p>
+    <h2 id="article-5-creation-et-gestion-du-compte">Article 5 — Création et gestion du Compte</h2>
+    <p>La création d&#x27;un Compte nécessite la communication des informations demandées lors de l&#x27;inscription.</p>
+    <p>L&#x27;Utilisateur s&#x27;engage à fournir des informations exactes et à ne pas usurper l&#x27;identité d&#x27;un tiers.</p>
+    <p>L&#x27;Utilisateur peut modifier son pseudonyme au moyen des fonctionnalités proposées sur le Site.</p>
+    <p>L&#x27;adresse électronique associée au Compte ne peut actuellement pas être directement modifiée par l&#x27;Utilisateur. En cas de difficulté relative à cette adresse ou à l&#x27;accès au Compte, l&#x27;Utilisateur peut contacter <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a>.</p>
+    <p>L&#x27;Utilisateur peut supprimer lui-même son Compte au moyen de la fonctionnalité prévue à cet effet.</p>
+    <p>Lorsqu&#x27;un Utilisateur mineur utilise MyFlashCard, l&#x27;autorisation de son représentant légal doit être obtenue lorsque celle-ci est requise par la réglementation applicable.</p>
+    <h2 id="article-6-caractere-personnel-du-compte-et-securite">Article 6 — Caractère personnel du Compte et sécurité</h2>
+    <p>Chaque Compte MyFlashCard est strictement personnel et individuel.</p>
+    <p>Un même Utilisateur peut accéder à son Compte depuis plusieurs appareils, notamment un ordinateur, une tablette ou un téléphone.</p>
+    <p>L&#x27;utilisation de plusieurs appareils par une même personne ne constitue pas un partage de Compte.</p>
+    <p>En revanche, l&#x27;Utilisateur ne peut permettre à une autre personne d&#x27;utiliser son Compte ou les accès qui lui sont réservés.</p>
+    <p class="block">Il est notamment interdit :</p>
+    <ul><li>de communiquer volontairement ses identifiants ou moyens d&#x27;authentification à un tiers afin de lui permettre d&#x27;utiliser le Compte</li><li>de partager un Compte entre plusieurs personnes</li><li>de mettre un Compte à disposition d&#x27;un groupe, d&#x27;une promotion ou d&#x27;une organisation</li><li>de vendre, louer, céder ou prêter l&#x27;accès à un Compte</li><li>d&#x27;utiliser sans autorisation le Compte ou les identifiants d&#x27;un autre Utilisateur</li></ul>
+    <p>L&#x27;Utilisateur doit prendre les précautions raisonnables nécessaires à la confidentialité et à la sécurité de ses moyens d&#x27;authentification.</p>
+    <p>En cas de suspicion d&#x27;accès non autorisé, l&#x27;Utilisateur est invité à sécuriser ses accès et à contacter MyFlashCard.</p>
+    <h2 id="article-7-utilisation-autorisee-des-services">Article 7 — Utilisation autorisée des Services</h2>
+    <p>MyFlashCard accorde à l&#x27;Utilisateur un droit personnel, limité, non exclusif, non cessible et non transférable d&#x27;accès et d&#x27;utilisation des Services et Contenus MyFlashCard auxquels il est autorisé à accéder.</p>
+    <p>Cette utilisation est réservée aux besoins personnels et non commerciaux de l&#x27;Utilisateur.</p>
+    <p>L&#x27;Utilisateur s&#x27;engage à utiliser MyFlashCard conformément aux présentes CGU, à la législation applicable et aux droits des tiers.</p>
+    <h2 id="article-8-utilisations-interdites">Article 8 — Utilisations interdites</h2>
+    <p class="block">Il est notamment interdit :</p>
+    <ul><li>de porter atteinte ou de tenter de porter atteinte au fonctionnement, à la disponibilité, à l&#x27;intégrité ou à la sécurité du Site</li><li>d&#x27;accéder ou de tenter d&#x27;accéder sans autorisation à un Compte, une base de données, un serveur ou une fonctionnalité</li><li>de contourner une mesure de sécurité, de contrôle d&#x27;accès ou de protection technique</li><li>d&#x27;introduire un logiciel malveillant, script ou dispositif susceptible d&#x27;altérer le Site</li><li>d&#x27;utiliser un robot, scraper, crawler, script ou autre procédé automatisé non autorisé afin d&#x27;accéder aux Services ou d&#x27;en extraire des informations</li><li>de procéder à une collecte ou extraction massive des Contenus MyFlashCard</li><li>de contourner les dispositifs destinés à empêcher ou limiter la copie des contenus</li><li>de reconstituer de manière systématique ou substantielle une partie des ressources ou bases de données MyFlashCard</li><li>d&#x27;utiliser le Site ou ses contenus à des fins commerciales non autorisées</li><li>d&#x27;utiliser le Site d&#x27;une manière portant atteinte aux droits de MyFlashCard, des autres Utilisateurs ou de tiers</li></ul>
+    <h2 id="article-9-propriete-intellectuelle">Article 9 — Propriété intellectuelle</h2>
+    <p>Le Site et les Contenus MyFlashCard dont MFC SAS détient les droits sont protégés par les dispositions françaises, européennes et internationales applicables en matière de propriété intellectuelle.</p>
+    <p>Sont notamment concernés les flashcards, cours, PDF, textes, questions, réponses, exercices, méthodes, illustrations, schémas, photographies, vidéos, éléments graphiques, interfaces, logiciels, bases de données, logos, marques et signes distinctifs.</p>
+    <p>L&#x27;accès à un contenu, qu&#x27;il soit gratuit ou payant, n&#x27;entraîne aucun transfert de droits de propriété intellectuelle au profit de l&#x27;Utilisateur.</p>
+    <p>L&#x27;Utilisateur bénéficie uniquement d&#x27;un droit d&#x27;utilisation personnel des contenus auxquels il est autorisé à accéder.</p>
+    <p>Sauf autorisation préalable et écrite de MyFlashCard ou exception prévue par la loi, il est notamment interdit :</p>
+    <ul><li>de reproduire ou redistribuer les Contenus MyFlashCard à des tiers</li><li>de transmettre à un tiers un PDF, un ensemble de flashcards, un cours ou une autre ressource réservée aux Utilisateurs</li><li>de publier les Contenus MyFlashCard sur un site Internet, réseau social, forum, groupe de discussion, espace de stockage partagé ou toute autre plateforme</li><li>d&#x27;importer ou redistribuer substantiellement les contenus sur une autre plateforme de révision ou de flashcards</li><li>de vendre, louer ou exploiter commercialement les contenus</li><li>d&#x27;extraire ou réutiliser une partie substantielle d&#x27;une base de données MyFlashCard</li><li>de reproduire systématiquement ou massivement les contenus par captures d&#x27;écran, photographies, enregistrements ou tout autre procédé</li><li>de contourner les mesures techniques destinées à limiter la copie, l&#x27;extraction ou la redistribution</li><li>de supprimer ou modifier une mention relative à MyFlashCard, à l&#x27;origine d&#x27;un contenu ou à ses droits</li></ul>
+    <p>Une capture d&#x27;écran ponctuelle réalisée pour les besoins strictement personnels de l&#x27;Utilisateur ne lui confère aucun droit de diffusion, de redistribution ou d&#x27;exploitation.</p>
+    <p>Ces règles s&#x27;appliquent également aux ressources accessibles gratuitement aux titulaires d&#x27;un Compte.</p>
+    <p>La gratuité d&#x27;une ressource ne signifie pas qu&#x27;elle est libre de droits ou librement redistribuable.</p>
+    <h2 id="article-10-forum-et-contenus-utilisateur">Article 10 — Forum et Contenus Utilisateur</h2>
+    <p>MyFlashCard met à disposition des Utilisateurs un forum permettant notamment de publier des messages, questions et réponses.</p>
+    <p>Les Contenus Utilisateur sont publiés sous la responsabilité de leurs auteurs.</p>
+    <p>MyFlashCard n&#x27;en garantit pas l&#x27;exactitude, la pertinence ou la fiabilité. Les réponses, conseils et échanges publiés par les Utilisateurs sur le forum ne constituent pas des contenus pédagogiques officiels de MyFlashCard et doivent être distingués des ressources pédagogiques éditées directement par MyFlashCard.</p>
+    <p>L&#x27;Utilisateur demeure responsable des Contenus Utilisateur qu&#x27;il publie.</p>
+    <p class="block">Il s&#x27;engage à ne pas publier de contenu notamment :</p>
+    <ul><li>manifestement illicite</li><li>injurieux, diffamatoire, menaçant ou constitutif de harcèlement</li><li>discriminatoire ou incitant à la haine ou à la violence</li><li>portant atteinte à la vie privée, à l&#x27;image ou aux données personnelles d&#x27;un tiers</li><li>portant atteinte aux droits de propriété intellectuelle de MyFlashCard ou d&#x27;un tiers</li><li>contenant un logiciel malveillant, lien frauduleux ou procédé susceptible de compromettre la sécurité</li><li>destiné à organiser la copie, l&#x27;extraction, le partage ou la redistribution non autorisée de Contenus MyFlashCard</li><li>constituant du spam ou une utilisation publicitaire ou commerciale non autorisée</li><li>contraire à la réglementation applicable</li></ul>
+    <p>L&#x27;Utilisateur est invité à ne pas publier d&#x27;informations personnelles sensibles, confidentielles ou inutilement identifiantes dans les espaces accessibles aux autres Utilisateurs.</p>
+    <h3>Licence nécessaire au fonctionnement du forum</h3>
+    <p>L&#x27;Utilisateur reste titulaire des droits dont il dispose sur ses Contenus Utilisateur.</p>
+    <p>Afin de permettre le fonctionnement technique du forum, l&#x27;Utilisateur autorise MyFlashCard, à titre non exclusif et gratuit, à héberger, stocker, reproduire techniquement et afficher les Contenus Utilisateur qu&#x27;il publie, dans la seule mesure nécessaire au fonctionnement, à la présentation, à la sécurisation et à la modération du forum.</p>
+    <p>Cette autorisation ne confère pas à MyFlashCard un droit général d&#x27;exploitation commerciale indépendante des Contenus Utilisateur.</p>
+    <h2 id="article-11-signalement-et-moderation-du-forum">Article 11 — Signalement et modération du forum</h2>
+    <p>Les Utilisateurs peuvent signaler un message qu&#x27;ils estiment contraire aux présentes CGU ou à la réglementation applicable au moyen de la fonctionnalité de signalement proposée sur le Site ou, le cas échéant, en contactant <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a>.</p>
+    <p>Un signalement n&#x27;entraîne pas automatiquement la suppression du contenu concerné.</p>
+    <p>MyFlashCard peut examiner le contenu signalé et prendre une mesure adaptée aux circonstances.</p>
+    <p>Lorsque cela est nécessaire, MyFlashCard peut notamment masquer ou supprimer un message contrevenant aux présentes CGU ou à la réglementation applicable.</p>
+    <p>MyFlashCard peut également prendre les mesures prévues à l&#x27;article 12 à l&#x27;encontre du Compte concerné.</p>
+    <p>L&#x27;utilisation abusive ou manifestement détournée du système de signalement peut également constituer une violation des présentes CGU.</p>
+    <h2 id="article-12-avertissement-suspension-et-fermeture-d-un-compte">Article 12 — Avertissement, suspension et fermeture d&#x27;un Compte</h2>
+    <p>En cas de violation des présentes CGU, MyFlashCard peut prendre une mesure proportionnée à la nature, à la gravité et, le cas échéant, à la répétition du manquement.</p>
+    <p class="block">Selon les circonstances, cette mesure peut notamment consister en :</p>
+    <ul><li>un avertissement</li><li>le masquage ou la suppression d&#x27;un Contenu Utilisateur</li><li>une restriction temporaire de certaines fonctionnalités, notamment du forum</li><li>une suspension temporaire du Compte</li><li>la fermeture définitive du Compte en cas de manquement grave ou répété</li></ul>
+    <p>Lorsque la nature du manquement le permet, MyFlashCard peut adresser préalablement un avertissement à l&#x27;Utilisateur.</p>
+    <p>Une suspension immédiate peut toutefois intervenir lorsque cela apparaît nécessaire afin de protéger MyFlashCard, les autres Utilisateurs, des tiers ou la sécurité du Site.</p>
+    <p class="block">Peuvent notamment constituer des manquements graves :</p>
+    <ul><li>la mise à disposition volontaire du Compte auprès de plusieurs personnes</li><li>la revente, location ou commercialisation d&#x27;un accès MyFlashCard</li><li>le partage organisé d&#x27;un Compte</li><li>la transmission massive ou organisée de Contenus MyFlashCard</li><li>l&#x27;extraction automatisée ou massive de flashcards, cours, PDF ou autres ressources</li><li>le contournement des mesures techniques de protection</li><li>une tentative d&#x27;intrusion ou une atteinte à la sécurité</li><li>une fraude</li><li>des menaces ou un harcèlement grave</li><li>la publication répétée de contenus manifestement illicites</li></ul>
+    <p>Lorsque cela est raisonnablement possible et approprié, l&#x27;Utilisateur est informé de la mesure prise et de son motif.</p>
+    <p>L&#x27;Utilisateur estimant qu&#x27;une mesure a été prise à tort peut contacter <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a> afin de demander un réexamen de sa situation.</p>
+    <p>Les mesures prises au titre du présent article ne peuvent avoir pour objet ou pour effet de priver l&#x27;Utilisateur des droits impératifs dont il bénéficie.</p>
+    <h2 id="article-13-suppression-volontaire-du-compte">Article 13 — Suppression volontaire du Compte</h2>
+    <p>L&#x27;Utilisateur peut supprimer définitivement son Compte au moyen de la fonctionnalité proposée sur le Site.</p>
+    <p>Avant la confirmation de cette opération, l&#x27;Utilisateur est clairement informé de son caractère irréversible et de ses principales conséquences.</p>
+    <p>La suppression du Compte entraîne notamment la perte de l&#x27;accès au Compte et la suppression, sous réserve des obligations légales de conservation et des modalités précisées dans la Politique de confidentialité, des éléments personnels associés au Compte, notamment :</p>
+    <ul><li>les flashcards personnelles de l&#x27;Utilisateur</li><li>sa progression de révision</li><li>ses points</li><li>son classement</li><li>les autres paramètres et données personnelles concernés</li></ul>
+    <h3>Conséquences sur les achats</h3>
+    <p>La suppression volontaire du Compte entraîne également la perte de l&#x27;accès aux contenus payants précédemment achetés et associés à ce Compte.</p>
+    <p>La suppression volontaire du Compte ne constitue pas une demande de remboursement et n&#x27;entraîne pas, à elle seule, le remboursement des sommes précédemment versées.</p>
+    <p>Lorsqu&#x27;il souhaite exercer un droit de rétractation dont il bénéficie légalement, l&#x27;Utilisateur doit utiliser la procédure prévue par les Conditions Générales de Vente.</p>
+    <p>La suppression du Compte est distincte de l&#x27;exercice du droit de rétractation et ne prive pas l&#x27;Utilisateur des droits impératifs dont il bénéficie en application de la loi.</p>
+    <h3>Messages publiés sur le forum</h3>
+    <p>La suppression du Compte n&#x27;entraîne pas nécessairement la suppression des messages précédemment publiés sur le forum lorsque leur conservation est nécessaire à la cohérence des discussions.</p>
+    <p>Dans ce cas, les messages concernés peuvent être conservés en étant dissociés du Compte supprimé et présentés sous la mention « Utilisateur supprimé », conformément aux modalités précisées dans la Politique de confidentialité.</p>
+    <p>Les données que MyFlashCard est tenue ou autorisée à conserver après la suppression du Compte sont traitées conformément à la réglementation applicable et à la Politique de confidentialité.</p>
+    <h2 id="article-14-disponibilite-et-maintenance">Article 14 — Disponibilité et maintenance</h2>
+    <p>MyFlashCard met en œuvre les moyens raisonnables nécessaires afin d&#x27;assurer le fonctionnement et l&#x27;accessibilité du Site.</p>
+    <p>Le Site peut connaître des interruptions temporaires, notamment en raison d&#x27;une maintenance, d&#x27;une mise à jour, d&#x27;un incident technique ou d&#x27;un événement indépendant de MyFlashCard.</p>
+    <p>Lorsque cela est raisonnablement possible, MyFlashCard peut informer les Utilisateurs des opérations de maintenance susceptibles d&#x27;entraîner une interruption significative.</p>
+    <p>MyFlashCard ne saurait être tenue responsable d&#x27;un dysfonctionnement exclusivement imputable au réseau Internet, aux équipements de l&#x27;Utilisateur ou à un événement extérieur échappant raisonnablement à son contrôle, sans préjudice des droits impératifs de l&#x27;Utilisateur.</p>
+    <h2 id="article-15-evolution-des-services">Article 15 — Évolution des Services</h2>
+    <p>MyFlashCard peut faire évoluer l&#x27;interface, les fonctionnalités et les caractéristiques techniques du Site afin notamment de les améliorer, les sécuriser, corriger des erreurs ou les adapter aux évolutions techniques, pédagogiques ou réglementaires.</p>
+    <p>Lorsqu&#x27;un Utilisateur bénéficie d&#x27;un Service payant, ces évolutions sont effectuées dans le respect des engagements contractuels de MyFlashCard et des dispositions légales applicables aux contenus et services numériques.</p>
+    <h2 id="article-16-contenus-pedagogiques-et-responsabilite">Article 16 — Contenus pédagogiques et responsabilité</h2>
+    <p>MyFlashCard propose des ressources destinées à accompagner les étudiants dans leur apprentissage et leurs révisions.</p>
+    <p>MyFlashCard apporte un soin raisonnable à l&#x27;élaboration et à la mise à jour de ses contenus.</p>
+    <p>Les Contenus MyFlashCard constituent néanmoins des outils complémentaires de révision et ne se substituent pas aux enseignements, référentiels, supports, consignes ou informations officiels communiqués par les universités, établissements, enseignants, jurys ou organismes compétents.</p>
+    <p>Malgré le soin apporté à leur élaboration, les contenus peuvent comporter des erreurs, omissions ou informations devenues obsolètes. L&#x27;Utilisateur est invité à signaler toute erreur identifiée à <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a>.</p>
+    <p>MyFlashCard ne garantit aucun résultat universitaire particulier, notamment l&#x27;obtention d&#x27;une note, d&#x27;un classement, d&#x27;une admission, d&#x27;un examen, d&#x27;un concours ou le passage dans une année supérieure.</p>
+    <p>L&#x27;Utilisateur demeure responsable de l&#x27;organisation de son travail et de la vérification des informations déterminantes au regard des sources officielles qui lui sont applicables.</p>
+    <p>Aucune stipulation des présentes CGU n&#x27;a pour objet ou pour effet d&#x27;exclure une responsabilité qui ne pourrait légalement être exclue ou de limiter les droits impératifs d&#x27;un consommateur.</p>
+    <h2 id="article-17-liens-et-services-de-tiers">Article 17 — Liens et services de tiers</h2>
+    <p>Le Site peut contenir des liens permettant d&#x27;accéder à des sites, services ou ressources proposés par des tiers.</p>
+    <p>Sauf indication contraire, MyFlashCard n&#x27;exerce pas de contrôle sur les services édités par ces tiers et n&#x27;est pas responsable de leur contenu ou de leur fonctionnement dans les limites prévues par la réglementation applicable.</p>
+    <p>L&#x27;utilisation d&#x27;un service tiers peut être soumise aux propres conditions contractuelles et politiques de confidentialité de son éditeur.</p>
+    <h2 id="article-18-donnees-personnelles-et-cookies">Article 18 — Données personnelles et cookies</h2>
+    <p>Dans le cadre du fonctionnement du Site, MFC SAS est susceptible de traiter des données à caractère personnel concernant les Utilisateurs.</p>
+    <p>Les finalités des traitements, leurs bases juridiques, les catégories de données concernées, leurs destinataires, leurs durées de conservation ainsi que les droits des personnes concernées sont précisés dans la Politique de confidentialité de MyFlashCard.</p>
+    <p>L&#x27;utilisation de cookies et autres traceurs est présentée dans les informations et outils de gestion des cookies disponibles sur le Site.</p>
+    <p>Lorsque le consentement de l&#x27;Utilisateur est légalement requis, celui-ci est recueilli conformément à la réglementation applicable.</p>
+    <h2 id="article-19-modification-des-cgu">Article 19 — Modification des CGU</h2>
+    <p>MyFlashCard peut modifier les présentes CGU afin notamment de tenir compte d&#x27;une évolution du Site, des Services, de la réglementation applicable ou de ses pratiques.</p>
+    <p>La version en vigueur est accessible sur le Site.</p>
+    <p>Lorsqu&#x27;une modification substantielle affecte les droits ou obligations des Utilisateurs, MyFlashCard en informe les Utilisateurs concernés par un moyen approprié.</p>
+    <p>Lorsque la nature de la modification nécessite une nouvelle acceptation, MyFlashCard peut demander à l&#x27;Utilisateur d&#x27;accepter la nouvelle version avant de poursuivre l&#x27;utilisation des fonctionnalités concernées.</p>
+    <p>Les modifications ne peuvent avoir pour objet ou pour effet de modifier rétroactivement les conditions d&#x27;une commande payante déjà conclue en méconnaissance des droits du consommateur.</p>
+    <h2 id="article-20-force-majeure">Article 20 — Force majeure</h2>
+    <p>MyFlashCard ne peut être tenue responsable d&#x27;un manquement à ses obligations résultant d&#x27;un événement présentant les caractéristiques de la force majeure au sens de l&#x27;article 1218 du Code civil.</p>
+    <h2 id="article-21-droit-applicable-et-reglement-des-differends">Article 21 — Droit applicable et règlement des différends</h2>
+    <p>Les présentes CGU sont soumises au droit français.</p>
+    <p>En cas de difficulté relative à l&#x27;utilisation de MyFlashCard, l&#x27;Utilisateur est invité à contacter préalablement MyFlashCard à l&#x27;adresse :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p>afin de rechercher une solution amiable.</p>
+    <p>Lorsqu&#x27;un litige relève d&#x27;une relation de consommation, les dispositions relatives aux réclamations et à la médiation de la consommation figurant dans les Conditions Générales de Vente sont applicables.</p>
+    <p>À défaut de résolution amiable, le litige peut être porté devant les juridictions compétentes conformément aux règles légales applicables.</p>
+    <p>Aucune stipulation des présentes CGU ne prive un consommateur des règles impératives de protection ou de compétence juridictionnelle dont il bénéficie.</p>
+  </article>
+</main>
+
+<nav class="docs" aria-label="Documents légaux">
+  <p>Les autres documents</p>
+  <div>
+        <span aria-current="page">CGU</span>
+        <a href="cgv.html">CGV</a>
+        <a href="confidentialite.html">Confidentialité</a>
+        <a href="cookies.html">Cookies</a>
+        <a href="mentions-legales.html">Mentions légales</a>
+  </div>
+</nav>
+
+<footer class="legal">
+  <div>MFC SAS · 4 rue Jean Moulin, 38640 Claix · <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></div>
+</footer>
+</body>
+</html>

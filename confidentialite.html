@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Politique de confidentialité — MyFlashcard</title>
+<meta name="description" content="Politique de confidentialité de MyFlashcard, édité par MFC SAS."/>
+<meta name="robots" content="index, follow"/>
+<style>
+/* Les couleurs, la typographie et les points de rupture sont ceux de
+   l'application : une page légale ne doit pas donner l'impression d'avoir
+   quitté MyFlashcard. */
+:root {
+  --bg:#f5f3ee; --surface:#ffffff; --border:#d0ccc4; --line:#e8e5e0;
+  --text:#1a1917; --textMed:#4e4a46; --textLt:#7a7672;
+  --accent:#2c4a7c; --accentBg:#eef3fb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c1b22; --surface:#26252e; --border:#3f3d4b; --line:#34323e;
+    --text:#f4f3f7; --textMed:#b9b7c6; --textLt:#8a8798;
+    --accent:#8ab4f8; --accentBg:#1e2a3f;
+    color-scheme: dark;
+  }
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:16px; line-height:1.75;
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+
+/* Barre supérieure : le retour au site est la seule action, elle reste
+   atteignable au pouce sur mobile. */
+header.bar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10;
+}
+header.bar > div {
+  max-width:780px; margin:0 auto; padding:14px 24px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.brand { font-family:Georgia,'Times New Roman',serif; font-size:19px; color:var(--text); text-decoration:none; }
+.back { font-size:13.5px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+.back:hover, .back:focus-visible { text-decoration:underline; }
+
+main { max-width:780px; margin:0 auto; padding:44px 24px 8px; }
+h1 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:clamp(26px,5vw,34px); line-height:1.25; letter-spacing:-.4px;
+  margin-bottom:10px;
+}
+.version { font-size:13.5px; color:var(--textLt); margin-bottom:38px; }
+
+article { max-width:66ch; }
+h2 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:21px; line-height:1.35; color:var(--text);
+  margin:44px 0 14px; padding-top:22px; border-top:1px solid var(--line);
+  scroll-margin-top:76px;
+}
+h2:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+h3 { font-size:15.5px; font-weight:600; margin:26px 0 8px; color:var(--text); }
+p { margin-bottom:15px; color:var(--textMed); }
+p.block { color:var(--text); line-height:1.6; margin:4px 0 18px; }
+ul, ol { margin:0 0 16px 22px; color:var(--textMed); }
+li { margin-bottom:7px; }
+a { color:var(--accent); }
+strong { color:var(--text); font-weight:600; }
+
+/* Les mentions « [À COMPLÉTER] » sont signalées visuellement : elles doivent
+   sauter aux yeux tant qu'elles n'ont pas été renseignées. */
+.todo {
+  background:var(--accentBg); color:var(--accent);
+  padding:1px 7px; border-radius:4px; font-size:.92em; font-weight:600;
+  white-space:nowrap;
+}
+
+nav.docs {
+  max-width:780px; margin:0 auto; padding:34px 24px 56px;
+  border-top:1px solid var(--line);
+}
+nav.docs p { font-size:13px; color:var(--textLt); margin-bottom:12px; }
+nav.docs div { display:flex; flex-wrap:wrap; gap:8px; }
+nav.docs a, nav.docs span {
+  font-size:13.5px; padding:7px 14px; border-radius:7px;
+  border:1.5px solid var(--border); text-decoration:none; color:var(--textMed);
+}
+nav.docs a:hover, nav.docs a:focus-visible { border-color:var(--accent); color:var(--accent); }
+nav.docs span { border-color:var(--accent); background:var(--accentBg); color:var(--accent); font-weight:600; }
+
+footer.legal {
+  border-top:1px solid var(--line); background:var(--surface);
+}
+footer.legal div {
+  max-width:780px; margin:0 auto; padding:22px 24px 30px;
+  font-size:12.5px; color:var(--textLt);
+}
+
+a:focus-visible, span:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+
+@media (max-width:640px) {
+  header.bar > div { padding:12px 16px; }
+  main { padding:30px 16px 8px; }
+  nav.docs { padding:28px 16px 44px; }
+  footer.legal div { padding:20px 16px 26px; }
+  body { font-size:15.5px; }
+}
+
+@media print {
+  header.bar, nav.docs { display:none; }
+  body { background:#fff; color:#000; font-size:11pt; }
+  h2 { page-break-after:avoid; }
+  main { padding:0; max-width:none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div>
+    <a class="brand" href="/">MyFlashcard</a>
+    <a class="back" href="/">Retour au site</a>
+  </div>
+</header>
+
+<main>
+  <h1>POLITIQUE DE CONFIDENTIALITÉ DE MYFLASHCARD</h1>
+  <p class="version">Version en vigueur au 13 septembre 2026</p>
+  <article>
+    <p>La présente Politique de confidentialité explique comment MFC SAS, éditrice de MyFlashCard, collecte et traite les données à caractère personnel des utilisateurs du site myflashcard.fr et, lorsque cela est précisé, des personnes interagissant avec MyFlashCard par l&#x27;intermédiaire de ses comptes officiels sur les réseaux sociaux.</p>
+    <p>MyFlashCard s&#x27;engage à traiter les données personnelles conformément à la réglementation applicable, notamment au Règlement général sur la protection des données (« RGPD ») et à la loi Informatique et Libertés.</p>
+    <p>La présente Politique est distincte des Conditions Générales d&#x27;Utilisation et des Conditions Générales de Vente de MyFlashCard.</p>
+    <h2 id="article-1-responsable-du-traitement">Article 1 — Responsable du traitement</h2>
+    <p>Le responsable des traitements décrits dans la présente Politique est :</p>
+    <p class="block">MFC SAS<br/>Société par actions simplifiée au capital de 1 500 euros<br/>Siège social : 4 rue Jean Moulin, 38640 Claix<br/>SIREN / RCS : <span class="todo">[À COMPLÉTER]</span></p>
+    <p>Pour toute question concernant les données personnelles ou pour exercer un droit :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p class="block">ou par courrier :</p>
+    <p class="block">MFC SAS<br/>4 rue Jean Moulin<br/>38640 Claix</p>
+    <p>MFC SAS n&#x27;a pas désigné, à ce jour, de délégué à la protection des données (« DPO »). Les demandes relatives à la protection des données peuvent être adressées directement au contact indiqué ci-dessus.</p>
+    <h2 id="article-2-principes-appliques-aux-donnees-personnelles">Article 2 — Principes appliqués aux données personnelles</h2>
+    <p>MyFlashCard collecte et traite les données personnelles nécessaires aux finalités décrites dans la présente Politique.</p>
+    <p class="block">MyFlashCard veille notamment :</p>
+    <ul><li>à collecter des données pertinentes et limitées à ce qui est nécessaire</li><li>à utiliser les données pour des finalités déterminées et légitimes</li><li>à ne pas les conserver plus longtemps que nécessaire</li><li>à protéger leur confidentialité et leur sécurité</li><li>à permettre aux personnes concernées d&#x27;exercer leurs droits</li></ul>
+    <p>MyFlashCard ne vend pas les données personnelles de ses Utilisateurs.</p>
+    <p>À la date de la présente Politique, MyFlashCard ne transmet pas les données personnelles de ses Utilisateurs à des partenaires afin que ceux-ci réalisent leur propre prospection commerciale.</p>
+    <h2 id="article-3-creation-et-gestion-du-compte">Article 3 — Création et gestion du Compte</h2>
+    <p>Lors de la création d&#x27;un Compte MyFlashCard, sont notamment collectés :</p>
+    <ul><li>l&#x27;adresse électronique</li><li>le numéro de téléphone</li><li>le pseudonyme</li><li>les données nécessaires à l&#x27;authentification, notamment celles permettant de sécuriser le mot de passe</li></ul>
+    <p class="block">Ces informations sont utilisées notamment pour :</p>
+    <ul><li>créer et administrer le Compte</li><li>identifier et authentifier l&#x27;Utilisateur</li><li>sécuriser l&#x27;accès au Compte</li><li>permettre l&#x27;utilisation des Services</li><li>associer les données de progression et les éventuels achats au bon Compte</li><li>communiquer avec l&#x27;Utilisateur lorsque cela est nécessaire au fonctionnement du Service</li></ul>
+    <p>Le traitement des informations nécessaires à la création et au fonctionnement du Compte repose principalement sur l&#x27;exécution du service demandé par l&#x27;Utilisateur.</p>
+    <p>Les informations indiquées comme obligatoires lors de l&#x27;inscription sont nécessaires à la création et au fonctionnement du Compte. À défaut, MyFlashCard peut ne pas être en mesure de fournir les Services concernés.</p>
+    <h2 id="article-4-donnees-relatives-aux-revisions-et-a-l-utilisation">Article 4 — Données relatives aux révisions et à l&#x27;utilisation de MyFlashCard</h2>
+    <p>Lors de l&#x27;utilisation de MyFlashCard, des données relatives à l&#x27;activité pédagogique de l&#x27;Utilisateur sont susceptibles d&#x27;être enregistrées.</p>
+    <p class="block">Elles peuvent notamment comprendre :</p>
+    <ul><li>la progression de révision</li><li>les flashcards consultées ou travaillées</li><li>les réponses et interactions avec les flashcards</li><li>les flashcards personnelles créées par l&#x27;Utilisateur</li><li>les points obtenus</li><li>les informations nécessaires au classement</li><li>les paramètres et préférences associés aux fonctionnalités pédagogiques</li></ul>
+    <p class="block">Ces informations permettent notamment :</p>
+    <ul><li>d&#x27;enregistrer la progression</li><li>de faire fonctionner les outils de révision</li><li>de retrouver les informations de l&#x27;Utilisateur lors de ses connexions ultérieures</li><li>de permettre le fonctionnement des flashcards personnelles</li><li>de calculer les points et, lorsque l&#x27;Utilisateur le souhaite, sa participation au classement</li></ul>
+    <p>Ces traitements reposent principalement sur l&#x27;exécution du service MyFlashCard demandé par l&#x27;Utilisateur.</p>
+    <h2 id="article-5-classement-et-points">Article 5 — Classement et points</h2>
+    <p>MyFlashCard peut proposer un système facultatif de classement.</p>
+    <p>L&#x27;Utilisateur choisit s&#x27;il souhaite apparaître dans ce classement.</p>
+    <p>Lorsqu&#x27;il y participe, ses points peuvent être visibles par les autres Utilisateurs ayant accès au classement.</p>
+    <p class="block">L&#x27;Utilisateur peut, selon les fonctionnalités proposées :</p>
+    <ul><li>apparaître sous son pseudonyme</li><li>ou choisir un affichage anonyme</li></ul>
+    <p>Lorsque l&#x27;affichage anonyme est choisi, le pseudonyme de l&#x27;Utilisateur n&#x27;est pas présenté aux autres Utilisateurs dans le classement.</p>
+    <p>Les informations nécessaires au calcul des points et au fonctionnement du classement peuvent néanmoins rester techniquement associées au Compte.</p>
+    <h2 id="article-6-forum">Article 6 — Forum</h2>
+    <p>Lorsque l&#x27;Utilisateur utilise le forum MyFlashCard, sont notamment traités :</p>
+    <ul><li>son pseudonyme</li><li>le contenu de ses messages</li><li>la date et l&#x27;heure de publication</li><li>les informations techniques nécessaires au rattachement du message au Compte, au fonctionnement du forum et à sa modération</li></ul>
+    <p class="block">Ces informations permettent notamment :</p>
+    <ul><li>de publier les messages</li><li>d&#x27;organiser les discussions</li><li>de permettre les échanges entre Utilisateurs</li><li>d&#x27;assurer la modération</li><li>de traiter les signalements</li><li>de prévenir et traiter les utilisations abusives</li></ul>
+    <p>Les autres Utilisateurs peuvent voir les informations rendues publiques sur le forum, notamment le pseudonyme et le contenu des messages.</p>
+    <p>L&#x27;Utilisateur est invité à ne pas publier de données sensibles, confidentielles ou inutilement identifiantes.</p>
+    <p>Les règles relatives aux publications, au signalement et à la modération figurent dans les Conditions Générales d&#x27;Utilisation de MyFlashCard.</p>
+    <h2 id="article-7-achats-et-paiements">Article 7 — Achats et paiements</h2>
+    <p>Les paiements sont réalisés au moyen des services de Stripe.</p>
+    <p class="block">MyFlashCard peut notamment conserver :</p>
+    <ul><li>le Compte ou l&#x27;adresse électronique associé à l&#x27;achat</li><li>l&#x27;offre achetée</li><li>le statut du paiement</li><li>la référence ou l&#x27;identifiant de la transaction Stripe</li><li>les informations nécessaires à l&#x27;activation et au suivi de l&#x27;accès acheté</li></ul>
+    <p>MyFlashCard ne conserve pas directement les données complètes de carte bancaire utilisées pour réaliser le paiement.</p>
+    <p>Les données nécessaires au traitement du paiement sont traitées par Stripe dans le cadre de ses services.</p>
+    <p>Les traitements nécessaires à la commande et à la fourniture de l&#x27;offre reposent sur l&#x27;exécution du contrat.</p>
+    <p>Certaines informations relatives aux commandes et transactions peuvent également être conservées lorsque cela est nécessaire au respect d&#x27;une obligation légale, notamment comptable ou fiscale, ou à la constatation, l&#x27;exercice ou la défense de droits.</p>
+    <h2 id="article-8-communications-necessaires-au-service">Article 8 — Communications nécessaires au Service</h2>
+    <p>MyFlashCard peut utiliser l&#x27;adresse électronique ou, lorsque cela est nécessaire et approprié, les coordonnées fournies par l&#x27;Utilisateur afin de lui transmettre des communications relatives notamment :</p>
+    <ul><li>à son Compte</li><li>à la sécurité de son Compte</li><li>au fonctionnement du Service</li><li>à une commande ou un paiement</li><li>à une demande qu&#x27;il a adressée à MyFlashCard</li><li>à une modification importante affectant le Service ou ses conditions</li></ul>
+    <p>Ces communications nécessaires au fonctionnement du Service sont distinctes des communications commerciales.</p>
+    <h2 id="article-9-actualites-et-communications-marketing">Article 9 — Actualités et communications marketing</h2>
+    <p>MyFlashCard peut proposer aux Utilisateurs de recevoir par courrier électronique des informations concernant notamment ses actualités, nouveautés, fonctionnalités et offres.</p>
+    <p>Lorsque le consentement préalable est requis, l&#x27;inscription à ces communications repose sur une action volontaire et distincte de l&#x27;Utilisateur.</p>
+    <p class="block">Une option telle que la suivante peut notamment être proposée :</p>
+    <p>« J&#x27;accepte de recevoir par e-mail les actualités, nouveautés et offres de MyFlashCard. »</p>
+    <p>Cette option est facultative et ne doit pas être précochée.</p>
+    <p>Le refus des communications marketing n&#x27;empêche pas la création ou l&#x27;utilisation normale d&#x27;un Compte MyFlashCard.</p>
+    <p>Lorsque le traitement repose sur le consentement, l&#x27;Utilisateur peut retirer celui-ci à tout moment.</p>
+    <p>Chaque communication commerciale adressée par MyFlashCard comporte, lorsque cela est applicable, un moyen simple permettant de se désabonner ou de s&#x27;opposer à la poursuite de ces communications.</p>
+    <p>Le retrait du consentement ou le désabonnement des communications commerciales n&#x27;empêche pas MyFlashCard d&#x27;envoyer les communications strictement nécessaires au Compte, aux achats ou à la sécurité du Service.</p>
+    <h2 id="article-10-demandes-adressees-a-myflashcard">Article 10 — Demandes adressées à MyFlashCard</h2>
+    <p>Lorsqu&#x27;une personne contacte MyFlashCard, notamment à l&#x27;adresse <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a>, peuvent être traités :</p>
+    <ul><li>son adresse électronique</li><li>son identité ou pseudonyme lorsqu&#x27;elle les communique</li><li>le contenu de sa demande</li><li>les éventuelles pièces ou informations volontairement transmises</li><li>les informations nécessaires au traitement et au suivi de la demande</li></ul>
+    <p>Ces données sont utilisées afin de répondre à la demande et d&#x27;en assurer le suivi.</p>
+    <p>La messagerie électronique utilisée par MyFlashCard repose actuellement sur les services de Google, notamment Gmail.</p>
+    <h2 id="article-11-reseaux-sociaux">Article 11 — Réseaux sociaux</h2>
+    <p>MyFlashCard dispose ou peut disposer de comptes officiels sur des réseaux sociaux, notamment Instagram et TikTok.</p>
+    <p>Lorsqu&#x27;une personne suit un compte MyFlashCard, commente une publication, envoie un message privé ou interagit avec un contenu MyFlashCard sur l&#x27;une de ces plateformes, certaines informations peuvent être accessibles à MyFlashCard selon les fonctionnalités de la plateforme et les paramètres du compte de l&#x27;Utilisateur.</p>
+    <p class="block">Il peut notamment s&#x27;agir :</p>
+    <ul><li>du pseudonyme ou nom du compte utilisé sur le réseau social</li><li>des informations rendues publiques par l&#x27;Utilisateur</li><li>du contenu d&#x27;un commentaire ou message</li><li>des interactions avec les publications MyFlashCard</li></ul>
+    <p>MyFlashCard utilise ces informations pour gérer ses comptes, répondre aux messages et commentaires et interagir avec sa communauté.</p>
+    <p>Les plateformes de réseaux sociaux traitent également des données pour leurs propres finalités conformément à leurs propres politiques de confidentialité.</p>
+    <p>Le simple fait de suivre MyFlashCard sur un réseau social ne signifie pas que les informations du compte social de la personne sont automatiquement ajoutées à son Compte MyFlashCard ou à la base de données du Site.</p>
+    <h2 id="article-12-collecte-directe-et-indirecte-des-donnees">Article 12 — Collecte directe et indirecte des données</h2>
+    <p>Les données utilisées par MyFlashCard sont principalement collectées directement auprès de l&#x27;Utilisateur ou générées lors de son utilisation des Services.</p>
+    <p>Cela concerne notamment les informations renseignées lors de l&#x27;inscription, les données générées lors des révisions, les publications sur le forum, les commandes, les demandes adressées à MyFlashCard et les choix effectués par l&#x27;Utilisateur.</p>
+    <p>MyFlashCard ne collecte actuellement pas de données personnelles concernant ses Utilisateurs auprès de courtiers en données ou de partenaires commerciaux dans le but d&#x27;enrichir leur profil.</p>
+    <p>Certaines informations peuvent néanmoins être accessibles à MyFlashCard lorsqu&#x27;une personne choisit volontairement d&#x27;interagir avec ses comptes sur une plateforme tierce, notamment Instagram ou TikTok, conformément à l&#x27;Article 11.</p>
+    <p>Si MyFlashCard devait à l&#x27;avenir collecter des données personnelles de manière indirecte pour de nouvelles finalités, les personnes concernées seraient informées conformément aux exigences de la réglementation applicable, notamment de la source des données lorsque cette information doit être fournie.</p>
+    <h2 id="article-13-donnees-techniques-et-securite">Article 13 — Données techniques et sécurité</h2>
+    <p>Lors de l&#x27;utilisation du Site, certaines données techniques peuvent être automatiquement traitées par MyFlashCard ou ses prestataires techniques.</p>
+    <p class="block">Selon les services utilisés, il peut notamment s&#x27;agir :</p>
+    <ul><li>de l&#x27;adresse IP</li><li>de la date et de l&#x27;heure d&#x27;une connexion ou d&#x27;une requête</li><li>d&#x27;informations techniques relatives au navigateur ou à l&#x27;appareil</li><li>de journaux techniques nécessaires au fonctionnement, au diagnostic ou à la sécurité du Service</li></ul>
+    <p class="block">Ces informations peuvent notamment servir à :</p>
+    <ul><li>assurer le fonctionnement technique du Site</li><li>sécuriser les Comptes et les Services</li><li>détecter ou prévenir des accès frauduleux</li><li>diagnostiquer des incidents</li><li>protéger l&#x27;infrastructure</li></ul>
+    <p>MyFlashCard n&#x27;utilise actuellement aucun outil d&#x27;analyse d&#x27;audience ou de suivi publicitaire sur son Site destiné à analyser le comportement de navigation des Utilisateurs.</p>
+    <p>L&#x27;utilisation de GitHub Pages, de Supabase ou d&#x27;autres infrastructures nécessaires au Service peut néanmoins entraîner le traitement de certaines données techniques nécessaires à leur fonctionnement et à leur sécurité.</p>
+    <h2 id="article-14-decisions-automatisees-et-profilage">Article 14 — Décisions automatisées et profilage</h2>
+    <p>MyFlashCard peut utiliser des mécanismes automatisés nécessaires au fonctionnement de certaines fonctionnalités, notamment pour enregistrer la progression, calculer des points, organiser les révisions ou faire fonctionner les outils pédagogiques proposés par la plateforme.</p>
+    <p>Toutefois, MyFlashCard ne prend actuellement aucune décision produisant des effets juridiques à l&#x27;égard d&#x27;un Utilisateur ou l&#x27;affectant de manière significative sur le seul fondement d&#x27;un traitement automatisé de ses données personnelles, au sens de l&#x27;article 22 du RGPD.</p>
+    <p>MyFlashCard ne réalise actuellement aucun profilage destiné à prendre une telle décision à l&#x27;égard de l&#x27;Utilisateur.</p>
+    <p>Si une fonctionnalité de cette nature devait être mise en place à l&#x27;avenir, les personnes concernées seraient préalablement informées conformément à la réglementation applicable.</p>
+    <h2 id="article-15-destinataires-et-prestataires">Article 15 — Destinataires et prestataires</h2>
+    <p>Les données sont accessibles uniquement aux personnes et prestataires qui ont besoin d&#x27;y accéder pour les finalités prévues par la présente Politique.</p>
+    <p>Au sein de MFC SAS, les données peuvent notamment être accessibles aux personnes habilitées à administrer et exploiter MyFlashCard, dans la limite de leurs besoins.</p>
+    <p class="block">MyFlashCard utilise actuellement notamment les services suivants :</p>
+    <h3>Supabase</h3>
+    <p>Supabase est notamment utilisé pour l&#x27;authentification, la base de données et le fonctionnement technique des Comptes et fonctionnalités MyFlashCard.</p>
+    <h3>Stripe</h3>
+    <p>Stripe est utilisé pour le traitement des paiements et le suivi des transactions.</p>
+    <h3>GitHub</h3>
+    <p>GitHub est utilisé notamment pour l&#x27;hébergement et la mise à disposition du Site au moyen de GitHub Pages.</p>
+    <h3>Google</h3>
+    <p>Les services de Google, notamment Gmail, sont utilisés pour la messagerie et le traitement des communications adressées à MyFlashCard.</p>
+    <h3>Réseaux sociaux</h3>
+    <p>MyFlashCard utilise notamment Instagram, service proposé par Meta, et TikTok pour sa communication et ses interactions sur les réseaux sociaux.</p>
+    <p>Ces plateformes peuvent traiter des données dans le cadre des interactions réalisées directement sur leurs services.</p>
+    <p>Les données peuvent également être communiquées à une autorité administrative, judiciaire ou autre destinataire lorsque la loi l&#x27;impose ou l&#x27;autorise.</p>
+    <h2 id="article-16-transferts-de-donnees-en-dehors-de-l-espace-econo">Article 16 — Transferts de données en dehors de l&#x27;Espace économique européen</h2>
+    <p>Certains prestataires utilisés par MyFlashCard appartiennent à des groupes internationaux ou peuvent recourir à des infrastructures ou sous-traitants situés en dehors de l&#x27;Espace économique européen.</p>
+    <p>Selon le service utilisé et sa configuration, certains traitements peuvent donc impliquer un transfert international de données.</p>
+    <p>Lorsqu&#x27;un transfert de données personnelles soumis au RGPD est réalisé vers un pays situé en dehors de l&#x27;Espace économique européen, celui-ci doit reposer sur un mécanisme reconnu par la réglementation applicable, tel qu&#x27;une décision d&#x27;adéquation ou des garanties appropriées, notamment les clauses contractuelles types de la Commission européenne lorsque celles-ci sont applicables.</p>
+    <p>MyFlashCard s&#x27;appuie à cet égard sur les mécanismes et garanties applicables aux services utilisés auprès de ses prestataires.</p>
+    <p>Pour obtenir davantage d&#x27;informations sur les garanties applicables à un traitement concernant ses données, l&#x27;Utilisateur peut contacter :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <h2 id="article-17-durees-de-conservation">Article 17 — Durées de conservation</h2>
+    <p>MyFlashCard conserve les données personnelles uniquement pendant la durée nécessaire aux finalités pour lesquelles elles sont utilisées.</p>
+    <h3>Compte actif</h3>
+    <p>Les données nécessaires au Compte, à son authentification et au fonctionnement des Services sont conservées pendant toute la durée de vie du Compte, tant que celui-ci demeure actif ou utilisé.</p>
+    <p class="block">Cela concerne notamment, selon les fonctionnalités utilisées :</p>
+    <ul><li>l&#x27;adresse électronique</li><li>le numéro de téléphone</li><li>le pseudonyme</li><li>les données du Compte</li><li>la progression</li><li>les flashcards personnelles</li><li>les points</li><li>les paramètres liés au classement</li><li>les données nécessaires au fonctionnement des outils de révision</li></ul>
+    <h3>Compte durablement inactif</h3>
+    <p>Lorsqu&#x27;un Compte n&#x27;a fait l&#x27;objet d&#x27;aucune activité pendant cinq (5) années consécutives, MyFlashCard peut procéder à sa suppression ainsi qu&#x27;à la suppression ou à l&#x27;anonymisation des données qui n&#x27;ont plus à être conservées.</p>
+    <p>Lorsque MyFlashCard dispose encore de coordonnées permettant de contacter l&#x27;Utilisateur, elle peut l&#x27;informer préalablement de la suppression envisagée afin de lui permettre, le cas échéant, de conserver son Compte.</p>
+    <p>Une reconnexion ou toute autre activité pertinente du Compte interrompt cette période d&#x27;inactivité.</p>
+    <p>Cette suppression ne concerne pas les informations que MyFlashCard doit ou peut légitimement conserver séparément en application d&#x27;une obligation légale ou pour la constatation, l&#x27;exercice ou la défense de droits.</p>
+    <h3>Suppression volontaire</h3>
+    <p>Lorsque l&#x27;Utilisateur supprime volontairement son Compte, les données qui n&#x27;ont plus à être conservées sont supprimées ou anonymisées conformément à la présente Politique.</p>
+    <p>Les flashcards personnelles, la progression, les points et les informations personnelles associées au classement sont notamment destinés à être supprimés.</p>
+    <h3>Forum</h3>
+    <p>Après la suppression d&#x27;un Compte, les messages nécessaires à la cohérence des discussions peuvent être conservés après dissociation de leur auteur.</p>
+    <p class="block">Ils apparaissent alors sous la mention :</p>
+    <p>« Utilisateur supprimé »</p>
+    <p>et ne sont plus présentés publiquement comme appartenant au Compte supprimé.</p>
+    <h3>Achats et transactions</h3>
+    <p>Les informations qui doivent être conservées afin de satisfaire aux obligations légales, comptables ou fiscales de MFC SAS peuvent être archivées pendant les durées prévues par la réglementation.</p>
+    <p>Les informations nécessaires à la preuve d&#x27;un contrat ou à la constatation, l&#x27;exercice ou la défense d&#x27;un droit peuvent également être conservées pendant les délais légaux applicables.</p>
+    <h3>Correspondances</h3>
+    <p>Les échanges avec MyFlashCard sont conservés pendant la durée nécessaire au traitement de la demande puis, lorsque cela est nécessaire, pendant une durée adaptée à la nature de l&#x27;échange et aux obligations ou délais de prescription applicables.</p>
+    <h3>Consentement marketing</h3>
+    <p>Les informations permettant de démontrer un consentement ou son retrait peuvent être conservées pendant la durée nécessaire afin de respecter les choix de l&#x27;Utilisateur et de démontrer leur prise en compte conformément à la réglementation.</p>
+    <h3>Données techniques</h3>
+    <p>Les durées de conservation des journaux et données techniques peuvent varier selon le prestataire et la finalité concernée.</p>
+    <p>MyFlashCard veille à ne pas conserver directement ces informations au-delà de ce qui est nécessaire aux finalités poursuivies.</p>
+    <h2 id="article-18-suppression-du-compte">Article 18 — Suppression du Compte</h2>
+    <p>L&#x27;Utilisateur peut supprimer définitivement son Compte au moyen de la fonctionnalité proposée par MyFlashCard.</p>
+    <p>Cette suppression entraîne notamment, sous réserve des exceptions prévues par la réglementation :</p>
+    <ul><li>la suppression des données personnelles du Compte qui n&#x27;ont plus à être conservées</li><li>la suppression des flashcards personnelles</li><li>la suppression de la progression</li><li>la suppression des points et des informations personnelles associées au classement</li><li>la perte de l&#x27;accès aux Services associés au Compte</li></ul>
+    <p>Les messages précédemment publiés sur le forum peuvent être conservés lorsque cela est nécessaire à la cohérence des discussions, après dissociation du Compte, sous la mention « Utilisateur supprimé ».</p>
+    <p>Certaines données peuvent être archivées séparément lorsque leur conservation est imposée ou autorisée par la réglementation, notamment pour satisfaire aux obligations comptables ou fiscales ou assurer la preuve d&#x27;une transaction ou la défense d&#x27;un droit.</p>
+    <p>Les conséquences contractuelles de la suppression du Compte, notamment sur les contenus payants, sont précisées dans les CGU et CGV.</p>
+    <h2 id="article-19-droits-des-personnes">Article 19 — Droits des personnes</h2>
+    <p>Conformément à la réglementation applicable, toute personne concernée peut, selon le traitement et les conditions prévues par le RGPD, bénéficier notamment :</p>
+    <ul><li>d&#x27;un droit d&#x27;accès à ses données</li><li>d&#x27;un droit de rectification</li><li>d&#x27;un droit à l&#x27;effacement</li><li>d&#x27;un droit à la limitation du traitement</li><li>d&#x27;un droit d&#x27;opposition</li><li>d&#x27;un droit à la portabilité lorsque les conditions légales sont réunies</li><li>du droit de retirer son consentement à tout moment lorsqu&#x27;un traitement repose sur celui-ci</li><li>du droit de ne pas faire l&#x27;objet d&#x27;une décision fondée exclusivement sur un traitement automatisé, y compris le profilage, lorsqu&#x27;une telle décision produit des effets juridiques ou l&#x27;affecte de manière significative, sous réserve des exceptions prévues par la réglementation</li></ul>
+    <p>Le retrait du consentement ne remet pas en cause la licéité des traitements effectués avant ce retrait.</p>
+    <p>Certains droits peuvent faire l&#x27;objet des limitations prévues par la réglementation, notamment lorsqu&#x27;une obligation légale impose la conservation de certaines informations.</p>
+    <h2 id="article-20-exercice-des-droits-et-delai-de-reponse">Article 20 — Exercice des droits et délai de réponse</h2>
+    <p>Pour exercer ses droits ou poser une question relative à ses données personnelles, l&#x27;Utilisateur peut contacter :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p class="block">ou écrire à :</p>
+    <p class="block">MFC SAS<br/>4 rue Jean Moulin<br/>38640 Claix</p>
+    <p>Lorsque cela est nécessaire pour protéger les données concernées, MyFlashCard peut demander des informations raisonnablement nécessaires afin de vérifier l&#x27;identité du demandeur.</p>
+    <p>MyFlashCard répond aux demandes dans les meilleurs délais et, en principe, dans un délai d&#x27;un mois à compter de leur réception.</p>
+    <p>Lorsque la complexité ou le nombre de demandes le justifie, ce délai peut être prolongé de deux mois supplémentaires, conformément à la réglementation applicable.</p>
+    <p>Dans ce cas, la personne concernée est informée de cette prolongation et de ses motifs dans le délai initial d&#x27;un mois.</p>
+    <h2 id="article-21-reclamation-aupres-de-la-cnil">Article 21 — Réclamation auprès de la CNIL</h2>
+    <p>Si une personne estime, après avoir contacté MyFlashCard, que ses droits relatifs à ses données personnelles ne sont pas respectés, elle dispose du droit d&#x27;introduire une réclamation auprès de la Commission nationale de l&#x27;informatique et des libertés (CNIL).</p>
+    <h2 id="article-22-utilisateurs-mineurs">Article 22 — Utilisateurs mineurs</h2>
+    <p>MyFlashCard peut être utilisé par des personnes mineures.</p>
+    <p>MyFlashCard veille à présenter les informations relatives à l&#x27;utilisation des données personnelles d&#x27;une manière adaptée et compréhensible.</p>
+    <p>Lorsque la réglementation exige, pour un traitement déterminé reposant sur le consentement, l&#x27;autorisation ou le consentement d&#x27;un titulaire de l&#x27;autorité parentale, MyFlashCard met en œuvre les mesures nécessaires.</p>
+    <p>Les règles concernant la capacité d&#x27;un mineur à souscrire une offre payante sont précisées dans les Conditions Générales de Vente.</p>
+    <h2 id="article-23-securite">Article 23 — Sécurité</h2>
+    <p>MyFlashCard met en œuvre des mesures techniques et organisationnelles adaptées afin de protéger les données personnelles contre notamment :</p>
+    <ul><li>l&#x27;accès non autorisé</li><li>la divulgation non autorisée</li><li>la modification non autorisée</li><li>la perte</li><li>la destruction</li><li>l&#x27;utilisation frauduleuse</li></ul>
+    <p>L&#x27;accès aux outils d&#x27;administration et aux données personnelles est limité aux personnes qui en ont besoin pour assurer le fonctionnement et la gestion de MyFlashCard.</p>
+    <p>Aucun système informatique ne permettant de garantir une sécurité absolue, les mesures mises en œuvre sont adaptées aux risques identifiés et peuvent évoluer.</p>
+    <p>En cas de violation de données personnelles, MyFlashCard applique les obligations prévues par la réglementation, notamment en matière de documentation de l&#x27;incident, de notification à l&#x27;autorité de contrôle lorsque celle-ci est requise et d&#x27;information des personnes concernées lorsqu&#x27;elle est légalement nécessaire.</p>
+    <h2 id="article-24-cookies-et-autres-traceurs">Article 24 — Cookies et autres traceurs</h2>
+    <p>Le Site peut utiliser des cookies ou technologies similaires strictement nécessaires à son fonctionnement, à l&#x27;authentification, à la sécurité ou à la fourniture d&#x27;une fonctionnalité demandée par l&#x27;Utilisateur.</p>
+    <p>Lorsque l&#x27;utilisation d&#x27;un cookie ou autre traceur nécessite le consentement préalable de l&#x27;Utilisateur, celui-ci est recueilli avant le dépôt ou la lecture du traceur concerné.</p>
+    <p>MyFlashCard n&#x27;utilise actuellement aucun outil d&#x27;analyse d&#x27;audience ou de suivi publicitaire sur le Site déclaré comme tel.</p>
+    <p>Les informations concernant les cookies et autres traceurs effectivement utilisés, leur finalité, leur durée et les moyens de gérer les choix de l&#x27;Utilisateur sont précisées dans la Politique relative aux cookies de MyFlashCard.</p>
+    <h2 id="article-25-modification-de-la-politique">Article 25 — Modification de la Politique</h2>
+    <p>MyFlashCard peut modifier la présente Politique afin notamment de tenir compte :</p>
+    <ul><li>d&#x27;une évolution des Services</li><li>de l&#x27;ajout ou de la suppression d&#x27;un prestataire</li><li>d&#x27;un nouveau traitement de données</li><li>d&#x27;une évolution technique</li><li>d&#x27;une évolution de la réglementation</li></ul>
+    <p>La version en vigueur est accessible sur le Site.</p>
+    <p>Lorsqu&#x27;une modification substantielle affecte la manière dont les données personnelles sont utilisées, MyFlashCard en informe les personnes concernées par un moyen approprié.</p>
+    <p>Dernière mise à jour : 13 septembre 2026.</p>
+  </article>
+</main>
+
+<nav class="docs" aria-label="Documents légaux">
+  <p>Les autres documents</p>
+  <div>
+        <a href="cgu.html">CGU</a>
+        <a href="cgv.html">CGV</a>
+        <span aria-current="page">Confidentialité</span>
+        <a href="cookies.html">Cookies</a>
+        <a href="mentions-legales.html">Mentions légales</a>
+  </div>
+</nav>
+
+<footer class="legal">
+  <div>MFC SAS · 4 rue Jean Moulin, 38640 Claix · <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></div>
+</footer>
+</body>
+</html>

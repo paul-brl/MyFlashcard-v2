@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Conditions Générales de Vente — MyFlashcard</title>
+<meta name="description" content="Conditions Générales de Vente de MyFlashcard, édité par MFC SAS."/>
+<meta name="robots" content="index, follow"/>
+<style>
+/* Les couleurs, la typographie et les points de rupture sont ceux de
+   l'application : une page légale ne doit pas donner l'impression d'avoir
+   quitté MyFlashcard. */
+:root {
+  --bg:#f5f3ee; --surface:#ffffff; --border:#d0ccc4; --line:#e8e5e0;
+  --text:#1a1917; --textMed:#4e4a46; --textLt:#7a7672;
+  --accent:#2c4a7c; --accentBg:#eef3fb;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#1c1b22; --surface:#26252e; --border:#3f3d4b; --line:#34323e;
+    --text:#f4f3f7; --textMed:#b9b7c6; --textLt:#8a8798;
+    --accent:#8ab4f8; --accentBg:#1e2a3f;
+    color-scheme: dark;
+  }
+}
+*, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body {
+  background:var(--bg); color:var(--text);
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:16px; line-height:1.75;
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+
+/* Barre supérieure : le retour au site est la seule action, elle reste
+   atteignable au pouce sur mobile. */
+header.bar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10;
+}
+header.bar > div {
+  max-width:780px; margin:0 auto; padding:14px 24px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.brand { font-family:Georgia,'Times New Roman',serif; font-size:19px; color:var(--text); text-decoration:none; }
+.back { font-size:13.5px; color:var(--accent); text-decoration:none; white-space:nowrap; }
+.back:hover, .back:focus-visible { text-decoration:underline; }
+
+main { max-width:780px; margin:0 auto; padding:44px 24px 8px; }
+h1 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:clamp(26px,5vw,34px); line-height:1.25; letter-spacing:-.4px;
+  margin-bottom:10px;
+}
+.version { font-size:13.5px; color:var(--textLt); margin-bottom:38px; }
+
+article { max-width:66ch; }
+h2 {
+  font-family:Georgia,'Times New Roman',serif; font-weight:400;
+  font-size:21px; line-height:1.35; color:var(--text);
+  margin:44px 0 14px; padding-top:22px; border-top:1px solid var(--line);
+  scroll-margin-top:76px;
+}
+h2:first-of-type { border-top:none; padding-top:0; margin-top:0; }
+h3 { font-size:15.5px; font-weight:600; margin:26px 0 8px; color:var(--text); }
+p { margin-bottom:15px; color:var(--textMed); }
+p.block { color:var(--text); line-height:1.6; margin:4px 0 18px; }
+ul, ol { margin:0 0 16px 22px; color:var(--textMed); }
+li { margin-bottom:7px; }
+a { color:var(--accent); }
+strong { color:var(--text); font-weight:600; }
+
+/* Les mentions « [À COMPLÉTER] » sont signalées visuellement : elles doivent
+   sauter aux yeux tant qu'elles n'ont pas été renseignées. */
+.todo {
+  background:var(--accentBg); color:var(--accent);
+  padding:1px 7px; border-radius:4px; font-size:.92em; font-weight:600;
+  white-space:nowrap;
+}
+
+nav.docs {
+  max-width:780px; margin:0 auto; padding:34px 24px 56px;
+  border-top:1px solid var(--line);
+}
+nav.docs p { font-size:13px; color:var(--textLt); margin-bottom:12px; }
+nav.docs div { display:flex; flex-wrap:wrap; gap:8px; }
+nav.docs a, nav.docs span {
+  font-size:13.5px; padding:7px 14px; border-radius:7px;
+  border:1.5px solid var(--border); text-decoration:none; color:var(--textMed);
+}
+nav.docs a:hover, nav.docs a:focus-visible { border-color:var(--accent); color:var(--accent); }
+nav.docs span { border-color:var(--accent); background:var(--accentBg); color:var(--accent); font-weight:600; }
+
+footer.legal {
+  border-top:1px solid var(--line); background:var(--surface);
+}
+footer.legal div {
+  max-width:780px; margin:0 auto; padding:22px 24px 30px;
+  font-size:12.5px; color:var(--textLt);
+}
+
+a:focus-visible, span:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+
+@media (max-width:640px) {
+  header.bar > div { padding:12px 16px; }
+  main { padding:30px 16px 8px; }
+  nav.docs { padding:28px 16px 44px; }
+  footer.legal div { padding:20px 16px 26px; }
+  body { font-size:15.5px; }
+}
+
+@media print {
+  header.bar, nav.docs { display:none; }
+  body { background:#fff; color:#000; font-size:11pt; }
+  h2 { page-break-after:avoid; }
+  main { padding:0; max-width:none; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div>
+    <a class="brand" href="/">MyFlashcard</a>
+    <a class="back" href="/">Retour au site</a>
+  </div>
+</header>
+
+<main>
+  <h1>CONDITIONS GÉNÉRALES DE VENTE</h1>
+  <p class="version">Version en vigueur au 13 septembre 2026</p>
+  <article>
+    <h2 id="article-1-objet-et-champ-d-application">Article 1 — Objet et champ d&#x27;application</h2>
+    <p>Les présentes Conditions Générales de Vente (ci-après les « CGV ») ont pour objet de définir les droits et obligations applicables à la fourniture des services et contenus numériques proposés sous la marque MyFlashCard (ci-après les « Services ») sur le site myflashcard.fr (ci-après le « Site »), édité par MFC SAS, société par actions simplifiée au capital de 1 500 euros, dont le siège social est situé 4 rue Jean Moulin, 38640 Claix, immatriculée au Registre du commerce et des sociétés sous le numéro <span class="todo">[SIREN/RCS À COMPLÉTER]</span> (ci-après « MyFlashCard »).</p>
+    <p class="block">MyFlashCard peut être contactée :</p>
+    <ul><li>par courrier : MFC SAS, 4 rue Jean Moulin, 38640 Claix</li><li>par courrier électronique : <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></li><li>par téléphone : 07 68 49 87 04 ou 07 66 11 91 11</li></ul>
+    <p>Les Services comprennent notamment l&#x27;accès, selon l&#x27;offre souscrite, à des contenus pédagogiques numériques proposés par MyFlashCard, notamment des flashcards, cours, supports de révision, illustrations, schémas et autres ressources pédagogiques accessibles depuis le Site.</p>
+    <p>Les présentes CGV s&#x27;appliquent à toute commande payante effectuée par une personne physique agissant à des fins n&#x27;entrant pas dans le cadre de son activité professionnelle (ci-après le « Client »).</p>
+    <p>Toute commande implique la prise de connaissance et l&#x27;acceptation sans réserve des présentes CGV par le Client avant la validation de sa commande.</p>
+    <p>Les CGV applicables sont celles en vigueur à la date de la commande.</p>
+    <p>Lorsqu&#x27;un Client mineur souhaite souscrire une offre payante, il déclare disposer de l&#x27;autorisation de son représentant légal lorsque celle-ci est juridiquement nécessaire. Le représentant légal est invité à prendre connaissance des présentes CGV préalablement à toute commande.</p>
+    <h2 id="article-2-description-des-services-et-des-offres">Article 2 — Description des Services et des offres</h2>
+    <p>MyFlashCard est une plateforme numérique destinée à accompagner les étudiants dans leurs révisions grâce notamment à des flashcards, des cours et différents contenus et outils pédagogiques.</p>
+    <p>MyFlashCard propose des offres d&#x27;accès correspondant aux différents semestres de l&#x27;année universitaire.</p>
+    <p class="block">À la date des présentes CGV :</p>
+    <ul><li>l&#x27;offre du premier semestre (S1) est proposée au prix de 99 euros TTC et comprend l&#x27;accès aux flashcards correspondant aux contenus inclus dans cette offre</li><li>les cours associés au premier semestre sont actuellement mis à disposition gratuitement, selon les conditions précisées sur le Site</li><li>l&#x27;offre du deuxième semestre (S2) est proposée au prix de 149 euros TTC et comprend l&#x27;accès aux contenus correspondant à cette offre</li></ul>
+    <p>Les caractéristiques précises de chaque offre, notamment les matières, contenus et fonctionnalités accessibles, sont présentées au Client sur le Site avant la validation de sa commande.</p>
+    <p>La souscription à une offre payante permet au Client d&#x27;accéder aux contenus et fonctionnalités compris dans l&#x27;offre choisie jusqu&#x27;au 30 juin de l&#x27;année universitaire concernée.</p>
+    <p>L&#x27;accès est strictement personnel et associé au compte du Client.</p>
+    <p>MyFlashCard peut également proposer temporairement un accès d&#x27;essai gratuit à tout ou partie de ses contenus ou fonctionnalités. Les caractéristiques et les contenus accessibles dans le cadre de cet essai sont indiqués sur le Site.</p>
+    <p>Sauf indication contraire expressément portée à la connaissance de l&#x27;utilisateur, l&#x27;accès à un essai gratuit n&#x27;entraîne aucune souscription automatique à une offre payante et aucun prélèvement automatique à son expiration.</p>
+    <p>MyFlashCard peut faire évoluer ses Services afin notamment de les améliorer, de corriger des erreurs, d&#x27;assurer leur sécurité ou de les adapter aux évolutions pédagogiques ou techniques, dans le respect des droits du Client et des dispositions légales applicables aux contenus et services numériques.</p>
+    <p>MyFlashCard peut procéder à des opérations de maintenance susceptibles d&#x27;entraîner une indisponibilité temporaire de tout ou partie du Site. Lorsque cela est raisonnablement possible, les utilisateurs en sont informés préalablement.</p>
+    <h2 id="article-3-duree-et-modalites-d-acces">Article 3 — Durée et modalités d&#x27;accès</h2>
+    <p>Les offres proposées par MyFlashCard sont des achats pour une durée déterminée et ne constituent pas des abonnements à reconduction automatique.</p>
+    <p>L&#x27;achat d&#x27;une offre correspondant au premier semestre (S1) ou au deuxième semestre (S2) donne accès aux contenus compris dans l&#x27;offre choisie à compter de l&#x27;activation de celle-ci et jusqu&#x27;au 30 juin de l&#x27;année universitaire concernée, quelle que soit la date à laquelle la commande est effectuée.</p>
+    <p>L&#x27;accès aux Services payants est activé immédiatement après validation du paiement et confirmation de la commande, sous réserve du délai strictement nécessaire au traitement technique de celle-ci.</p>
+    <p>Au 30 juin de l&#x27;année universitaire concernée, l&#x27;accès aux contenus associés à l&#x27;offre prend automatiquement fin.</p>
+    <p>Les offres ne font l&#x27;objet d&#x27;aucune reconduction automatique. Aucun nouveau paiement ou prélèvement n&#x27;est effectué à leur expiration.</p>
+    <p>L&#x27;accès aux contenus d&#x27;une nouvelle année universitaire nécessite, le cas échéant, une nouvelle commande du Client.</p>
+    <h2 id="article-4-commande">Article 4 — Commande</h2>
+    <p class="block">Pour effectuer une commande sur le Site, le Client doit notamment :</p>
+    <ol><li>disposer ou créer un compte MyFlashCard</li><li>sélectionner l&#x27;offre souhaitée</li><li>prendre connaissance de ses caractéristiques essentielles et de son prix</li><li>vérifier les informations relatives à sa commande et, le cas échéant, corriger les erreurs</li><li>prendre connaissance et accepter les présentes CGV</li><li>confirmer sa commande et son obligation de paiement</li><li>procéder au paiement au moyen de l&#x27;un des moyens de paiement proposés sur le Site.</li></ol>
+    <p>Une confirmation de la commande est adressée au Client par voie électronique dans les meilleurs délais après validation de celle-ci.</p>
+    <p>MyFlashCard se réserve le droit de refuser ou d&#x27;annuler une commande pour tout motif légitime, notamment en cas de fraude ou tentative de fraude, d&#x27;utilisation abusive du Site, d&#x27;incident de paiement ou de litige antérieur relatif au paiement d&#x27;une commande.</p>
+    <h2 id="article-5-prix">Article 5 — Prix</h2>
+    <p>Les prix applicables sont ceux affichés sur le Site au moment de la commande.</p>
+    <p>À la date d&#x27;entrée en vigueur des présentes CGV, les tarifs sont les suivants :</p>
+    <ul><li>Premier semestre (S1) : 99 euros TTC</li><li>Deuxième semestre (S2) : 149 euros TTC</li></ul>
+    <p>Le prix total dû par le Client est présenté avant la validation définitive de la commande.</p>
+    <p>MyFlashCard peut modifier ses tarifs pour les commandes futures. Une modification de prix est sans effet sur une commande déjà conclue.</p>
+    <p>Les éventuelles offres promotionnelles, réductions ou périodes d&#x27;essai sont applicables dans les conditions et pendant la durée indiquées sur le Site.</p>
+    <p>Les éventuels frais liés à l&#x27;accès à Internet, à l&#x27;équipement informatique ou aux télécommunications nécessaires à l&#x27;utilisation du Site restent à la charge du Client.</p>
+    <h2 id="article-6-paiement">Article 6 — Paiement</h2>
+    <p>Le paiement est effectué au moyen des solutions de paiement proposées au Client lors de la commande.</p>
+    <p>Les paiements en ligne sont traités par Stripe, prestataire de services de paiement.</p>
+    <p>Le Client garantit qu&#x27;il est autorisé à utiliser le moyen de paiement sélectionné.</p>
+    <p>Le prix est exigible intégralement au moment de la validation de la commande.</p>
+    <p>Les données bancaires nécessaires au paiement sont traitées par Stripe dans les conditions définies par ce prestataire. MyFlashCard ne conserve pas directement les données complètes de carte bancaire traitées par Stripe.</p>
+    <p>En cas de refus du paiement ou d&#x27;incident de paiement, la commande peut ne pas être validée.</p>
+    <h2 id="article-7-droit-de-retractation">Article 7 — Droit de rétractation</h2>
+    <p>Conformément aux dispositions du Code de la consommation, le Client consommateur dispose, lorsqu&#x27;il bénéficie légalement du droit de rétractation, d&#x27;un délai de quatorze (14) jours à compter de la conclusion du contrat pour exercer ce droit, sans avoir à motiver sa décision.</p>
+    <p>Pour exercer son droit de rétractation, le Client informe MyFlashCard de sa décision au moyen d&#x27;une déclaration dénuée d&#x27;ambiguïté ou du formulaire type de rétractation figurant en annexe des présentes CGV, dans les conditions et au moyen des fonctionnalités mises à sa disposition conformément à la réglementation applicable.</p>
+    <p>Lorsqu&#x27;une rétractation est valablement exercée, MyFlashCard met fin à l&#x27;accès du Client aux contenus et Services concernés par la commande et procède au remboursement des sommes dues conformément aux dispositions du Code de la consommation.</p>
+    <p>Le remboursement est effectué dans les délais et selon les modalités prévus par la réglementation applicable, en principe au moyen du même moyen de paiement que celui utilisé pour la transaction initiale, sauf accord exprès du Client pour un autre moyen et sous réserve que celui-ci n&#x27;occasionne pas de frais pour le Client.</p>
+    <p>Les Services MyFlashCard étant fournis sous forme numérique, aucun bien matériel n&#x27;est à retourner et aucun frais de renvoi d&#x27;un bien n&#x27;est applicable.</p>
+    <p>Les modalités permettant d&#x27;exercer le droit de rétractation sont mises à disposition du Client conformément aux exigences légales applicables aux contrats conclus à distance.</p>
+    <h2 id="article-8-garantie-legale-de-conformite-des-contenus-et-serv">Article 8 — Garantie légale de conformité des contenus et services numériques</h2>
+    <p>Le Client bénéficie de la garantie légale de conformité applicable aux contenus numériques et services numériques, conformément aux articles L. 224-25-12 et suivants du Code de la consommation.</p>
+    <p>MyFlashCard fournit un contenu numérique ou un service numérique conforme au contrat ainsi qu&#x27;aux critères de conformité prévus par le Code de la consommation.</p>
+    <p>Les Services MyFlashCard étant fournis de manière continue pendant la période contractuelle, MyFlashCard répond des défauts de conformité qui apparaissent pendant toute la période durant laquelle le Service est fourni au Client, soit jusqu&#x27;au terme de son droit d&#x27;accès.</p>
+    <p>Le Service doit notamment correspondre à la description, aux fonctionnalités et aux caractéristiques prévues au contrat et présenter les qualités auxquelles le consommateur peut légitimement s&#x27;attendre, compte tenu notamment de sa nature et des déclarations publiques effectuées par MyFlashCard dans les conditions prévues par la loi.</p>
+    <p>MyFlashCard informe également le Client des mises à jour nécessaires au maintien de la conformité du Service et les fournit pendant la période prévue par la réglementation applicable.</p>
+    <p>En cas de défaut de conformité, le Client est en droit d&#x27;obtenir la mise en conformité du contenu ou du service numérique, sans frais, sans retard injustifié et sans inconvénient majeur pour lui.</p>
+    <p>Lorsque les conditions prévues par le Code de la consommation sont réunies, le Client peut également bénéficier d&#x27;une réduction du prix ou obtenir la résolution du contrat.</p>
+    <p>La garantie légale de conformité s&#x27;applique indépendamment de toute éventuelle garantie commerciale qui pourrait être consentie par MyFlashCard.</p>
+    <p>Pour toute demande relative à la garantie légale de conformité, le Client peut contacter MyFlashCard à l&#x27;adresse <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a>.</p>
+    <h2 id="article-9-responsabilite">Article 9 — Responsabilité</h2>
+    <p>MyFlashCard met en œuvre les moyens raisonnables nécessaires afin d&#x27;assurer l&#x27;accès et le bon fonctionnement du Site et des Services.</p>
+    <p>Le Client reconnaît toutefois que le fonctionnement d&#x27;un service accessible par Internet peut être affecté par des événements indépendants de MyFlashCard, notamment des difficultés liées au réseau Internet, à son équipement ou à son fournisseur d&#x27;accès.</p>
+    <p>MyFlashCard ne saurait être responsable des dommages résultant exclusivement d&#x27;un équipement, logiciel ou environnement numérique du Client qui ne respecterait pas les éventuelles exigences techniques portées à sa connaissance, sous réserve des dispositions légales impératives applicables.</p>
+    <p>MyFlashCard ne garantit pas que l&#x27;utilisation de ses contenus pédagogiques permettra au Client d&#x27;obtenir un résultat universitaire, un classement, une note, une admission, la réussite à un examen ou à un concours déterminé.</p>
+    <p>Les contenus proposés par MyFlashCard constituent des outils d&#x27;accompagnement à l&#x27;apprentissage et à la révision. Ils ne se substituent pas aux enseignements officiels, documents, consignes et informations communiqués par les établissements d&#x27;enseignement et organismes compétents.</p>
+    <p>Aucune disposition des présentes CGV n&#x27;a pour objet ou pour effet d&#x27;exclure ou de limiter les droits impératifs du consommateur ou une responsabilité qui ne pourrait légalement être exclue ou limitée.</p>
+    <h2 id="article-10-propriete-intellectuelle">Article 10 — Propriété intellectuelle</h2>
+    <p>Le Site ainsi que les contenus dont MyFlashCard détient les droits, notamment les flashcards, cours, textes, questions, réponses, exercices, méthodes, illustrations, schémas, éléments graphiques, bases de données, logiciels, interfaces, photographies, vidéos, logos, marques et plus généralement les contenus proposés par MyFlashCard sont protégés par les dispositions applicables en matière de propriété intellectuelle.</p>
+    <p>L&#x27;accès gratuit ou payant à un contenu MyFlashCard n&#x27;emporte aucun transfert au profit de l&#x27;utilisateur des droits de propriété intellectuelle attachés à ce contenu.</p>
+    <p>L&#x27;utilisateur bénéficie uniquement d&#x27;un droit personnel, non exclusif, non cessible et non transférable d&#x27;accès et d&#x27;utilisation des contenus mis à sa disposition par MyFlashCard, pour ses besoins personnels et non commerciaux et pendant la durée pendant laquelle il est autorisé à y accéder.</p>
+    <p>Cette règle s&#x27;applique également aux contenus mis gratuitement à disposition des utilisateurs disposant d&#x27;un compte MyFlashCard. La gratuité d&#x27;un contenu ne signifie pas que celui-ci est libre de droits ou librement redistribuable.</p>
+    <p>Sauf autorisation préalable et écrite de MyFlashCard ou exception prévue par la loi, sont notamment interdits :</p>
+    <ul><li>la reproduction ou la redistribution des contenus à des tiers</li><li>leur publication ou leur mise à disposition sur Internet, sur les réseaux sociaux, sur une plateforme ou sur un espace de stockage partagé</li><li>la transmission à des tiers de PDF, flashcards ou autres ressources MyFlashCard</li><li>leur revente ou exploitation commerciale</li><li>l&#x27;extraction, l&#x27;exportation ou la réutilisation substantielle des contenus ou bases de données</li><li>l&#x27;extraction automatisée ou massive des contenus</li><li>la reproduction systématique ou massive des contenus au moyen de captures d&#x27;écran ou de tout autre procédé</li><li>le contournement des dispositifs techniques destinés à empêcher ou limiter la copie, l&#x27;extraction ou l&#x27;accès non autorisé aux contenus</li><li>toute suppression ou altération des mentions relatives à MyFlashCard ou aux droits de propriété intellectuelle</li></ul>
+    <p>La réalisation ponctuelle d&#x27;une capture d&#x27;écran pour les besoins strictement personnels de l&#x27;utilisateur ne lui confère aucun droit de diffusion, de redistribution ou d&#x27;exploitation du contenu concerné.</p>
+    <p>Les modalités détaillées d&#x27;utilisation du Site, des comptes et des contenus sont précisées dans les Conditions Générales d&#x27;Utilisation.</p>
+    <h2 id="article-11-donnees-personnelles">Article 11 — Données personnelles</h2>
+    <p>Dans le cadre de l&#x27;utilisation du Site et de l&#x27;exécution des commandes, MyFlashCard est susceptible de traiter des données à caractère personnel concernant le Client.</p>
+    <p>Les modalités de ces traitements, leurs finalités, leurs bases juridiques, leurs durées de conservation ainsi que les droits dont disposent les personnes concernées sont précisés dans la Politique de confidentialité de MyFlashCard, accessible depuis le Site.</p>
+    <h2 id="article-12-force-majeure">Article 12 — Force majeure</h2>
+    <p>Aucune partie ne pourra être tenue responsable d&#x27;un manquement à ses obligations lorsque celui-ci résulte d&#x27;un événement présentant les caractéristiques de la force majeure au sens de l&#x27;article 1218 du Code civil.</p>
+    <p>Lorsque l&#x27;empêchement est temporaire, l&#x27;exécution de l&#x27;obligation concernée est suspendue dans les conditions prévues par la loi.</p>
+    <p>Lorsque l&#x27;empêchement est définitif, le contrat peut être résolu dans les conditions prévues par la réglementation applicable.</p>
+    <h2 id="article-13-modification-des-cgv">Article 13 — Modification des CGV</h2>
+    <p>MyFlashCard peut modifier les présentes CGV pour les commandes futures, notamment afin de tenir compte des évolutions législatives, réglementaires, techniques ou commerciales.</p>
+    <p>Les CGV applicables à une commande sont celles acceptées par le Client au moment de sa conclusion.</p>
+    <p>Les modifications ultérieures ne modifient pas rétroactivement les conditions contractuelles applicables aux commandes déjà conclues, sous réserve des dispositions légales impératives applicables.</p>
+    <p>La version en vigueur des CGV est accessible sur le Site.</p>
+    <h2 id="article-14-nullite-partielle">Article 14 — Nullité partielle</h2>
+    <p>Si une disposition des présentes CGV est déclarée nulle, illégale ou inapplicable, les autres dispositions demeurent applicables dans toute la mesure permise par la loi.</p>
+    <h2 id="article-15-reclamations-et-mediation-de-la-consommation">Article 15 — Réclamations et médiation de la consommation</h2>
+    <p class="block">Pour toute réclamation, le Client peut contacter MyFlashCard :</p>
+    <p class="block"><a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p>Après avoir préalablement adressé une réclamation écrite à MyFlashCard et en l&#x27;absence de solution satisfaisante, le consommateur peut recourir gratuitement à un médiateur de la consommation dans les conditions prévues par le Code de la consommation.</p>
+    <p>Médiateur de la consommation : <span class="todo">[À COMPLÉTER APRÈS ADHÉSION]</span>.</p>
+    <p>Les coordonnées et le site Internet du médiateur désigné seront communiqués sur le Site et dans les présentes CGV dès l&#x27;adhésion de MFC SAS au dispositif de médiation concerné.</p>
+    <h2 id="article-16-droit-applicable-et-reglement-des-litiges">Article 16 — Droit applicable et règlement des litiges</h2>
+    <p>Les présentes CGV sont soumises au droit français.</p>
+    <p>En cas de litige, le Client est invité à contacter préalablement MyFlashCard afin de rechercher une solution amiable.</p>
+    <p>À défaut de résolution amiable, le litige pourra être porté devant les juridictions compétentes conformément aux règles légales applicables.</p>
+    <p>Aucune stipulation des présentes CGV ne prive le consommateur des règles impératives de compétence juridictionnelle dont il bénéficie en application de la législation applicable.</p>
+    <h2 id="annexe-formulaire-type-de-retractation">ANNEXE — FORMULAIRE TYPE DE RÉTRACTATION</h2>
+    <p>Le présent formulaire est à compléter et à transmettre à MyFlashCard uniquement si le Client souhaite exercer son droit de rétractation dans les conditions prévues par la réglementation applicable.</p>
+    <p class="block">À l&#x27;attention de :</p>
+    <p class="block">MFC SAS<br/>4 rue Jean Moulin<br/>38640 Claix<br/>E-mail : <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></p>
+    <p>Je vous notifie par la présente ma rétractation du contrat portant sur la fourniture du service suivant :</p>
+    <p>Offre souscrite : …………………………………………………………..</p>
+    <p>Commandée le : …………………………………………………………..</p>
+    <p>Nom du consommateur : …………………………………………………………..</p>
+    <p>Adresse du consommateur : …………………………………………………………..</p>
+    <p>Adresse e-mail associée au compte MyFlashCard : …………………………………………………………..</p>
+    <p>Date : …………………………………………………………..</p>
+    <p>Signature du consommateur (uniquement en cas d&#x27;envoi du présent formulaire sur papier) :</p>
+    <p>…………………………………………………………..</p>
+  </article>
+</main>
+
+<nav class="docs" aria-label="Documents légaux">
+  <p>Les autres documents</p>
+  <div>
+        <a href="cgu.html">CGU</a>
+        <span aria-current="page">CGV</span>
+        <a href="confidentialite.html">Confidentialité</a>
+        <a href="cookies.html">Cookies</a>
+        <a href="mentions-legales.html">Mentions légales</a>
+  </div>
+</nav>
+
+<footer class="legal">
+  <div>MFC SAS · 4 rue Jean Moulin, 38640 Claix · <a href="mailto:contact@myflashcard.fr">contact@myflashcard.fr</a></div>
+</footer>
+</body>
+</html>
