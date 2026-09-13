@@ -2594,7 +2594,7 @@ function ForgotPasswordModal({onClose,accounts,onPasswordReset}){
   const handleReset=async()=>{setError("");if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}if(!validatePassword(password).ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(password!==confirm){setError("Les mots de passe ne correspondent pas.");return;}setSaving(true);try{const valid=await supa.checkVerification(email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré. Demande un nouveau code.");setSaving(false);return;}const ok=await supa.updatePassword(email.trim().toLowerCase(),password);if(!ok){setError("Erreur lors de la mise à jour. Contacte le support.");setSaving(false);return;}onPasswordReset(email.trim().toLowerCase(),password);setDone(true);}catch(e){setError(`Erreur : ${e.message}`);}finally{setSaving(false);}};
   useEffect(()=>()=>clearInterval(cooldownRef.current),[]);
   return <Modal onClose={onClose} width={400}>
-    {done?(<div style={{textAlign:"center"}}><p style={{fontSize:52,margin:"0 0 16px"}}>✓</p><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Mot de passe modifié !</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>Tu peux maintenant te connecter avec ton nouveau mot de passe.</p><Btn fill full onClick={onClose}>Retour à la connexion →</Btn></div>):(
+    {done?(<div style={{textAlign:"center"}}><p style={{fontSize:48,margin:"0 0 16px"}}>📬</p><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Vérifie ta boîte mail</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px",lineHeight:1.7}}>Si un compte existe avec cette adresse, un lien de réinitialisation vient d'être envoyé. Clique dessus pour choisir un nouveau mot de passe.</p><Btn fill full onClick={onClose}>Retour à la connexion →</Btn></div>):(
       <><p style={{fontFamily:serif,fontSize:20,margin:"0 0 4px"}}>Mot de passe oublié</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>{step===1?"Saisis ton adresse email pour recevoir un code de réinitialisation.":`Code envoyé à ${email}. Saisis le code et ton nouveau mot de passe.`}</p>
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:22}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:24,height:24,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"var(--c-onSolid)":C.textLt,fontSize:11,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:32,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
         {step===1&&(<div><Lbl>Adresse email</Lbl><input style={iLine} type="email" placeholder="votre@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSendCode()} autoFocus/>{error&&<p style={{fontSize:12,color:C.again,margin:"12px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:20,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Envoyer le code →"}</Btn></div>)}
@@ -2637,17 +2637,25 @@ function RegisterView({onRegister,onBack,accounts}){
   const handleSendCode=async()=>{setError("");if(!validateEmail(form.email)){setError("Adresse email invalide.");return;}if(!form.pseudo.trim()){setError("Choisis un pseudonyme.");return;}if(!validatePhone(form.phone)){setError("Numéro de téléphone invalide. Exemple : 06 12 34 56 78.");return;}if(!pwdState.ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(form.password!==form.confirm){setError("Les mots de passe ne correspondent pas.");return;}if(accounts.find(a=>a.username===form.email.trim().toLowerCase())){setError("Cette adresse email est déjà utilisée.");return;}setStep(2);
   };
   const startCooldown=()=>{setResendCooldown(60);clearInterval(cooldownRef.current);cooldownRef.current=setInterval(()=>{setResendCooldown(v=>{if(v<=1){clearInterval(cooldownRef.current);return 0;}return v-1;});},1000);};
-  const handleVerify=async()=>{
+    const handleVerify=async()=>{
     setError("");setVerifying(true);
     try{
       const email=form.email.trim().toLowerCase();
-      const {data,error}=await sb.auth.signUp({email,password:form.password});
+      // Le pseudo et le téléphone voyagent dans les métadonnées du compte Auth :
+      // un déclencheur Postgres crée ensuite la ligne accounts côté serveur, avec
+      // les droits nécessaires. Le navigateur n'écrit plus rien dans accounts.
+      const {data,error}=await sb.auth.signUp({
+        email,password:form.password,
+        options:{data:{pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX),phone:normalizePhone(form.phone)}},
+      });
       if(error){setError(error.message.includes("already")?"Cette adresse email est déjà utilisée.":`Erreur : ${error.message}`);return;}
-      if(data.session)applySession(data.session);
-      const newAcc={username:email,email,planId:"prerentree",groups:FREE_GROUP_IDS,
-        pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX),phone:normalizePhone(form.phone),
-        createdAt:new Date().toISOString(),user_id:data.user?.id||null};
-      onRegister(newAcc);
+      savePseudoLocal(email,form.pseudo.trim().slice(0,PSEUDO_MAX));
+      if(data.session){
+        applySession(data.session);
+        onRegister({username:email,email,planId:"prerentree",groups:FREE_GROUP_IDS,user_id:data.user?.id||null});
+      } else {
+        setStep(3); // confirmation par e-mail requise
+      }
     }catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}
   };
   useEffect(()=>()=>clearInterval(cooldownRef.current),[]);
@@ -2658,7 +2666,23 @@ function RegisterView({onRegister,onBack,accounts}){
       <p style={{textAlign:"center",fontSize:12,color:C.textLt,margin:"0 0 20px"}}>{step===1?"Étape 1 — Informations":"Étape 2 — Confirmation email"}</p>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
         {step===1&&<div><div style={{background:C.utilBg,border:`1px solid var(--c-utilSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p></div><div><Lbl>Numéro de téléphone</Lbl><input style={{...iLine,borderColor:form.phone&&!validatePhone(form.phone)?C.again:C.border}} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/>{form.phone&&!validatePhone(form.phone)?<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Numéro invalide — format français ou international</p>:<p style={{fontSize:10.5,color:C.textLt,margin:"4px 0 0",lineHeight:1.5}}>Obligatoire · uniquement pour te joindre au sujet de ton compte</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
-        {step===2&&<div><div style={{textAlign:"center",marginBottom:24}}><p style={{fontSize:40,margin:"0 0 12px"}}>📬</p><p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Vérifie ta boîte mail</p><p style={{fontSize:13,color:C.textMed,lineHeight:1.6}}>Code envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong></p></div><div style={{marginBottom:20}}><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:32,fontWeight:700,letterSpacing:14,textAlign:"center",padding:"12px 0",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} onKeyDown={e=>e.key==="Enter"&&handleVerify()} autoFocus/></div>{error&&<p style={{fontSize:12,color:C.again,margin:"0 0 14px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px",marginBottom:12}} onClick={handleVerify} disabled={verifying||code.length!==6}>{verifying?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Vérification…</>:"Créer mon compte →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16,marginTop:8}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(resendCooldown>0)return;handleSendCode();}} disabled={resendCooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:resendCooldown>0?"not-allowed":"pointer",color:resendCooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:resendCooldown>0?0.6:1}}>{resendCooldown>0?`Renvoyer (${resendCooldown}s)`:"Renvoyer un code"}</button></div><p style={{fontSize:11,color:C.textLt,textAlign:"center",marginTop:12}}>Le code expire dans 10 minutes. Vérifie tes spams.</p></div>}
+        {step===2&&<div>
+          <div style={{textAlign:"center",marginBottom:24}}>
+            <p style={{fontSize:40,margin:"0 0 12px"}}>✉️</p>
+            <p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Confirme ton adresse</p>
+            <p style={{fontSize:13,color:C.textMed,lineHeight:1.6}}>Un lien de confirmation sera envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong></p>
+          </div>
+          {error&&<p style={{fontSize:12,color:C.again,margin:"0 0 14px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}
+          <Btn fill full style={{fontSize:14,padding:"12px",marginBottom:12}} onClick={handleVerify} disabled={verifying}>{verifying?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Création…</>:"Créer mon compte →"}</Btn>
+          <div style={{display:"flex",justifyContent:"center",marginTop:8}}><button onClick={()=>{setStep(1);setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier mes informations</button></div>
+        </div>}
+        {step===3&&<div style={{textAlign:"center"}}>
+          <p style={{fontSize:44,margin:"0 0 14px"}}>📬</p>
+          <p style={{fontFamily:serif,fontSize:19,margin:"0 0 10px"}}>Vérifie ta boîte mail</p>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.7}}>Un lien de confirmation vient d'être envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong>.<br/>Clique dessus pour activer ton compte, puis connecte-toi.</p>
+          <p style={{fontSize:11,color:C.textLt,margin:"0 0 20px"}}>Rien reçu après quelques minutes ? Vérifie tes spams.</p>
+          <Btn fill full onClick={onBack}>Aller à la connexion →</Btn>
+        </div>}
       </div>
       <button onClick={onBack} style={{display:"block",margin:"20px auto 0",fontFamily:font,fontSize:13,background:"none",border:"none",color:C.textLt,cursor:"pointer",textDecoration:"underline"}}>Déjà un compte ? Se connecter</button>
     </div>
