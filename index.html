@@ -698,6 +698,8 @@ const supa = {
   // Fetch a single user's account (lightweight alternative to getAccounts)
     setMarketingOptIn: async (username, optIn) => {
     let ok=false;
+    console.log("MKT-AUTH", H.Authorization.slice(-10), "| anon:", SUPA_KEY.slice(-10), "| user:", username);
+    console.log("MKT-GET", JSON.stringify(await (await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}&select=username,user_id`,{headers:H})).json()));
     try {
       const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`, {
         method:"PATCH", headers:{...H,"Prefer":"return=representation"},
