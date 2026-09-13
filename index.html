@@ -2681,10 +2681,12 @@ function RegisterView({onRegister,onBack,accounts}){
           <p style={{fontFamily:serif,fontSize:19,margin:"0 0 10px"}}>Vérifie ta boîte mail</p>
           <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.7}}>Un lien de confirmation vient d'être envoyé à<br/><strong style={{color:C.text}}>{form.email}</strong>.<br/>Clique dessus pour activer ton compte, puis connecte-toi.</p>
           <p style={{fontSize:11,color:C.textLt,margin:"0 0 20px"}}>Rien reçu après quelques minutes ? Vérifie tes spams.</p>
-          <Btn fill full onClick={onBack}>Aller à la connexion →</Btn>
+                    <div style={{background:C.accentBg,border:`1px solid var(--c-accentSoft)`,borderRadius:8,padding:"12px 14px"}}>
+            <p style={{fontSize:12.5,color:C.accent,margin:0,lineHeight:1.65}}>Ton compte ne sera actif qu'après avoir cliqué sur ce lien. Tu pourras ensuite te connecter normalement.</p>
+          </div>
         </div>}
       </div>
-      <button onClick={onBack} style={{display:"block",margin:"20px auto 0",fontFamily:font,fontSize:13,background:"none",border:"none",color:C.textLt,cursor:"pointer",textDecoration:"underline"}}>Déjà un compte ? Se connecter</button>
+      {step<3&&<button onClick={onBack} style={{display:"block",margin:"20px auto 0",fontFamily:font,fontSize:13,background:"none",border:"none",color:C.textLt,cursor:"pointer",textDecoration:"underline"}}>Déjà un compte ? Se connecter</button>}
     </div>
   </div>;
 }
@@ -7336,7 +7338,13 @@ function App(){
     const isAdmin=sbIsAdmin();
     // Les droits sont relus depuis le serveur à chaque connexion : ils ne
     // dépendent plus de ce que contient localStorage.
-    const acc=await supa.getAccount(lc);
+    // Le jeton vient d'être posé dans H, mais le client Supabase a besoin d'un
+    // battement pour le propager. Sans cette pause, la requête part encore avec
+    // la clé anon : la RLS la refuse, le compte revient vide, et les matières
+    // n'apparaissent qu'après un rechargement manuel.
+    await new Promise(r=>setTimeout(r,80));
+    let acc=await supa.getAccount(lc);
+    if(!acc){ await new Promise(r=>setTimeout(r,500)); acc=await supa.getAccount(lc); }
     const subPlanId=isAdmin?"both":toSubscriptionPlan(acc?.plan_id||acc?.planId);
     const groups=isAdmin?ALL:computeGroups(subPlanId,Array.isArray(acc?.groups)?acc.groups:[],getExtraGroups(lc));
     const fullGroups=isAdmin?ALL:computeFullGroups(subPlanId,derivePaidGroups(acc,lc),[]);
