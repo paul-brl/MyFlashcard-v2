@@ -1112,7 +1112,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-14-forum";
+const APP_VERSION="2026-09-14-admin";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -3632,17 +3632,32 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   </div>;
 }
 function AdminUsers({accounts,onSave,onDelete}){
-  const [editor,setEditor]=useState(null),[form,setForm]=useState({username:"",password:"",planId:"sem1"}),[err,setErr]=useState(""),[delUser,setDelUser]=useState(null);
-  const openNew=()=>{setEditor("new");setForm({username:"",password:"",planId:"sem1"});setErr("");};
-  const openEdit=a=>{setEditor(a.username);setForm({username:a.username,password:a.password,planId:a.plan_id||a.planId});setErr("");};
-  const handleSave=()=>{if(!form.username.trim()||!form.password.trim()){setErr("Email et mot de passe requis.");return;}if(ADMINS.some(a=>a.username===form.username.toLowerCase())){setErr("Ce nom est réservé.");return;}if(editor==="new"&&accounts.find(a=>a.username===form.username)){setErr("Cet email existe déjà.");return;}const plan=PLANS.find(p=>p.id===form.planId);onSave({username:form.username,password:form.password,planId:form.planId,groups:plan?.groups||[]});setEditor(null);};
+  const [editor,setEditor]=useState(null),[form,setForm]=useState({username:"",planId:"sem1"}),[err,setErr]=useState(""),[delUser,setDelUser]=useState(null);
+  // Les mots de passe vivent chez Supabase Auth, hachés. L'espace admin ne les
+  // lit pas, ne les écrit pas, ne les affiche pas : il ne peut qu'envoyer à
+  // l'étudiant un lien de réinitialisation, comme le ferait le formulaire
+  // « mot de passe oublié ».
+  const [showPhones,setShowPhones]=useState(false);
+  const [resetSent,setResetSent]=useState(""),[resetBusy,setResetBusy]=useState(false);
+  const openEdit=a=>{setEditor(a.username);setForm({username:a.username,planId:a.plan_id||a.planId});setErr("");setResetSent("");};
+  const sendReset=async email=>{
+    setResetBusy(true);setErr("");
+    try{
+      const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin});
+      if(error)setErr(`Envoi impossible : ${error.message}`);
+      else setResetSent(email);
+    }catch(e){ setErr(`Envoi impossible : ${e.message}`); }
+    finally{ setResetBusy(false); }
+  };
+  const handleSave=()=>{if(!form.username.trim()){setErr("Email requis.");return;}const plan=PLANS.find(p=>p.id===form.planId);onSave({username:form.username,planId:form.planId,groups:plan?.groups||[]});setEditor(null);};
   const mainPlans=PLANS.slice(0,4);
   return <div style={{maxWidth:700,margin:"0 auto",padding:24}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><p style={{fontFamily:serif,fontSize:18,margin:0}}>Comptes étudiants</p><Btn fill onClick={openNew}>+ Nouvel étudiant</Btn></div>
-    {accounts.length===0?(<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"48px 24px",textAlign:"center"}}><p style={{fontSize:14,color:C.textLt,margin:"0 0 16px"}}>Aucun étudiant inscrit.</p><Btn onClick={openNew}>Créer →</Btn></div>):(
-      <div style={{display:"flex",flexDirection:"column",gap:8}}>{accounts.map(a=>{const planId=a.plan_id||a.planId;const plan=PLANS.find(p=>p.id===planId);return<div key={a.username} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><p style={{fontFamily:mono,fontSize:13,margin:"0 0 4px",color:C.text}}>{a.username}</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Tag color={C.accent} bg={C.accentBg} small>{plan?.label||planId}</Tag><Tag color={C.textMed} bg={C.bg} small>{plan?.price||"—"}</Tag>{a.phone&&<Tag color={C.util} bg={C.utilBg} small>{a.phone}</Tag>}{a.created_at&&<Tag color={C.textLt} bg={C.bg} small>{new Date(a.created_at).toLocaleDateString("fr-FR")}</Tag>}</div></div><div style={{display:"flex",gap:8}}><Btn small onClick={()=>openEdit(a)}>Modifier</Btn><Btn small danger onClick={()=>setDelUser(a.username)}>Supprimer</Btn></div></div>;})}</div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><p style={{fontFamily:serif,fontSize:18,margin:0}}>Comptes étudiants</p><Btn small onClick={()=>setShowPhones(v=>!v)}>{showPhones?"Masquer les téléphones":"Afficher les téléphones"}</Btn></div>
+    <p style={{fontSize:11.5,color:C.textMed,margin:"0 0 18px",lineHeight:1.6}}>Les comptes sont créés par les étudiants eux-mêmes depuis la page d'inscription. Ici, tu peux changer leur offre, leur envoyer un lien de réinitialisation de mot de passe, ou supprimer leur ligne.</p>
+    {accounts.length===0?(<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"48px 24px",textAlign:"center"}}><p style={{fontSize:14,color:C.textLt,margin:"0 0 16px"}}>Aucun étudiant inscrit.</p></div>):(
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>{accounts.map(a=>{const planId=a.plan_id||a.planId;const plan=PLANS.find(p=>p.id===planId);return<div key={a.username} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><p style={{fontFamily:mono,fontSize:13,margin:"0 0 4px",color:C.text}}>{a.username}</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Tag color={C.accent} bg={C.accentBg} small>{plan?.label||planId}</Tag><Tag color={C.textMed} bg={C.bg} small>{plan?.price||"—"}</Tag>{a.phone&&showPhones&&<Tag color={C.util} bg={C.utilBg} small>{a.phone}</Tag>}{a.created_at&&<Tag color={C.textLt} bg={C.bg} small>{new Date(a.created_at).toLocaleDateString("fr-FR")}</Tag>}</div></div><div style={{display:"flex",gap:8}}><Btn small onClick={()=>openEdit(a)}>Modifier</Btn><Btn small danger onClick={()=>setDelUser(a.username)}>Supprimer</Btn></div></div>;})}</div>
     )}
-    {editor!==null&&<Modal onClose={()=>setEditor(null)} width={380}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 20px"}}>{editor==="new"?"Nouvel étudiant":"Modifier"}</p><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Email / Identifiant</Lbl><input style={iLine} placeholder="email@exemple.com" value={form.username} onChange={e=>setForm(p=>({...p,username:e.target.value}))} disabled={editor!=="new"}/></div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><div><Lbl>Abonnement</Lbl><div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>{mainPlans.map(o=><button key={o.id} onClick={()=>setForm(p=>({...p,planId:o.id}))} style={{fontFamily:font,fontSize:13,padding:"10px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${form.planId===o.id?C.accent:C.border}`,background:form.planId===o.id?C.accentBg:"transparent",color:form.planId===o.id?C.accent:C.textMed,textAlign:"left"}}>{form.planId===o.id&&"✓ "}{o.label} — {o.price}</button>)}</div></div></div>{err&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:"14px 0 0"}}>{err}</p>}<div style={{display:"flex",gap:10,marginTop:24}}><Btn fill onClick={handleSave}>{editor==="new"?"Créer":"Mettre à jour"}</Btn><Btn onClick={()=>setEditor(null)}>Annuler</Btn></div></Modal>}
+    {editor!==null&&<Modal onClose={()=>setEditor(null)} width={380}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 20px"}}>Modifier</p><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Email / Identifiant</Lbl><input style={iLine} value={form.username} disabled/></div><div><Lbl>Mot de passe</Lbl><p style={{fontSize:11.5,color:C.textMed,margin:"6px 0 8px",lineHeight:1.6}}>Les mots de passe sont chiffrés chez Supabase et ne sont lisibles par personne, administrateurs compris. Pour dépanner un étudiant, envoie-lui un lien de réinitialisation.</p>{resetSent===form.username?<p style={{fontSize:12,color:C.good,margin:0}}>✓ Lien envoyé à {resetSent}</p>:<Btn small onClick={()=>sendReset(form.username)} disabled={resetBusy}>{resetBusy?"Envoi…":"✉ Envoyer un lien de réinitialisation"}</Btn>}</div> onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><div><Lbl>Abonnement</Lbl><div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>{mainPlans.map(o=><button key={o.id} onClick={()=>setForm(p=>({...p,planId:o.id}))} style={{fontFamily:font,fontSize:13,padding:"10px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${form.planId===o.id?C.accent:C.border}`,background:form.planId===o.id?C.accentBg:"transparent",color:form.planId===o.id?C.accent:C.textMed,textAlign:"left"}}>{form.planId===o.id&&"✓ "}{o.label} — {o.price}</button>)}</div></div></div>{err&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:"14px 0 0"}}>{err}</p>}<div style={{display:"flex",gap:10,marginTop:24}}><Btn fill onClick={handleSave}>Mettre à jour</Btn><Btn onClick={()=>setEditor(null)}>Annuler</Btn></div></Modal>}
     {delUser&&<Modal onClose={()=>setDelUser(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer {delUser} ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>L'étudiant ne pourra plus se connecter.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delUser);setDelUser(null);}}>Supprimer</Btn><Btn onClick={()=>setDelUser(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
