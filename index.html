@@ -704,6 +704,7 @@ const supa = {
         body: JSON.stringify({ marketing_opt_in: !!optIn, marketing_updated_at: new Date().toISOString() }),
       });
       ok = r.ok;
+      if(!r.ok) console.log("MKT", r.status, await r.text());
     } catch {}
     // Trace horodatée du choix : une NOUVELLE ligne à chaque changement, jamais
     // une modification de l'ancienne. user_id est posé par la base (auth.uid()).
