@@ -7357,6 +7357,7 @@ function App(){
     setCurrentUser(u);
     storage.set("mx6-session",u);
     setView("dashboard");
+    supa.getCardsMeta().then(m=>{ if(m&&m.length)setCards(sortCardsGlobally(m)); }).catch(()=>{});
     return true;
   };
   const logout=async()=>{try{await sb.auth.signOut();}catch{}applySession(null);storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
