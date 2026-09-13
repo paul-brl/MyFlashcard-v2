@@ -700,9 +700,10 @@ const supa = {
     let ok=false;
     try {
       const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`, {
-        method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+        method:"PATCH", headers:{...H,"Prefer":"return=representation"},
         body: JSON.stringify({ marketing_opt_in: !!optIn, marketing_updated_at: new Date().toISOString() }),
       });
+      console.log("MKT-ROWS", r.status, JSON.stringify(await r.clone().json().catch(()=>null)));
       ok = r.ok;
          if(!r.ok) console.log("MKT", r.status, await r.text());
     } catch(e) { console.log("MKT-EXC", e && e.message); }
