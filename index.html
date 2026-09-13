@@ -994,11 +994,12 @@ const supa = {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts`, {
         method:"POST",
-        headers:{...H,"Prefer":"return=minimal"},
+        headers:{...H,"Prefer":"return=presentation"},
         body:JSON.stringify([{...post,created_at:new Date().toISOString()}])
       });
       if(!r.ok){ let msg=`HTTP ${r.status}`; try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}; throw new Error(msg); }
-      const d=await r.json();
+      const t=await r.text();
+      const d=t?JSON.parse(t):null;
       return Array.isArray(d)&&d.length>0?d[0]:null;
     } catch(e){ console.error("createForumPost failed:",e); throw e; }
   },
