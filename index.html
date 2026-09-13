@@ -944,13 +944,51 @@ const supa = {
       return Array.isArray(d)?d:null;
     } catch(e){ return null; }
   },
-  getForumPosts: async () => {
+   getForumPosts: async (isAdmin=false) => {
     try {
-      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts?select=id,username,display_name,role,body,parent_id,created_at&order=created_at.asc&limit=1000`,{headers:H});
+      // Un message masqué n'est pas filtré dans le navigateur : il n'est tout
+      // simplement pas envoyé aux étudiants. Seul l'administrateur le reçoit.
+      const hiddenFilter = isAdmin ? "" : "&hidden=is.false";
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts?select=id,username,display_name,role,body,parent_id,created_at,hidden${hiddenFilter}&order=created_at.asc&limit=1000`,{headers:H});
       if(!r.ok) return null;
       const d=await r.json();
       return Array.isArray(d)?d:null;
     } catch(e){ return null; }
+  },
+    createForumReport: async (rep) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_reports`, {
+        method:"POST", headers:{...H,"Prefer":"return=minimal"},
+        body:JSON.stringify([rep]),
+      });
+      return r.ok;
+    } catch { return false; }
+  },
+  getForumReports: async () => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_reports?select=*&order=created_at.desc&limit=300`,{headers:H});
+      if(!r.ok) return null;
+      const d=await r.json();
+      return Array.isArray(d)?d:null;
+    } catch { return null; }
+  },
+  setForumReportStatus: async (id, status) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_reports?id=eq.${encodeURIComponent(id)}`,{
+        method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+        body:JSON.stringify({ status, handled_at:new Date().toISOString() }),
+      });
+      return r.ok;
+    } catch { return false; }
+  },
+  setForumPostHidden: async (id, hidden) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts?id=eq.${encodeURIComponent(id)}`,{
+        method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+        body:JSON.stringify({ hidden:!!hidden, hidden_at:hidden?new Date().toISOString():null }),
+      });
+      return r.ok;
+    } catch { return false; }
   },
   createForumPost: async (post) => {
     try {
@@ -1073,7 +1111,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-13-legal3";
+const APP_VERSION="2026-09-14-forum";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -3747,10 +3785,11 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="reports" label="⚑ Signalements"/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>{setEditCard(null);setSubView("editor");}} onEdit={c=>{setEditCard(c);setSubView("editor");}} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="lessons"&&<AdminLessons cards={cards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
+    {tab==="reports"&&<AdminReports/>}
   <Footer/>
   </div>;
 }
@@ -4724,8 +4763,28 @@ function ForumTab({currentUser,pseudo,onRead}){
   // Suppression de ses propres messages : id du message en attente de confirmation.
   const [confirmDel,setConfirmDel]=useState(null);
   const [deleting,setDeleting]=useState(false);
+  const [reportFor,setReportFor]=useState(null),[reportReason,setReportReason]=useState("illicite"),[reportComment,setReportComment]=useState(""),[reporting,setReporting]=useState(false),[reportDone,setReportDone]=useState(false);
+  const REPORT_REASONS=[["illicite","Contenu illicite ou haineux"],["donnees","Données personnelles d'un tiers"],["spam","Spam ou publicité"],["droits","Atteinte aux droits d'autrui"],["autre","Autre"]];
+  const sendReport=async()=>{
+    if(!reportFor||reporting)return;
+    setReporting(true);
+    const ok=await supa.createForumReport({
+      post_id:String(reportFor.id),
+      reason:reportReason,
+      comment:reportComment.trim()||null,
+      post_excerpt:(reportFor.body||"").slice(0,500),
+      post_author:reportFor.display_name||null,
+    });
+    setReporting(false);
+    if(ok){setReportFor(null);setReportComment("");setReportReason("illicite");setReportDone(true);setTimeout(()=>setReportDone(false),5000);}
+    else setErr("Le signalement n'a pas pu être enregistré. Réessaie dans un instant.");
+  };
+  const toggleHidden=async p=>{
+    const ok=await supa.setForumPostHidden(p.id,!p.hidden);
+    if(ok)setPosts(list=>Array.isArray(list)?list.map(x=>x.id===p.id?{...x,hidden:!p.hidden}:x):list);
+  };
   const load=useCallback(async()=>{
-    const rows=await supa.getForumPosts();
+    const rows=await supa.getForumPosts(isAdmin);
     setPosts(rows);
     // Consulter le forum marque tout comme lu — uniquement dans ce navigateur.
     if(onRead&&Array.isArray(rows))onRead(latestOtherPost(rows,currentUser.username));
@@ -4795,9 +4854,12 @@ function ForumTab({currentUser,pseudo,onRead}){
       {p.role==="admin"&&<Tag color={C.again} bg={C.againBg} small>Admin</Tag>}
       <span style={{fontSize:11,color:C.textLt}}>{fmtDate(p.created_at)}</span>
     </div>
+    {p.hidden&&<p style={{fontFamily:mono,fontSize:10,letterSpacing:1.5,textTransform:"uppercase",color:C.imp,background:C.impBg,borderRadius:4,padding:"3px 8px",display:"inline-block",margin:"0 0 6px"}}>Masqué — visible des seuls administrateurs</p>}
     <p style={{fontSize:13.5,color:C.text,margin:"0 0 6px",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{p.body}</p>
     <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
       {!isReply&&<button onClick={()=>{setReplyTo(replyTo===p.id?null:p.id);setReplyBody("");}} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",padding:0}}>{replyTo===p.id?"Annuler":"↩ Répondre"}</button>}
+      {!canDelete(p)&&<button onClick={()=>{setReportFor(p);setReportComment("");}} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",padding:0}}>⚑ Signaler</button>}
+      {isAdmin&&<button onClick={()=>toggleHidden(p)} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:p.hidden?C.good:C.imp,textDecoration:"underline",padding:0}}>{p.hidden?"↩ Réafficher":"👁 Masquer"}</button>}
       {canDelete(p)&&confirmDel!==p.id&&<button onClick={()=>setConfirmDel(p.id)} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",padding:0}}>🗑 Supprimer</button>}
       {canDelete(p)&&confirmDel===p.id&&<span style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
         <span style={{fontSize:11,color:C.again}}>{!isReply&&(repliesOf[p.id]||[]).length>0?`Supprimer ce message et ses ${(repliesOf[p.id]||[]).length} réponse${(repliesOf[p.id]||[]).length>1?"s":""} ?`:"Supprimer définitivement ce message ?"}</span>
@@ -4814,6 +4876,9 @@ function ForumTab({currentUser,pseudo,onRead}){
   return <div style={{animation:"fadeIn 0.18s ease"}}>
     <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Forum</p>
     <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px"}}>Espace d'échange commun à tous les utilisateurs de MyFlashCard.</p>
+    <div style={{background:C.impBg,border:`1px solid var(--c-goldSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:20}}>
+      <p style={{fontSize:12,color:C.imp,margin:0,lineHeight:1.6}}>Les messages ci-dessous sont publiés par des étudiants. Ce ne sont pas des réponses pédagogiques officielles de MyFlashCard et ils peuvent contenir des erreurs.</p>
+    </div>
     <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:20}}>
       <p style={{fontSize:12,color:C.textLt,margin:"0 0 8px"}}>Tu postes sous le pseudo : <strong style={{color:nameColor(isAdmin?"admin":"student")}}>{pseudo||defaultPseudo(currentUser.username)}</strong> {isAdmin&&<span style={{color:C.textLt}}>(modifiable dans Réglages → Profil)</span>}</p>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -4821,6 +4886,8 @@ function ForumTab({currentUser,pseudo,onRead}){
         <Btn fill onClick={()=>submit(body,null)} disabled={!body.trim()||posting} style={{alignSelf:"flex-end"}}>{posting?"Envoi…":"Publier"}</Btn>
       </div>
       {err&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{err}</p>}
+      {reportDone&&<p style={{fontSize:12,color:C.good,margin:"8px 0 0"}}>✓ Signalement transmis aux administrateurs. Merci.</p>}
+      <p style={{fontSize:11,color:C.textLt,margin:"10px 0 0",lineHeight:1.6}}>En publiant, tu acceptes de respecter les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>CGU MyFlashCard</a>. Ne publie pas de données personnelles sensibles ni de contenu illicite ou portant atteinte aux droits d'autrui.</p>
     </div>
     {posts===undefined?(
       <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Chargement du forum…</p>
@@ -4836,6 +4903,77 @@ function ForumTab({currentUser,pseudo,onRead}){
         {[...topLevel].reverse().map(p=><React.Fragment key={p.id}>{renderPost(p,false)}</React.Fragment>)}
       </div>
     )}
+        {reportFor&&<Modal onClose={()=>setReportFor(null)} width={420}>
+      <p style={{fontFamily:serif,fontSize:20,margin:"0 0 6px"}}>Signaler ce message</p>
+      <p style={{fontSize:12,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Le message et son auteur sont transmis aux administrateurs, qui décideront de la suite. Aucune sanction n'est automatique.</p>
+      <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",marginBottom:16,maxHeight:120,overflowY:"auto"}}>
+        <p style={{fontSize:12,color:C.textMed,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{(reportFor.body||"").slice(0,300)}</p>
+      </div>
+      <Lbl>Motif</Lbl>
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+        {REPORT_REASONS.map(([id,lbl])=>(
+          <label key={id} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",fontSize:12.5,padding:"8px 10px",borderRadius:7,border:`1.5px solid ${reportReason===id?C.accent:C.border}`,background:reportReason===id?C.accentBg:"transparent",color:reportReason===id?C.accent:C.text}}>
+            <input type="radio" checked={reportReason===id} onChange={()=>setReportReason(id)} style={{accentColor:C.accent,flexShrink:0}}/>{lbl}
+          </label>
+        ))}
+      </div>
+      <Lbl>Précision (facultatif)</Lbl>
+      <textarea style={{...iBox,minHeight:60,marginTop:4}} value={reportComment} onChange={e=>setReportComment(e.target.value.slice(0,500))} placeholder="Ce qui te paraît problématique…"/>
+      <div style={{display:"flex",gap:10,marginTop:18}}>
+        <Btn fill full onClick={sendReport} disabled={reporting}>{reporting?"Envoi…":"Envoyer le signalement"}</Btn>
+        <Btn full onClick={()=>setReportFor(null)}>Annuler</Btn>
+      </div>
+    </Modal>}
+  </div>;
+}
+// ─── Signalements (espace administrateur) ─────────────────────────────────────
+function AdminReports(){
+  const [rows,setRows]=useState(undefined),[busy,setBusy]=useState(null);
+  const load=useCallback(async()=>{ setRows(await supa.getForumReports()); },[]);
+  useEffect(()=>{load();},[load]);
+  const LABELS={illicite:"Contenu illicite ou haineux",donnees:"Données personnelles d'un tiers",spam:"Spam ou publicité",droits:"Atteinte aux droits d'autrui",autre:"Autre"};
+  const act=async(rep,action)=>{
+    setBusy(rep.id);
+    try{
+      if(action==="hide")   await supa.setForumPostHidden(rep.post_id,true);
+      if(action==="show")   await supa.setForumPostHidden(rep.post_id,false);
+      if(action==="delete") await supa.deleteForumPost(rep.post_id);
+      await supa.setForumReportStatus(rep.id, action==="reject"?"rejected":"handled");
+      await load();
+    } finally { setBusy(null); }
+  };
+  const open=(rows||[]).filter(r=>r.status==="open");
+  const done=(rows||[]).filter(r=>r.status!=="open");
+  const Card=({r})=>(
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",marginBottom:8}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+        <Tag color={C.again} bg={C.againBg} small>{LABELS[r.reason]||r.reason}</Tag>
+        <span style={{fontSize:11,color:C.textLt}}>{new Date(r.created_at).toLocaleString("fr-FR")}</span>
+        {r.post_author&&<span style={{fontSize:11,color:C.textLt}}>· auteur : {r.post_author}</span>}
+        {r.status!=="open"&&<Tag color={C.textMed} bg={C.bg} small>{r.status==="handled"?"Traité":"Écarté"}</Tag>}
+      </div>
+      <p style={{fontSize:12.5,color:C.text,margin:"0 0 8px",lineHeight:1.6,whiteSpace:"pre-wrap",background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"8px 10px"}}>{r.post_excerpt||"(message vide)"}</p>
+      {r.comment&&<p style={{fontSize:12,color:C.textMed,margin:"0 0 8px",lineHeight:1.6}}>Précision : {r.comment}</p>}
+      {r.status==="open"&&<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <Btn small onClick={()=>act(r,"hide")} disabled={busy===r.id}>👁 Masquer le message</Btn>
+        <Btn small onClick={()=>act(r,"show")} disabled={busy===r.id}>↩ Réafficher</Btn>
+        <Btn small danger onClick={()=>act(r,"delete")} disabled={busy===r.id}>🗑 Supprimer</Btn>
+        <Btn small onClick={()=>act(r,"reject")} disabled={busy===r.id}>Écarter</Btn>
+      </div>}
+    </div>
+  );
+  return <div style={{maxWidth:700,margin:"0 auto",padding:24}}>
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Signalements</p>
+    <p style={{fontSize:12,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Masquer retire le message aux étudiants sans l'effacer. Supprimer est définitif. Écarter classe le signalement sans rien changer.</p>
+    {rows===undefined?<p style={{fontSize:13,color:C.textLt,textAlign:"center",padding:"24px 0"}}>Chargement…</p>
+     :rows===null?<p style={{fontSize:13,color:C.again,textAlign:"center",padding:"24px 0"}}>La table forum_reports n'est pas accessible.</p>
+     :rows.length===0?<p style={{fontSize:13,color:C.textLt,textAlign:"center",padding:"24px 0"}}>Aucun signalement.</p>
+     :<>
+        {open.length>0&&<p style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.again,margin:"0 0 8px"}}>À traiter — {open.length}</p>}
+        {open.map(r=><Card key={r.id} r={r}/>)}
+        {done.length>0&&<p style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"20px 0 8px"}}>Historique</p>}
+        {done.map(r=><Card key={r.id} r={r}/>)}
+      </>}
   </div>;
 }
 // ─── Cours PDF : composants partagés ──────────────────────────────────────────
