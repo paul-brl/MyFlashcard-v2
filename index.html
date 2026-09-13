@@ -654,6 +654,16 @@ const supa = {
       });
     } catch {}
   },
+  // Suppression définitive du compte. Le navigateur ne peut pas effacer un
+  // utilisateur Auth : seule une fonction serveur, munie de la clé service_role,
+  // en a le droit. Elle anonymise aussi les messages du forum avant d'effacer.
+  deleteMyAccount: async () => {
+    try {
+      const r = await fetch(`${EDGE_URL}/delete-account`, { method:"POST", headers:H });
+      if (!r.ok) { console.error("delete-account:", r.status, await r.text()); return false; }
+      return true;
+    } catch(e) { console.error("delete-account:", e); return false; }
+  },
   deleteAccount: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${username}`,{method:"DELETE",headers:H}); } catch {} },
   checkVerification: async (email, code) => {
     try {
@@ -1112,7 +1122,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-14-admin";
+const APP_VERSION="2026-09-14-delete";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -7008,16 +7018,25 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
     })()}
     {confirmDelAcc&&(()=>{
       const doConfirmDelete=async()=>{
-        const acc=(accounts||[]).find(a=>a.username===currentUser?.username);
-        const validPwd=acc?acc.password===delAccPwd:false;
-        if(!validPwd){setDelAccErr("Mot de passe incorrect.");return;}
-        setDelAccBusy(true);
-        try{ await onDeleteAccount(); } finally{ setDelAccBusy(false); }
+        if(delAccBusy)return;
+        setDelAccErr("");setDelAccBusy(true);
+        try{
+          // Le mot de passe est vérifié par Supabase, contre le hachage. Le
+          // navigateur ne compare plus rien lui-même — l'ancienne colonne en
+          // clair est vide pour tout compte créé depuis la migration.
+          const {error}=await sb.auth.signInWithPassword({email:currentUser.username,password:delAccPwd});
+          if(error){setDelAccErr("Mot de passe incorrect.");return;}
+          const ok=await onDeleteAccount();
+          if(ok===false)setDelAccErr(`La suppression a échoué. Réessaie, ou écris à ${CONTACT_EMAIL}.`);
+        } finally{ setDelAccBusy(false); }
       };
       return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:20}} onClick={()=>!delAccBusy&&setConfirmDelAcc(false)}>
         <div style={{background:C.surface,borderRadius:12,padding:"24px 22px",maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
           <p style={{fontFamily:serif,fontSize:17,margin:"0 0 8px"}}>⚠️ Supprimer définitivement ton compte ?</p>
-          <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Ton compte <strong>{currentUser?.username}</strong>, tes flashcards personnelles, ta progression de révision, tes points et ton classement seront <strong>définitivement effacés</strong>. Cette action est <strong>irréversible</strong>.</p>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Ton compte <strong>{currentUser?.username}</strong>, tes flashcards personnelles, ta progression de révision, tes points et ton classement seront <strong><p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Ton compte <strong>{currentUser?.username}</strong>, tes flashcards personnelles, ta progression de révision, tes points et ton classement seront <strong>définitivement supprimés</strong>. Cette action est <strong>irréversible</strong>.</p>
+          <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Si tu as acheté une offre MyFlashCard, tu perdras également l'accès aux contenus payants associés à ce compte. La suppression du compte n'entraîne pas le remboursement de tes achats.</p>
+          <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Tes messages du forum sont conservés pour la cohérence des discussions, mais ne seront plus rattachés à ton pseudonyme : ils apparaîtront sous « Utilisateur supprimé ».</p>
+          <p style={{fontSize:12,color:C.textLt,margin:"0 0 16px",lineHeight:1.6}}>Certaines données — preuves d'achat, pièces comptables — peuvent devoir être conservées séparément pour répondre à nos obligations légales, comme indiqué dans la <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>.</p>
           <Lbl>Mot de passe</Lbl>
           <input type="password" style={{...iBox,marginTop:4}} value={delAccPwd} onChange={e=>{setDelAccPwd(e.target.value);setDelAccErr("");}} onKeyDown={e=>e.key==="Enter"&&doConfirmDelete()} autoFocus/>
           {delAccErr&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{delAccErr}</p>}
@@ -7797,19 +7816,13 @@ function App(){
   // déconnecte. Action déclenchée uniquement depuis les Réglages, après
   // confirmation par mot de passe.
   const handleDeleteAccount=useCallback(async()=>{
-    if(!currentUser||currentUser.role==="admin")return;
+    if(!currentUser||currentUser.role==="admin")return false;
     const username=currentUser.username;
-    try{
-      await Promise.all([
-        supa.deleteAccount(username),
-        supa.deleteAllUserCards(username),
-        supa.deleteAllProgress(username),
-        supa.deleteDailyPoints(username),
-        supa.deleteAllJPlans?supa.deleteAllJPlans(username):Promise.resolve(),
-        supa.deleteProfile?supa.deleteProfile(username):Promise.resolve(),
-        supa.deleteAllCardOverrides(username),
-      ]);
-    }catch(e){ console.error("handleDeleteAccount failed:",e); }
+    // Tout se passe côté serveur, en une fois. Si la requête échoue, RIEN n'est
+    // effacé localement : mieux vaut un compte intact qu'une session vidée
+    // devant des données encore en base.
+    const ok=await supa.deleteMyAccount();
+    if(!ok)return false;
     [
       `mx6-prog-${username}`,`mx6-stats-${username}`,`mx6-points-${username}`,
       `mx6-extra-${username}`,`mx6-integrated-${username}`,`mx6-ucache-${username}`,
@@ -7822,7 +7835,9 @@ function App(){
     idbClear("img");idbClear("content");
     setAccounts(p=>p.filter(a=>a.username!==username));
     storage.del("mx6-session");
+    try{ await sb.auth.signOut(); }catch{}
     setCurrentUser(null);setProg({});setUserCards([]);setOverrides({});setPseudo("");setView("login");
+    return true;
   },[currentUser]);
   const handleRegister=useCallback(async newAcc=>{
     await supa.upsertAccount(newAcc);
