@@ -324,6 +324,7 @@
 </head>
 <body>
 <div id="root"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.23.9/babel.min.js"></script>
@@ -337,7 +338,31 @@ const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsI
 const EDGE_URL = `${SUPA_URL}/functions/v1`;
 // Nom du bucket Supabase Storage qui héberge les PDF de cours.
 const LESSON_BUCKET = "cours";
+// ─── Session Supabase Auth ───────────────────────────────────────────────────
+// H reste un OBJET (et non une fonction) : les ~40 appels existants écrivent
+// soit `headers:H`, soit `headers:{...H, …}`, et lisent donc son contenu au
+// moment de l'appel. Il suffit de réécrire son champ Authorization à chaque
+// changement de session pour que toutes les requêtes portent le jeton de
+// l'utilisateur connecté — sans modifier une seule de ces 40 lignes.
+const sb = window.supabase.createClient(SUPA_URL, SUPA_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+});
+let SB_SESSION = null;
 const H = { "Content-Type":"application/json", "apikey":SUPA_KEY, "Authorization":`Bearer ${SUPA_KEY}` };
+const applySession = s => {
+  SB_SESSION = s || null;
+  // Sans session, on retombe sur la clé anon : les pages publiques (accueil,
+  // connexion) continuent de fonctionner exactement comme avant.
+  H.Authorization = `Bearer ${s?.access_token || SUPA_KEY}`;
+};
+// L'identité vient TOUJOURS du jeton, jamais de localStorage.
+const sbUserId = () => SB_SESSION?.user?.id || null;
+const sbEmail  = () => (SB_SESSION?.user?.email || "").toLowerCase();
+const sbIsAdmin = () => SB_SESSION?.user?.app_metadata?.role === "admin";
+// Le jeton expire au bout d'une heure : supabase-js le renouvelle tout seul,
+// et nous réécrivons H à chaque renouvellement. Sans cela, une longue session
+// de révision commencerait à échouer silencieusement au bout d'une heure.
+sb.auth.onAuthStateChange((_evt, session) => applySession(session));
 const supa = {
   // Load metadata only — NO front/back. Fast even for 100k cards.
   // First page tells us the total count (Prefer: count=exact), then every
@@ -623,7 +648,8 @@ const supa = {
         // phone et created_at ne sont envoyés que s'ils sont fournis : une mise à
         // jour depuis l'espace admin ne doit ni effacer le numéro, ni réécrire la
         // date d'inscription (dont dépend l'éligibilité à l'offre de lancement).
-        body: JSON.stringify({ username:acc.username, password:acc.password, email:acc.email||"", plan_id:acc.planId, groups:acc.groups,
+        body: JSON.stringify({ username:acc.username, email:acc.email||"", plan_id:acc.planId, groups:acc.groups,
+          ...(acc.user_id?{user_id:acc.user_id}:{}),
           ...(acc.phone?{phone:acc.phone}:{}), ...(acc.createdAt?{created_at:acc.createdAt}:{}) }),
       });
     } catch {}
@@ -1028,7 +1054,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-08-27-2";
+const APP_VERSION="2026-09-13-auth";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -1657,20 +1683,12 @@ const SUBJECT_PLAN_MAP = {
   "g-biophys":"biophys","g-biostat":"biostat","g-anatomie":"anatomie",
   "g-physio":"physio","g-medic":"medic","g-ssh":"ssh"
 };
-const ADMIN_USERNAME = "admin";
-const ADMIN_PASSWORD = "medecine2024";
-const ADMIN2_USERNAME = "admin2";
-const ADMIN2_PASSWORD = "flashcard2025";
-const ADMIN3_USERNAME = "admin3";
-const ADMIN3_PASSWORD = "revision2027";
-const ADMIN4_USERNAME = "juliette.pelen";
-const ADMIN4_PASSWORD = "myflashcard!";
-const ADMINS = [
-  {username:ADMIN_USERNAME, password:ADMIN_PASSWORD},
-  {username:ADMIN2_USERNAME, password:ADMIN2_PASSWORD},
-  {username:ADMIN3_USERNAME, password:ADMIN3_PASSWORD},
-  {username:ADMIN4_USERNAME, password:ADMIN4_PASSWORD},
-];
+// ─── Administrateurs ─────────────────────────────────────────────────────────
+// Plus aucun identifiant en dur : le rôle est porté par le jeton Supabase Auth,
+// dans app_metadata — une zone que seule la clé service_role peut écrire. Un
+// utilisateur qui modifierait son navigateur ne peut donc pas se l'attribuer.
+// ADMINS reste défini (vide) pour ne casser aucune référence résiduelle.
+const ADMINS = [];
 const DEFAULT_SETTINGS = { againMin:1, hardMin:5, goodMin:10, easyDays:4, newCardsPerDay:20, maxReviewsPerDay:100, dailyGroups:[], dailyPackets:[], newCardOrder:"first", newCardEvery:5 };
 const INITIAL_CARDS = [];
 const groupLabel = (g) => g.label + (g.sem===1?" — Sem. 1":" — Sem. 2");
@@ -2550,7 +2568,18 @@ function ForgotPasswordModal({onClose,accounts,onPasswordReset}){
   const [step,setStep]=useState(1),[email,setEmail]=useState(""),[code,setCode]=useState(""),[password,setPassword]=useState(""),[confirm,setConfirm]=useState("");
   const [error,setError]=useState(""),[sending,setSending]=useState(false),[saving,setSaving]=useState(false),[done,setDone]=useState(false),[cooldown,setCooldown]=useState(0);
   const cooldownRef=useRef(null);
-  const handleSendCode=async()=>{setError("");if(!validateEmail(email)){setError("Adresse email invalide.");return;}const exists=accounts.find(a=>a.username===email.trim().toLowerCase());if(!exists){setError("Aucun compte trouvé avec cette adresse email.");return;}setSending(true);try{const r=await fetch(`${EDGE_URL}/send-verification`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`},body:JSON.stringify({email:email.trim().toLowerCase()})});if(!r.ok){const d=await r.json();throw new Error(d.error||"Erreur envoi");}setStep(2);startCooldown();}catch(e){setError(`Impossible d'envoyer le code : ${e.message}`);}finally{setSending(false);}};
+  const handleSendCode=async()=>{
+    setError("");
+    if(!validateEmail(email)){setError("Adresse email invalide.");return;}
+    setSending(true);
+    // Auth envoie un lien signé, à usage unique. Plus aucun code ne transite
+    // par une table lisible depuis le navigateur.
+    const {error}=await sb.auth.resetPasswordForEmail(email.trim().toLowerCase(),{redirectTo:window.location.origin});
+    setSending(false);
+    // Message volontairement identique que le compte existe ou non : cela évite
+    // de révéler qui est inscrit sur MyFlashcard.
+    setDone(true);
+  };
   const startCooldown=()=>{setCooldown(60);clearInterval(cooldownRef.current);cooldownRef.current=setInterval(()=>{setCooldown(v=>{if(v<=1){clearInterval(cooldownRef.current);return 0;}return v-1;});},1000);};
   const handleReset=async()=>{setError("");if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}if(!validatePassword(password).ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(password!==confirm){setError("Les mots de passe ne correspondent pas.");return;}setSaving(true);try{const valid=await supa.checkVerification(email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré. Demande un nouveau code.");setSaving(false);return;}const ok=await supa.updatePassword(email.trim().toLowerCase(),password);if(!ok){setError("Erreur lors de la mise à jour. Contacte le support.");setSaving(false);return;}onPasswordReset(email.trim().toLowerCase(),password);setDone(true);}catch(e){setError(`Erreur : ${e.message}`);}finally{setSaving(false);}};
   useEffect(()=>()=>clearInterval(cooldownRef.current),[]);
@@ -2567,7 +2596,7 @@ function ForgotPasswordModal({onClose,accounts,onPasswordReset}){
 // ─── Login ────────────────────────────────────────────────────────────────────
 function LoginView({onLogin,onShowLanding,onRegister,accounts,onPasswordReset,theme,onToggleTheme}){
   const [email,setEmail]=useState(""),[password,setPassword]=useState(""),[error,setError]=useState(""),[loading,setLoading]=useState(false),[showForgot,setShowForgot]=useState(false);
-  const handleSubmit=()=>{if(!email.trim()||!password.trim()){setError("Veuillez remplir tous les champs.");return;}setLoading(true);setError("");setTimeout(()=>{const ok=onLogin(email.trim().toLowerCase(),password);if(!ok)setError("Email ou mot de passe incorrect.");setLoading(false);},400);};
+  const handleSubmit=async()=>{if(!email.trim()||!password.trim()){setError("Veuillez remplir tous les champs.");return;}setLoading(true);setError("");const ok=await onLogin(email.trim().toLowerCase(),password);if(!ok)setError("Email ou mot de passe incorrect.");setLoading(false);};
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column"}}>
     <div style={{display:"flex",justifyContent:"flex-end",padding:"14px 18px 0"}}>{onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme}/>}</div>
     <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
@@ -2595,9 +2624,22 @@ function RegisterView({onRegister,onBack,accounts}){
   const [step,setStep]=useState(1),[form,setForm]=useState({email:"",password:"",confirm:"",pseudo:"",phone:""}),[code,setCode]=useState(""),[error,setError]=useState(""),[sending,setSending]=useState(false),[verifying,setVerifying]=useState(false),[resendCooldown,setResendCooldown]=useState(0);
   const cooldownRef=useRef(null);
   const pwdState=validatePassword(form.password);
-  const handleSendCode=async()=>{setError("");if(!validateEmail(form.email)){setError("Adresse email invalide.");return;}if(!form.pseudo.trim()){setError("Choisis un pseudonyme.");return;}if(!validatePhone(form.phone)){setError("Numéro de téléphone invalide. Exemple : 06 12 34 56 78.");return;}if(!pwdState.ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(form.password!==form.confirm){setError("Les mots de passe ne correspondent pas.");return;}if(accounts.find(a=>a.username===form.email.trim().toLowerCase())){setError("Cette adresse email est déjà utilisée.");return;}setSending(true);try{const r=await fetch(`${EDGE_URL}/send-verification`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`},body:JSON.stringify({email:form.email.trim().toLowerCase()})});if(!r.ok){const d=await r.json();throw new Error(d.error||"Erreur envoi");}setStep(2);startCooldown();}catch(e){setError(`Impossible d'envoyer le code : ${e.message}`);}finally{setSending(false);}};
+  const handleSendCode=async()=>{setError("");if(!validateEmail(form.email)){setError("Adresse email invalide.");return;}if(!form.pseudo.trim()){setError("Choisis un pseudonyme.");return;}if(!validatePhone(form.phone)){setError("Numéro de téléphone invalide. Exemple : 06 12 34 56 78.");return;}if(!pwdState.ok){setError("Le mot de passe ne respecte pas les critères.");return;}if(form.password!==form.confirm){setError("Les mots de passe ne correspondent pas.");return;}if(accounts.find(a=>a.username===form.email.trim().toLowerCase())){setError("Cette adresse email est déjà utilisée.");return;}setStep(2);
+  };
   const startCooldown=()=>{setResendCooldown(60);clearInterval(cooldownRef.current);cooldownRef.current=setInterval(()=>{setResendCooldown(v=>{if(v<=1){clearInterval(cooldownRef.current);return 0;}return v-1;});},1000);};
-  const handleVerify=async()=>{if(code.trim().length!==6){setError("Le code doit contenir 6 chiffres.");return;}setError("");setVerifying(true);try{const valid=await supa.checkVerification(form.email.trim().toLowerCase(),code.trim());if(!valid){setError("Code invalide ou expiré.");return;}const newAcc={username:form.email.trim().toLowerCase(),password:form.password,email:form.email.trim().toLowerCase(),planId:"prerentree",groups:FREE_GROUP_IDS,pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX),phone:normalizePhone(form.phone),createdAt:new Date().toISOString()};onRegister(newAcc);}catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}};
+  const handleVerify=async()=>{
+    setError("");setVerifying(true);
+    try{
+      const email=form.email.trim().toLowerCase();
+      const {data,error}=await sb.auth.signUp({email,password:form.password});
+      if(error){setError(error.message.includes("already")?"Cette adresse email est déjà utilisée.":`Erreur : ${error.message}`);return;}
+      if(data.session)applySession(data.session);
+      const newAcc={username:email,email,planId:"prerentree",groups:FREE_GROUP_IDS,
+        pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX),phone:normalizePhone(form.phone),
+        createdAt:new Date().toISOString(),user_id:data.user?.id||null};
+      onRegister(newAcc);
+    }catch(e){setError(`Erreur : ${e.message}`);}finally{setVerifying(false);}
+  };
   useEffect(()=>()=>clearInterval(cooldownRef.current),[]);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24}}>
     <div style={{width:"100%",maxWidth:420}}>
@@ -7133,7 +7175,11 @@ function App(){
         setCards(INITIAL_CARDS);
         setAccounts([]);
       } finally {
-        const saved=storage.get("mx6-session");
+        // La session vient du jeton Supabase, pas de localStorage : une session
+        // bricolée à la main ne donne plus aucun accès.
+        const {data:{session}}=await sb.auth.getSession();
+        applySession(session);
+        const saved=session?{...(storage.get("mx6-session")||{}),username:sbEmail(),role:sbIsAdmin()?"admin":"student"}:null;
         if(saved){
           let planId=toSubscriptionPlan(saved.plan?.planId||"prerentree");
           let groups=Array.isArray(saved.plan?.groups)?[...saved.plan.groups]:[];
@@ -7245,28 +7291,34 @@ function App(){
     }
     const t=setTimeout(()=>setPaymentStatus(null),8000);return()=>clearTimeout(t);
   },[currentUser]);
-  const handleLogin=(email,password)=>{
-    const lc=email.toLowerCase();
-    const adminMatch=ADMINS.find(a=>a.username===lc&&a.password===password);
-    if(adminMatch){const u={username:adminMatch.username,role:"admin",plan:{planId:"both",groups:ALL}};setProg(storage.get(`mx6-prog-${adminMatch.username}`)||{});refreshProgressFromCloud(adminMatch.username);setPseudo(getPseudo(adminMatch.username));refreshPseudoFromCloud(adminMatch.username);setResumeInfo(getStudySession(adminMatch.username));setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;}
-    const acc=accounts.find(a=>a.username===lc&&a.password===password);
-    if(acc){
-      const rawPlanId=acc.plan_id||acc.planId;
-      const subPlanId=toSubscriptionPlan(rawPlanId);
-      const supaGroups=Array.isArray(acc.groups)?acc.groups:[];
-      const extra=getExtraGroups(lc);
-      const groups=computeGroups(subPlanId,supaGroups,extra);
-      // Droits recalculés à partir des seules matières PAYÉES, jamais de acc.groups
-      // (qui contient aussi les matières offertes) — sinon un compte gratuit
-      // récupérait l'accès complet au S1 à chaque reconnexion.
-      const paid=derivePaidGroups(acc,lc);
-      const fullGroups=computeFullGroups(subPlanId,paid,[]);
-      const u={username:acc.username,role:"student",plan:{planId:subPlanId,groups,fullGroups}};
-      setProg(storage.get(`mx6-prog-${lc}`)||{});refreshProgressFromCloud(lc);setPseudo(getPseudo(lc));refreshPseudoFromCloud(lc);setResumeInfo(getStudySession(lc));setCurrentUser(u);storage.set("mx6-session",u);setView("dashboard");return true;
-    }
-    return false;
+   const handleLogin=async(email,password)=>{
+    const lc=email.trim().toLowerCase();
+    // La vérification du mot de passe se fait désormais CÔTÉ SERVEUR, chez
+    // Supabase, contre un hachage bcrypt. Le navigateur ne voit plus aucun
+    // mot de passe, ni le sien ni celui des autres.
+    const {data,error}=await sb.auth.signInWithPassword({email:lc,password});
+    if(error||!data?.session)return false;
+    applySession(data.session);
+    const isAdmin=sbIsAdmin();
+    // Les droits sont relus depuis le serveur à chaque connexion : ils ne
+    // dépendent plus de ce que contient localStorage.
+    const acc=await supa.getAccount(lc);
+    const subPlanId=isAdmin?"both":toSubscriptionPlan(acc?.plan_id||acc?.planId);
+    const groups=isAdmin?ALL:computeGroups(subPlanId,Array.isArray(acc?.groups)?acc.groups:[],getExtraGroups(lc));
+    const fullGroups=isAdmin?ALL:computeFullGroups(subPlanId,derivePaidGroups(acc,lc),[]);
+    const u={username:lc,role:isAdmin?"admin":"student",plan:{planId:subPlanId,groups,fullGroups}};
+    setProg(storage.get(`mx6-prog-${lc}`)||{});
+    refreshProgressFromCloud(lc);
+    setPseudo(getPseudo(lc));
+    refreshPseudoFromCloud(lc);
+    setResumeInfo(getStudySession(lc));
+    setCurrentUser(u);
+    storage.set("mx6-session",u);
+    setView("dashboard");
+    return true;
   };
-  const logout=()=>{storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
+  };
+  const logout=async()=>{try{await sb.auth.signOut();}catch{}applySession(null);storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
   const refreshProgressFromCloud=useCallback(async username=>{
     const remote=await supa.getProgress(username);
     if(remote===null)return;
