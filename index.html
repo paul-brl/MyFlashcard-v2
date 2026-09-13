@@ -698,17 +698,13 @@ const supa = {
   // Fetch a single user's account (lightweight alternative to getAccounts)
     setMarketingOptIn: async (username, optIn) => {
     let ok=false;
-    console.log("MKT-AUTH", H.Authorization.slice(-10), "| anon:", SUPA_KEY.slice(-10), "| user:", username);
-    console.log("MKT-GET", JSON.stringify(await (await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}&select=username,user_id`,{headers:H})).json()));
     try {
       const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`, {
-        method:"PATCH", headers:{...H,"Prefer":"return=representation"},
+        method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
         body: JSON.stringify({ marketing_opt_in: !!optIn, marketing_updated_at: new Date().toISOString() }),
       });
-      console.log("MKT-ROWS", r.status, JSON.stringify(await r.clone().json().catch(()=>null)));
       ok = r.ok;
-         if(!r.ok) console.log("MKT", r.status, await r.text());
-    } catch(e) { console.log("MKT-EXC", e && e.message); }
+   } catch {}
     // Trace horodatée du choix : une NOUVELLE ligne à chaque changement, jamais
     // une modification de l'ancienne. user_id est posé par la base (auth.uid()).
     try {
@@ -960,7 +956,7 @@ const supa = {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts`, {
         method:"POST",
-        headers:{...H,"Prefer":"return=representation"},
+        headers:{...H,"Prefer":"return=minimal"},
         body:JSON.stringify([{...post,created_at:new Date().toISOString()}])
       });
       if(!r.ok){ let msg=`HTTP ${r.status}`; try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}; throw new Error(msg); }
@@ -6708,7 +6704,6 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
     const next=!mktOptIn;
     setMktSaving(true);setMktOptIn(next);
     const ok=await supa.setMarketingOptIn(currentUser.username,next);
-    console.log("MKT-RES", ok, next);
     if(!ok)setMktOptIn(!next);
     setMktSaving(false);
   };
@@ -6809,7 +6804,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
       <SettingsSection title="🔒 Données personnelles">
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
           <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:mktOptIn===null?"default":"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}>
-           <input type="checkbox" checked={!!mktOptIn} disabled={mktSaving} onChange={toggleMkt} onClick={()=>console.log("MKT-CLICK")} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/>
+           <input type="checkbox" checked={!!mktOptIn} disabled={mktSaving} onChange={toggleMkt} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/>
             <span>{MARKETING_WORDING}<br/><span style={{fontSize:11,color:C.textLt}}>Ce choix est modifiable à tout moment. Le décocher ne change rien aux e-mails nécessaires à ton compte : confirmation, sécurité, mot de passe, achats.</span></span>
           </label>
           <p style={{fontSize:11.5,color:C.textMed,margin:0,lineHeight:1.6}}>Pour savoir quelles données sont traitées et comment exercer tes droits, consulte la <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>. Pour toute demande — accès, rectification, effacement, portabilité — écris à <a href={`mailto:${CONTACT_EMAIL}`} style={{color:C.accent}}>{CONTACT_EMAIL}</a>.</p>
