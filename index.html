@@ -1114,7 +1114,7 @@ const toSubscriptionPlan = pid => ["sem1","sem2","both","prerentree"].includes(p
 // Deux notions DISTINCTES, à ne jamais confondre :
 //
 //  · groups     → matières VISIBLES sur le tableau de bord. Contient toujours les
-//                 5 matières offertes, car tout le monde y a droit au cours 1.
+//                 5 matières offertes, car tout le monde y a droit aux cours offerts.
 //  · paidGroups → matières RÉELLEMENT PAYÉES, seules à donner accès aux cours 2+.
 //
 // Un abonnement actif ("sem1"/"sem2"/"both") ou l'achat d'une matière à l'unité
@@ -1154,12 +1154,13 @@ const derivePaidGroups = (acc, username) => {
   const local = username ? getExtraGroups(username) : [];
   return [...new Set([...planGroups, ...legacy, ...local])];
 };
-// Un cours est accessible si la matière est payée (accès complet), ou si c'est le
-// cours 1 d'une des matières offertes. La Biostatistique n'étant pas dans
-// FREE_GROUP_IDS, aucun de ses cours n'est offert.
+// Un cours est accessible si la matière est payée (accès complet), ou s'il fait
+// partie des cours offerts de cette matière (voir isFreeCourse / FREE_GROUP_IDS
+// et FREE_EXTRA_COURSE_NUMS). La Biostatistique n'étant pas dans FREE_GROUP_IDS,
+// aucun de ses cours n'est offert.
 const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
   if ((fullGroups||[]).includes(groupId)) return true;
-  if (num === 1 && FREE_GROUP_IDS.includes(groupId) && (userGroups||[]).includes(groupId)) return true;
+  if (isFreeCourse(groupId, num) && (userGroups||[]).includes(groupId)) return true;
   return false;
 };
 // ─── Forum : mémoire de lecture (100 % locale) ───────────────────────────────
@@ -1659,6 +1660,15 @@ const METHOD_EMPTY_MSG = {
   perso: "Aucune carte dans cette sélection.",
 };
 const FREE_GROUP_IDS = ["cell-bio","histo","biochem","biomol","biophys"]; // accès gratuit : 5 matières du semestre 1
+// Cours offerts EN PLUS du cours 1, matière par matière. C'est le seul endroit à
+// modifier pour ouvrir (ou refermer) un cours supplémentaire à tout le monde.
+// Exemple : "biochem":[2] → la Biochimie cours 2 est offerte comme le cours 1.
+const FREE_EXTRA_COURSE_NUMS = { "biochem":[2] };
+// Un cours est offert si sa matière fait partie des matières gratuites ET que
+// c'est le cours 1 ou l'un des cours supplémentaires ouverts ci-dessus.
+const isFreeCourse = (groupId, num) =>
+  FREE_GROUP_IDS.includes(groupId) &&
+  (num === 1 || (FREE_EXTRA_COURSE_NUMS[groupId] || []).includes(num));
 const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
 const SEM2 = GROUPS.filter(g=>g.sem===2).map(g=>g.id);
 const ALL  = [...SEM1,...SEM2];
