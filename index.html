@@ -696,6 +696,25 @@ const supa = {
     } catch { return false; }
   },
   // Fetch a single user's account (lightweight alternative to getAccounts)
+    setMarketingOptIn: async (username, optIn) => {
+    let ok=false;
+    try {
+      const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`, {
+        method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+        body: JSON.stringify({ marketing_opt_in: !!optIn, marketing_updated_at: new Date().toISOString() }),
+      });
+      ok = r.ok;
+    } catch {}
+    // Trace horodatée du choix : une NOUVELLE ligne à chaque changement, jamais
+    // une modification de l'ancienne. user_id est posé par la base (auth.uid()).
+    try {
+      await fetch(`${SUPA_URL}/rest/v1/consents`, {
+        method:"POST", headers:{...H,"Prefer":"return=minimal"},
+        body: JSON.stringify([{ doc_type:"marketing", version:MARKETING_VERSION, accepted:!!optIn, wording:MARKETING_WORDING }]),
+      });
+    } catch {}
+    return ok;
+  },
   getAccount: async (username) => {
     try {
       const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}&select=*`, { headers: H });
@@ -1054,7 +1073,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-13-legal2";
+const APP_VERSION="2026-09-13-legal3";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -6673,6 +6692,21 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
   const [pseudoInput,setPseudoInput]=useState(pseudo||"");
   const [pseudoSaved,setPseudoSaved]=useState(false);
   const [cacheCleared,setCacheCleared]=useState(false);
+    const [mktOptIn,setMktOptIn]=useState(null),[mktSaving,setMktSaving]=useState(false);
+  useEffect(()=>{
+    let alive=true;
+    if(!currentUser?.username)return;
+    supa.getAccount(currentUser.username).then(a=>{ if(alive&&a)setMktOptIn(!!a.marketing_opt_in); });
+    return()=>{alive=false;};
+  },[currentUser?.username]);
+  const toggleMkt=async()=>{
+    if(mktSaving||mktOptIn===null)return;
+    const next=!mktOptIn;
+    setMktSaving(true);setMktOptIn(next);
+    const ok=await supa.setMarketingOptIn(currentUser.username,next);
+    if(!ok)setMktOptIn(!next);
+    setMktSaving(false);
+  };
   useEffect(()=>{setPseudoInput(pseudo||"");},[pseudo]);
   const savePseudoClick=()=>{
     const trimmed=pseudoInput.trim().slice(0,PSEUDO_MAX);
@@ -6767,6 +6801,15 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
       {/* La zone de danger est nettement détachée du bouton Sauvegarder : elle
           n'a rien à voir avec l'enregistrement des réglages et ne doit jamais
           être cliquée par méprise. */}
+      <SettingsSection title="🔒 Données personnelles">
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
+          <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:mktOptIn===null?"default":"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}>
+            <input type="checkbox" checked={!!mktOptIn} disabled={mktOptIn===null||mktSaving} onChange={toggleMkt} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/>
+            <span>{MARKETING_WORDING}<br/><span style={{fontSize:11,color:C.textLt}}>Ce choix est modifiable à tout moment. Le décocher ne change rien aux e-mails nécessaires à ton compte : confirmation, sécurité, mot de passe, achats.</span></span>
+          </label>
+          <p style={{fontSize:11.5,color:C.textMed,margin:0,lineHeight:1.6}}>Pour savoir quelles données sont traitées et comment exercer tes droits, consulte la <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>. Pour toute demande — accès, rectification, effacement, portabilité — écris à <a href={`mailto:${CONTACT_EMAIL}`} style={{color:C.accent}}>{CONTACT_EMAIL}</a>.</p>
+        </div>
+      </SettingsSection>
       {onDeleteAccount&&currentUser?.role!=="admin"&&<div style={{marginTop:56,paddingTop:8}}>
         <SettingsSection title="⚠️ Zone de danger">
           <div style={{background:C.againBg,border:`1.5px solid var(--c-againSoft)`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
