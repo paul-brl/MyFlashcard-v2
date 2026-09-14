@@ -1220,7 +1220,23 @@ const computeFullGroups = (subscriptionPlanId, paidGroups, extraGroups) => {
 //  3. les achats mémorisés localement (mx6-extra-*) sont toujours ajoutés, ce qui
 //     couvre l'achat d'une matière pourtant offerte (ex. Biophysique) — cas que
 //     le repli hérité ne peut pas deviner.
+// Matières couvertes par un achat ENCORE VALIDE. Un achat remboursé, en cours de
+// rétractation, ou dont la date de fin est passée, n'ouvre plus aucun droit.
+// L'accès s'arrête au 30 juin de l'année universitaire : c'est ce que dit
+// access_end_date, calculée au moment de l'achat et jamais glissante.
+const activeGroupsFromPurchases = rows => [...new Set(
+  (rows||[])
+    .filter(p => p.status === "paid_active"
+      && (!p.access_end_date || new Date(`${p.access_end_date}T23:59:59`) >= new Date()))
+    .flatMap(p => Array.isArray(p.groups) ? p.groups : [])
+)];
+// Source de vérité des droits payants, posée après lecture de la table purchases.
+// Tant qu'elle vaut null — table injoignable, compte admin, lecture pas encore
+// faite — on retombe sur l'ancien calcul : jamais de perte d'accès par accident.
+let PAID_FROM_PURCHASES = null;
+const setPaidFromPurchases = rows => { PAID_FROM_PURCHASES = rows ? activeGroupsFromPurchases(rows) : null; };
 const derivePaidGroups = (acc, username) => {
+  if (Array.isArray(PAID_FROM_PURCHASES)) return [...PAID_FROM_PURCHASES];
   const planId = toSubscriptionPlan(acc?.plan_id || acc?.planId);
   const planGroups = isPaidPlan(planId) ? (PLANS.find(p => p.id === planId)?.groups || []) : [];
   const explicit = Array.isArray(acc?.paid_groups) ? acc.paid_groups : null;
@@ -7598,6 +7614,7 @@ function App(){
             const accPlan=toSubscriptionPlan(freshAcc.plan_id||freshAcc.planId);
             if(!pendingApplied)planId=accPlan;
           }
+          setPaidFromPurchases(await supa.getMyPurchases());
           const restoredPaid=freshAcc
             ? derivePaidGroups(freshAcc,saved.username)
             : [...new Set([...(isPaidPlan(planId)?(PLANS.find(p=>p.id===planId)?.groups||[]):[]),...extra])];
@@ -7733,6 +7750,7 @@ function App(){
     await new Promise(r=>setTimeout(r,80));
     let acc=await supa.getAccount(lc);
     if(!acc){ await new Promise(r=>setTimeout(r,500)); acc=await supa.getAccount(lc); }
+    if(!isAdmin)setPaidFromPurchases(await supa.getMyPurchases());
     const subPlanId=isAdmin?"both":toSubscriptionPlan(acc?.plan_id||acc?.planId);
     const groups=isAdmin?ALL:computeGroups(subPlanId,Array.isArray(acc?.groups)?acc.groups:[],getExtraGroups(lc));
     const fullGroups=isAdmin?ALL:computeFullGroups(subPlanId,derivePaidGroups(acc,lc),[]);
