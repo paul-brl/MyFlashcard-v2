@@ -7467,6 +7467,22 @@ function App(){
   useEffect(()=>{
     async function init(){
       let loadedAccounts=[];
+      // ─── La session AVANT la moindre requête ────────────────────────────────
+      // C'est ici que se jouait le bug des « paquets vides à la première
+      // connexion ». Auparavant, getCardsMeta() partait tout de suite, alors que
+      // supabase-js n'avait pas encore fini de restaurer (ou de rafraîchir) le
+      // jeton : l'en-tête Authorization portait donc encore la clé anon, la RLS
+      // renvoyait une liste vide, et l'application affichait des paquets sans
+      // aucune carte. Un rechargement « réparait » le problème par hasard,
+      // simplement parce que le jeton était alors déjà en cache et arrivait à
+      // temps. On attend désormais explicitement la session : toutes les
+      // requêtes qui suivent portent le bon jeton, dès le premier chargement.
+      let session=null;
+      try {
+        const {data}=await sb.auth.getSession();
+        session=data?.session||null;
+      } catch(e){ console.warn("getSession error:",e); }
+      applySession(session);
       try {
         const savedSet=storage.get("mx6-settings");
         if(savedSet)setSettings({...DEFAULT_SETTINGS,...savedSet});
@@ -7514,9 +7530,8 @@ function App(){
         setAccounts([]);
       } finally {
         // La session vient du jeton Supabase, pas de localStorage : une session
-        // bricolée à la main ne donne plus aucun accès.
-        const {data:{session}}=await sb.auth.getSession();
-        applySession(session);
+        // bricolée à la main ne donne plus aucun accès. Elle a déjà été résolue
+        // et appliquée en tout début d'init (voir plus haut) : on la réutilise.
         const saved=session?{...(storage.get("mx6-session")||{}),username:sbEmail(),role:sbIsAdmin()?"admin":"student"}:null;
         if(saved){
           let planId=toSubscriptionPlan(saved.plan?.planId||"prerentree");
@@ -7577,6 +7592,43 @@ function App(){
     }
     init();
   },[]);
+  // ─── Filet de sécurité : des paquets sans cartes ne doivent jamais rester ───
+  // Même avec la session résolue en amont, une requête peut échouer (réseau
+  // capricieux, jeton en cours de renouvellement au moment précis du premier
+  // appel, projet Supabase qui se réveille…). Plutôt que de laisser l'étudiant
+  // devant des paquets vides en attendant qu'il recharge lui-même la page, on
+  // retente automatiquement le chargement des cartes tant qu'un utilisateur est
+  // connecté et que la liste est vide, avec un délai qui s'allonge à chaque
+  // essai. Dès que les cartes arrivent, les tentatives s'arrêtent.
+  const cardsRetryRef=useRef(0);
+  const cardsLoadingRef=useRef(false);
+  // Rechargement des métadonnées de cartes, jeton resynchronisé au passage.
+  // Un verrou évite que la connexion et le filet de sécurité ne lancent deux
+  // fois la même requête en même temps.
+  const reloadCards=useCallback(async()=>{
+    if(cardsLoadingRef.current)return false;
+    cardsLoadingRef.current=true;
+    try{
+      try{ const {data}=await sb.auth.getSession(); applySession(data?.session||null); }catch{}
+      const m=await supa.getCardsMeta();
+      if(m&&m.length){ setCards(sortCardsGlobally(m)); setSupaError(null); return true; }
+      return false;
+    }catch(e){ console.warn("reloadCards failed:",e); return false; }
+    finally{ cardsLoadingRef.current=false; }
+  },[]);
+  useEffect(()=>{
+    if(!currentUser)return;
+    if(cards.length>0){cardsRetryRef.current=0;return;}
+    if(cardsRetryRef.current>=6)return;
+    let cancelled=false;
+    const attempt=cardsRetryRef.current;
+    const t=setTimeout(()=>{
+      if(cancelled)return;
+      cardsRetryRef.current=attempt+1;
+      reloadCards();
+    },attempt===0?150:700*attempt);
+    return()=>{cancelled=true;clearTimeout(t);};
+  },[currentUser,cards.length,reloadCards]);
   useEffect(()=>{
     if(!currentUser)return;
     const params=new URLSearchParams(window.location.search);
@@ -7659,11 +7711,17 @@ function App(){
     setCurrentUser(u);
     storage.set("mx6-session",u);
     setView("dashboard");
-    supa.getCardsMeta().then(m=>{ if(m&&m.length)setCards(sortCardsGlobally(m)); }).catch(()=>{});
+    // Les cartes sont relues avec le jeton fraîchement obtenu : si le premier
+    // chargement de la page s'était fait sans session (visiteur arrivé sur
+    // l'accueil), la RLS avait pu renvoyer une liste vide. Le compteur de
+    // tentatives repart à zéro pour que le filet de sécurité puisse de nouveau
+    // jouer son rôle sur ce compte.
+    cardsRetryRef.current=0;
+    reloadCards();
         if(isAdmin)supa.getAccounts().then(a=>{ if(Array.isArray(a)&&a.length)setAccounts(a); });
     return true;
   };
-  const logout=async()=>{try{await sb.auth.signOut();}catch{}applySession(null);storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
+  const logout=async()=>{try{await sb.auth.signOut();}catch{}applySession(null);cardsRetryRef.current=0;storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
   const refreshProgressFromCloud=useCallback(async username=>{
     const remote=await supa.getProgress(username);
     if(remote===null)return;
