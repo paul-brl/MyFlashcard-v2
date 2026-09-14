@@ -725,6 +725,14 @@ const supa = {
     } catch {}
     return ok;
   },
+    getMyPurchases: async () => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/purchases?select=*&order=purchase_date.desc`,{headers:H});
+      if(!r.ok) return null;
+      const d=await r.json();
+      return Array.isArray(d)?d:null;
+    } catch { return null; }
+  },
   getAccount: async (username) => {
     try {
       const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}&select=*`, { headers: H });
@@ -6856,6 +6864,15 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
   const [pseudoInput,setPseudoInput]=useState(pseudo||"");
   const [pseudoSaved,setPseudoSaved]=useState(false);
   const [cacheCleared,setCacheCleared]=useState(false);
+  const [purchases,setPurchases]=useState(undefined);
+  useEffect(()=>{ let alive=true; supa.getMyPurchases().then(d=>{ if(alive)setPurchases(d); }); return()=>{alive=false;}; },[]);
+  const purchaseLabel=o=>(PLANS.find(p=>p.id===o)?.label)||o;
+  const purchaseState=p=>{
+    if(p.status==="refunded")return{txt:"Remboursé",c:C.textLt,bg:C.bg};
+    if(p.status==="withdrawal_requested")return{txt:"Rétractation en cours",c:C.imp,bg:C.impBg};
+    if(p.access_end_date&&new Date(p.access_end_date)<new Date())return{txt:"Expiré",c:C.textLt,bg:C.bg};
+    return{txt:"Actif",c:C.good,bg:C.goodBg};
+  };
     const [mktOptIn,setMktOptIn]=useState(null),[mktSaving,setMktSaving]=useState(false);
   useEffect(()=>{
     let alive=true;
@@ -6965,6 +6982,23 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
       {/* La zone de danger est nettement détachée du bouton Sauvegarder : elle
           n'a rien à voir avec l'enregistrement des réglages et ne doit jamais
           être cliquée par méprise. */}
+      <SettingsSection title="🧾 Mes achats">
+        {purchases===undefined?<p style={{fontSize:12.5,color:C.textLt,margin:0}}>Chargement…</p>
+         :!purchases||purchases.length===0?<p style={{fontSize:12.5,color:C.textMed,margin:0,lineHeight:1.6}}>Aucun achat pour le moment. Les cours gratuits restent accessibles avec ton compte.</p>
+         :purchases.map(p=>{const st=purchaseState(p);return(
+          <div key={p.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8}}>
+              <p style={{fontFamily:serif,fontSize:15,margin:0}}>{purchaseLabel(p.offer)}</p>
+              <Tag color={st.c} bg={st.bg} small>{st.txt}</Tag>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:3,fontSize:12,color:C.textMed}}>
+              <span>Commandé le {new Date(p.purchase_date).toLocaleDateString("fr-FR")}{p.amount_cents?` · ${(p.amount_cents/100).toFixed(2).replace(".",",")} € TTC`:""}</span>
+              <span>Accès jusqu'au {new Date(p.access_end_date).toLocaleDateString("fr-FR")}</span>
+              <span style={{color:C.textLt}}>Paiement unique · aucune reconduction automatique</span>
+            </div>
+          </div>
+         );})}
+      </SettingsSection>
       <SettingsSection title="🔒 Données personnelles">
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
           <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:mktOptIn===null?"default":"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}>
