@@ -6044,13 +6044,6 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
   const displayName=pseudo||defaultPseudo(currentUser.username);
   const [showUpgrade,setShowUpgrade]=useState(false);
-  const [needCgu,setNeedCgu]=useState(false);
-  useEffect(()=>{
-    if(!currentUser||currentUser.role==="admin"){setNeedCgu(false);return;}
-    let alive=true;
-    supa.hasAcceptedCgu(CGU_VERSION).then(v=>{ if(alive&&v===false)setNeedCgu(true); });
-    return()=>{alive=false;};
-  },[currentUser]);
   const [cramPrompt,setCramPrompt]=useState(null); // {title, groupId, num, chapterId}
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
@@ -8628,6 +8621,13 @@ function App(){
   return null;
   };
   if(recoveryMode)return <ResetPasswordView onDone={()=>{ setRecoveryMode(false); setView("login"); }}/>;
+  const [needCgu,setNeedCgu]=useState(false);
+  useEffect(()=>{
+    if(!currentUser||currentUser.role==="admin"){setNeedCgu(false);return;}
+    let alive=true;
+    supa.hasAcceptedCgu(CGU_VERSION).then(v=>{ if(alive&&v===false)setNeedCgu(true); });
+    return()=>{alive=false;};
+  },[currentUser]);
   return <>
     {renderView()}
     {needCgu&&<CguGateModal onAccepted={()=>setNeedCgu(false)} onLogout={logout}/>}
