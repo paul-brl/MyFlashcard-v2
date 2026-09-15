@@ -1702,18 +1702,6 @@ const isPayablePrice = str => parsePrice(str)!=null && !/gratuit/i.test(String(s
 const promoAmount = str => { const v=parsePrice(str); return v==null?null:Math.round(v*(1-PROMO.rate)); };
 const promoLabel  = str => { const a=promoAmount(str); return a==null?str:`${a} €`; };
 const promoSaved  = str => { const v=parsePrice(str),a=promoAmount(str); return (v==null||a==null)?0:Math.round(v-a); };
-// ─── Stripe ──────────────────────────────────────────────────────────────────
-const STRIPE_LINKS = { "sem1":"https://buy.stripe.com/5kQ7sN68i58ocCW0gDasg00","sem2":"https://buy.stripe.com/3cI14p8gq30gauO1kHasg01","both":"https://buy.stripe.com/5kQeVf0NY0S85au8N9asg02","g-cell-bio":"https://buy.stripe.com/14A5kFaoy8kA0UegfBasg0d","g-histo":"https://buy.stripe.com/6oUeVfbsCgR6dH03sPasg04","g-biochem":"https://buy.stripe.com/4gM00l68i0S8cCW8N9asg05","g-biomol":"https://buy.stripe.com/3cI3cxgMW58o6ey6F1asg06","g-biophys":"https://buy.stripe.com/cNiaEZ2W6cAQ6ey0gDasg07","g-biostat":"https://buy.stripe.com/5kQdRb8gqeIYeL49Rdasg08","g-anatomie":"https://buy.stripe.com/fZu3cxcwGdEUauO3sPasg09","g-physio":"https://buy.stripe.com/bJe8wR2W644kauOfbxasg0c","g-medic":"https://buy.stripe.com/dRmfZj0NY1WcgTc8N9asg0b","g-ssh":"https://buy.stripe.com/cNi6oJ2W68kA32mgfBasg0a" };
-function redirectToStripe(planId, username) {
-  // Filet de sécurité : tant que PURCHASES_ENABLED est à false, aucune
-  // redirection de paiement n'est déclenchée, même si un bouton était oublié.
-  if (!PURCHASES_ENABLED) return false;
-  const base = STRIPE_LINKS[planId];
-  if (!base||base.includes("REMPLACE_MOI")) { alert("Le paiement en ligne n'est pas encore configuré pour ce plan."); return false; }
-  try { localStorage.setItem("mx6-pending-purchase", JSON.stringify({ planId, username, ts: Date.now() })); } catch {}
-  window.location.href = `${base}?client_reference_id=${encodeURIComponent(`${username}|${planId}`)}`;
-  return true;
-}
 // ─── Constants ───────────────────────────────────────────────────────────────
 const GROUPS = [
   { id:"cell-bio", label:"Biologie cellulaire",                   sem:1, nums:[1,2,3,4] },
