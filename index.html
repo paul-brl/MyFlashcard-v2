@@ -737,7 +737,7 @@ const supa = {
     } catch {}
     return ok;
   },
-      // Acceptation des CGU par un compte créé avant la mise en place des preuves.
+  // Acceptation des CGU par un compte créé avant la mise en place des preuves.
   hasAcceptedCgu: async (version) => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/consents?select=id&doc_type=eq.cgu&version=eq.${encodeURIComponent(version)}&limit=1`,{headers:H});
@@ -754,6 +754,17 @@ const supa = {
       });
       return r.ok;
     } catch { return false; }
+  },
+    requestWithdrawal: async (purchaseId) => {
+    try {
+      const r=await fetch(`${EDGE_URL}/request-withdrawal`,{
+        method:"POST", headers:{...H,"Content-Type":"application/json"},
+        body:JSON.stringify({ purchase_id: purchaseId }),
+      });
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok) return { ok:false, error:d.error||"erreur" };
+      return { ok:true, refunded:!!d.refunded };
+    } catch(e) { return { ok:false, error:String(e) }; }
   },
     getMyPurchases: async () => {
     try {
@@ -1163,7 +1174,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-15-catalogue";
+const APP_VERSION="2026-09-15-retractation";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -6959,6 +6970,23 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
   const [purchases,setPurchases]=useState(undefined);
   useEffect(()=>{ let alive=true; supa.getMyPurchases().then(d=>{ if(alive)setPurchases(d); }); return()=>{alive=false;}; },[]);
   const purchaseLabel=o=>(PLANS.find(p=>p.id===o)?.label)||o;
+  // Éligible tant que l'achat est actif et que les 14 jours ne sont pas écoulés.
+  const canWithdraw=p=>p.status==="paid_active"&&p.withdrawal_deadline&&new Date(p.withdrawal_deadline)>=new Date();
+  const [wdFor,setWdFor]=useState(null),[wdBusy,setWdBusy]=useState(false),[wdErr,setWdErr]=useState(""),[wdDone,setWdDone]=useState(false);
+  const confirmWithdrawal=async()=>{
+    if(!wdFor||wdBusy)return;
+    setWdBusy(true);setWdErr("");
+    const res=await supa.requestWithdrawal(wdFor.id);
+    setWdBusy(false);
+    if(!res.ok){
+      setWdErr(res.error==="delai depasse"?"Le délai de 14 jours est dépassé pour cet achat."
+        :res.error==="achat non eligible"?"Cet achat n'est plus éligible à la rétractation."
+        :`La demande n'a pas pu être enregistrée. Réessaie, ou écris à ${CONTACT_EMAIL}.`);
+      return;
+    }
+    setWdFor(null);setWdDone(true);
+    supa.getMyPurchases().then(d=>setPurchases(d));
+  };
   const purchaseState=p=>{
     if(p.status==="refunded")return{txt:"Remboursé",c:C.textLt,bg:C.bg};
     if(p.status==="withdrawal_requested")return{txt:"Rétractation en cours",c:C.imp,bg:C.impBg};
@@ -7086,11 +7114,29 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
             <div style={{display:"flex",flexDirection:"column",gap:3,fontSize:12,color:C.textMed}}>
               <span>Commandé le {new Date(p.purchase_date).toLocaleDateString("fr-FR")}{p.amount_cents?` · ${(p.amount_cents/100).toFixed(2).replace(".",",")} € TTC`:""}</span>
               <span>Accès jusqu'au {new Date(p.access_end_date).toLocaleDateString("fr-FR")}</span>
+                          {canWithdraw(p)&&<span style={{color:C.textLt}}>Rétractation possible jusqu'au {new Date(p.withdrawal_deadline).toLocaleDateString("fr-FR")}</span>}
               <span style={{color:C.textLt}}>Paiement unique · aucune reconduction automatique</span>
             </div>
+            {canWithdraw(p)&&<Btn small style={{marginTop:10}} onClick={()=>{setWdFor(p);setWdErr("");}}>Exercer mon droit de rétractation</Btn>}
           </div>
          );})}
       </SettingsSection>
+             {wdDone&&<p style={{fontSize:12.5,color:C.good,margin:"8px 0 0",lineHeight:1.6}}>✓ Ta rétractation est enregistrée. Un accusé de réception vient de t'être envoyé par e-mail.</p>}
+        {purchases&&purchases.length>0&&<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0",lineHeight:1.6}}>Tu disposes de 14 jours après l'achat pour te rétracter, sans avoir à te justifier. Le formulaire type figure en annexe des <a href="/cgv.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>CGV</a>.</p>}
+      </SettingsSection>
+      {wdFor&&<Modal onClose={()=>!wdBusy&&setWdFor(null)} width={420}>
+        <p style={{fontFamily:serif,fontSize:20,margin:"0 0 14px"}}>Exercer ton droit de rétractation</p>
+        <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"12px 14px",marginBottom:14,display:"flex",flexDirection:"column",gap:4,fontSize:12.5,color:C.textMed}}>
+          <span style={{fontFamily:serif,fontSize:15,color:C.text}}>{purchaseLabel(wdFor.offer)}</span>
+          <span>Commandé le {new Date(wdFor.purchase_date).toLocaleDateString("fr-FR")}</span>
+          {wdFor.amount_cents?<span>Montant payé : {(wdFor.amount_cents/100).toFixed(2).replace(".",",")} € TTC</span>:null}
+        </div>
+        <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 14px",lineHeight:1.65}}>En confirmant ta rétractation, ton accès payant à cette offre sera supprimé et ta demande de remboursement sera enregistrée. Ton compte, tes flashcards personnelles et ta progression sont conservés.</p>
+        <p style={{fontSize:11.5,color:C.textLt,margin:"0 0 16px",lineHeight:1.6}}>Aucun motif ne t'est demandé. Le remboursement est effectué sur le moyen de paiement utilisé lors de la commande.</p>
+        {wdErr&&<p style={{fontSize:12,color:C.again,margin:"0 0 12px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{wdErr}</p>}
+        <Btn fill full danger onClick={confirmWithdrawal} disabled={wdBusy}>{wdBusy?"Enregistrement…":"Confirmer ma rétractation"}</Btn>
+        <Btn full style={{marginTop:8}} onClick={()=>setWdFor(null)} disabled={wdBusy}>Annuler</Btn>
+      </Modal>}
       <SettingsSection title="🔒 Données personnelles">
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
           <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:mktOptIn===null?"default":"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}>
