@@ -1163,7 +1163,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-15-session";
+const APP_VERSION="2026-09-15-catalogue";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -7715,24 +7715,6 @@ function App(){
         if(saved){
           let planId=toSubscriptionPlan(saved.plan?.planId||"prerentree");
           let groups=Array.isArray(saved.plan?.groups)?[...saved.plan.groups]:[];
-          let pendingApplied=false;
-          let pendingGroups=[];
-          try{
-            const pending=JSON.parse(localStorage.getItem("mx6-pending-purchase")||"null");
-            if(pending&&pending.username===saved.username&&Date.now()-pending.ts<1200000){
-              const pp=PLANS.find(p=>p.id===pending.planId);
-              if(pp){
-                const isFullPlan=["sem1","sem2","both"].includes(pending.planId);
-                if(isFullPlan)planId=pending.planId;
-                pendingGroups=pp.groups||[];
-                saveExtraGroups(saved.username,[...getExtraGroups(saved.username),...pendingGroups]);
-                pendingApplied=true;
-              }
-              localStorage.removeItem("mx6-pending-purchase");
-            } else if(pending&&Date.now()-pending.ts>=1200000){
-              localStorage.removeItem("mx6-pending-purchase");
-            }
-          }catch{}
           const extra=getExtraGroups(saved.username);
           const restoredGroups=computeGroups(planId,groups,extra);
           // Les droits ne sont JAMAIS repris tels quels depuis la session stockée
@@ -7740,8 +7722,7 @@ function App(){
           // recalculés depuis le compte Supabase à chaque rechargement.
           const freshAcc=loadedAccounts.find(a=>a.username===saved.username)||null;
           if(freshAcc){
-            const accPlan=toSubscriptionPlan(freshAcc.plan_id||freshAcc.planId);
-            if(!pendingApplied)planId=accPlan;
+                        planId=toSubscriptionPlan(freshAcc.plan_id||freshAcc.planId);
           }
           setPaidFromPurchases(await supa.getMyPurchases());
           const restoredPaid=freshAcc
@@ -7763,10 +7744,6 @@ function App(){
           setCurrentUser(restored);
           storage.set("mx6-session",restored);
           setView("dashboard");
-          if(pendingApplied&&saved.username){
-            supa.updateGroups(saved.username,restoredGroups,planId).catch(()=>{});
-            supa.updatePaidGroups(saved.username,restoredFullGroups).catch(()=>{});
-          }
         }else{setView("landing");}
       }
     }
@@ -7816,33 +7793,17 @@ function App(){
     if(!payment)return;
     window.history.replaceState({},"",window.location.pathname);
     if(payment==="cancel"){
-      localStorage.removeItem("mx6-pending-purchase");
       setPaymentStatus("cancel");
       const t=setTimeout(()=>setPaymentStatus(null),6000);return()=>clearTimeout(t);
     }
     if(payment==="success"&&currentUser.role!=="admin"){
       setPaymentStatus("success");
-      const pending=JSON.parse(localStorage.getItem("mx6-pending-purchase")||"null");
-      if(pending&&pending.username===currentUser.username){
-        const pp=PLANS.find(p=>p.id===pending.planId);
-        if(pp){
-          const isFullPlan=["sem1","sem2","both"].includes(pending.planId);
-          const subPlanId=isFullPlan?pending.planId:(currentUser.plan?.planId||"prerentree");
-          const extra=getExtraGroups(currentUser.username);
-          saveExtraGroups(currentUser.username,[...extra,...pp.groups]);
-          const newGroups=computeGroups(subPlanId,currentUser.plan?.groups||[],pp.groups);
-          // L'achat qui vient d'aboutir est un droit payant : il alimente fullGroups.
-          const newFullGroups=computeFullGroups(subPlanId,currentUser.plan?.fullGroups||[],pp.groups);
-          const immediateUser={...currentUser,plan:{planId:subPlanId,groups:newGroups,fullGroups:newFullGroups}};
-          setCurrentUser(immediateUser);
-          storage.set("mx6-session",immediateUser);
-          supa.updateGroups(currentUser.username,newGroups,isFullPlan?subPlanId:undefined).catch(()=>{});
-          supa.updatePaidGroups(currentUser.username,newFullGroups).catch(()=>{});
-        }
-        localStorage.removeItem("mx6-pending-purchase");
-      }
+            // L'ouverture des droits est faite par le webhook Stripe, côté serveur.
+      // Le navigateur ne fait que relire ce que la base contient, après un
+      // court délai laissé au webhook pour traiter l'événement.
       setTimeout(async()=>{
         try{
+          setPaidFromPurchases(await supa.getMyPurchases());
           const acc=await supa.getAccount(currentUser.username);
           if(!acc)return;
           setAccounts(prev=>prev.map(a=>a.username===currentUser.username?{...a,...acc}:a));
