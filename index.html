@@ -7115,9 +7115,10 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
       const grp=GROUPS.find(g=>g.id===rGroup);
       const pktLabel=rPkt==="all"?"tout le cours":PACKETS.find(pk=>pk.id===rPkt)?.label;
       const doConfirm=async()=>{
-        const acc=(accounts||[]).find(a=>a.username===currentUser?.username);
-        const validPwd=acc?acc.password===resetPwd:false;
-        if(!validPwd){setResetErr("Mot de passe incorrect.");return;}
+        // Vraie ré-authentification : le mot de passe est vérifié par Supabase,
+        // contre le hachage. L'ancienne colonne en clair n'existe plus.
+        const {error}=await sb.auth.signInWithPassword({email:currentUser.username,password:resetPwd});
+        if(error){setResetErr("Mot de passe incorrect.");return;}
         onResetProgress(targetCards.map(cd=>cd.id),rResetOrder);
         setResetErr("");setResetDone(true);
         setTimeout(()=>{setConfirmReset(false);setResetDone(false);},1400);
