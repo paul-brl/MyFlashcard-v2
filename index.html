@@ -355,6 +355,28 @@ const applySession = s => {
   // connexion) continuent de fonctionner exactement comme avant.
   H.Authorization = `Bearer ${s?.access_token || SUPA_KEY}`;
 };
+// ─── Session expirée ─────────────────────────────────────────────────────────
+// Un jeton périmé ne provoque pas d'erreur visible : Supabase répond 401 et
+// l'application affiche des listes vides. L'étudiant croit alors avoir perdu
+// ses données. On intercepte donc ces 401 une bonne fois, au niveau du réseau.
+let SESSION_EXPIRED_FIRED = false;
+(function(){
+  const orig = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const r = await orig(...args);
+    try {
+      const url = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url) || "";
+      const signedIn = H.Authorization !== `Bearer ${SUPA_KEY}`;
+      if (r.status === 401 && signedIn && url.startsWith(SUPA_URL) && !url.includes("/auth/v1/")) {
+        if (!SESSION_EXPIRED_FIRED) {
+          SESSION_EXPIRED_FIRED = true;
+          window.dispatchEvent(new CustomEvent("mfc-session-expired"));
+        }
+      }
+    } catch {}
+    return r;
+  };
+})();
 // L'identité vient TOUJOURS du jeton, jamais de localStorage.
 const sbUserId = () => SB_SESSION?.user?.id || null;
 const sbEmail  = () => (SB_SESSION?.user?.email || "").toLowerCase();
@@ -1141,7 +1163,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-15-cgu-gate";
+const APP_VERSION="2026-09-15-session";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -7387,6 +7409,16 @@ function ResetPasswordView({onDone}){
 // Les comptes créés avant la mise en place des preuves n'ont accepté aucune
 // version des CGU. On la demande une fois, à la connexion. Pas de croix ni de
 // clic à côté pour fermer : soit on accepte, soit on se déconnecte.
+function SessionExpiredModal({onReconnect}){
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,zIndex:10000}}>
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"26px 24px",maxWidth:400,width:"100%",textAlign:"center"}}>
+      <p style={{fontSize:32,margin:"0 0 10px"}}>🔑</p>
+      <p style={{fontFamily:serif,fontSize:19,margin:"0 0 10px"}}>Ta session a expiré</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.65}}>Rien n'est perdu : tes flashcards, ta progression et tes points sont en sécurité. Reconnecte-toi pour les retrouver.</p>
+      <Btn fill full onClick={onReconnect}>Se reconnecter</Btn>
+    </div>
+  </div>;
+}
 function CguGateModal({onAccepted,onLogout}){
   const [ok,setOk]=useState(false),[busy,setBusy]=useState(false),[err,setErr]=useState("");
   const accept=async()=>{
@@ -7421,6 +7453,12 @@ function App(){
   const [updateDismissed,setUpdateDismissed]=useState(false);
   // ─── Porte CGU ──────────────────────────────────────────────────────────────
   // L'état vit ici, dans App, parce que c'est App qui rend <CguGateModal/>.
+  const [sessionExpired,setSessionExpired]=useState(false);
+  useEffect(()=>{
+    const onExpired=()=>setSessionExpired(true);
+    window.addEventListener("mfc-session-expired",onExpired);
+    return()=>window.removeEventListener("mfc-session-expired",onExpired);
+  },[]);
   const [needCgu,setNeedCgu]=useState(false);
   useEffect(()=>{
     if(!currentUser||currentUser.role==="admin"){setNeedCgu(false);return;}
@@ -8624,6 +8662,7 @@ function App(){
   return <>
     {renderView()}
     {needCgu&&<CguGateModal onAccepted={()=>setNeedCgu(false)} onLogout={logout}/>}
+    {sessionExpired&&<SessionExpiredModal onReconnect={async()=>{ try{await sb.auth.signOut();}catch{} storage.del("mx6-session"); window.location.reload(); }}/>}
     {updateReady&&!updateDismissed&&<UpdateBanner
       pending={pendingSaves}
       onDismiss={()=>setUpdateDismissed(true)}
