@@ -7114,7 +7114,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
       const targetCards=(cards||[]).filter(cd=>cd.groupId===rGroup&&cd.num===rNum&&(rPkt==="all"||cd.packetId===rPkt));
       const grp=GROUPS.find(g=>g.id===rGroup);
       const pktLabel=rPkt==="all"?"tout le cours":PACKETS.find(pk=>pk.id===rPkt)?.label;
-      const doConfirm=()=>{
+      const doConfirm=async()=>{
         const acc=(accounts||[]).find(a=>a.username===currentUser?.username);
         const validPwd=acc?acc.password===resetPwd:false;
         if(!validPwd){setResetErr("Mot de passe incorrect.");return;}
