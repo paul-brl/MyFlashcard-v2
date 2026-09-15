@@ -1133,7 +1133,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-14-vues";
+const APP_VERSION=""2026-09-15-cours-s1"";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -1253,6 +1253,13 @@ const derivePaidGroups = (acc, username) => {
 // partie des cours offerts de cette matière (voir isFreeCourse / FREE_GROUP_IDS
 // et FREE_EXTRA_COURSE_NUMS). La Biostatistique n'étant pas dans FREE_GROUP_IDS,
 // aucun de ses cours n'est offert.
+// Les PDF de cours du semestre 1 sont offerts à TOUT compte, conformément à
+// l'article 2 des CGV. Cela ne concerne que les cours : les flashcards du S1
+// restent payantes et continuent de passer par isCourseAccessible.
+const isLessonAccessible = (groupId, num, userGroups, fullGroups) => {
+  if ((GROUPS.find(g => g.id === groupId)?.sem) === 1) return true;
+  return isCourseAccessible(groupId, num, userGroups, fullGroups);
+};
 const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
   if ((fullGroups||[]).includes(groupId)) return true;
   if (isFreeCourse(groupId, num) && (userGroups||[]).includes(groupId)) return true;
@@ -5394,7 +5401,7 @@ function LessonsTab({semLabel,groups,lessonsByKey,lessons,loading,allCards,isAdm
   const [comingSoon,setComingSoon]=useState(null);
   function LessonGroupBlock({group}){
     const [activeCours,setActiveCours]=useState(null);
-    const groupLocked=!isAdmin&&!group.nums.some(n=>isCourseAccessible(group.id,n,userGroups,fullGroups));
+    const groupLocked=!isAdmin&&!group.nums.some(n=>isLessonAccessible(group.id,n,userGroups,fullGroups));
     const availableCount=group.nums.reduce((acc,n)=>{
       const chs=getLessonChapters(group.id,n,allCards,lessons);
       return acc+chs.filter((_,i)=>lessonsByKey[lessonKey(group.id,n,i+1)]).length;
@@ -5417,7 +5424,7 @@ function LessonsTab({semLabel,groups,lessonsByKey,lessons,loading,allCards,isAdm
       </div>
       <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",borderBottom:activeCours?`1px solid ${C.border}`:"none",background:C.surface}}>
         {group.nums.map(n=>{
-          const locked=!isAdmin&&!isCourseAccessible(group.id,n,userGroups,fullGroups);
+          const locked=!isAdmin&&!isLessonAccessible(group.id,n,userGroups,fullGroups);
           const active=activeCours===n;
           const chs=getLessonChapters(group.id,n,allCards,lessons);
           const ready=locked?0:chs.filter((_,i)=>lessonsByKey[lessonKey(group.id,n,i+1)]).length;
@@ -6072,7 +6079,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   // Garde-fou : même en forçant l'appel, un cours non débloqué ne s'ouvre pas.
   const openLessonSafe=useCallback((lesson,subtitle)=>{
     if(!lesson||!lesson.url)return;
-    if(!isAdmin&&!isCourseAccessible(lesson.groupId,lesson.num,userGroups,fullGroups)){
+    if(!isAdmin&&!isLessonAccessible(lesson.groupId,lesson.num,userGroups,fullGroups)){
       if(PURCHASES_VISIBLE)setShowUpgrade(true);
       return;
     }
