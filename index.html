@@ -7513,7 +7513,7 @@ function App(){
     if(pointsSyncTimer.current)clearTimeout(pointsSyncTimer.current);
     pointsSyncTimer.current=setTimeout(()=>{
       const d=todayPoints(username);
-      supa.upsertDailyPoints(currentUser.username,dateKey(),d.points,d.cards,rankDisplayName(currentUser.username,prefs.anon),prefs.anon);
+      supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
     },2000);
   },[]);
   const uname=currentUser?currentUser.username:null;
