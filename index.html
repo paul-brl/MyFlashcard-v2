@@ -725,6 +725,24 @@ const supa = {
     } catch {}
     return ok;
   },
+      // Acceptation des CGU par un compte créé avant la mise en place des preuves.
+  hasAcceptedCgu: async (version) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/consents?select=id&doc_type=eq.cgu&version=eq.${encodeURIComponent(version)}&limit=1`,{headers:H});
+      if(!r.ok) return null;          // table injoignable : on ne bloque personne
+      const d=await r.json();
+      return Array.isArray(d) && d.length>0;
+    } catch { return null; }
+  },
+  acceptCgu: async (version) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/consents`,{
+        method:"POST", headers:{...H,"Prefer":"return=minimal"},
+        body:JSON.stringify([{doc_type:"cgu",version,accepted:true}]),
+      });
+      return r.ok;
+    } catch { return false; }
+  },
     getMyPurchases: async () => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/purchases?select=*&order=purchase_date.desc`,{headers:H});
@@ -1133,7 +1151,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-15-cours-s1";
+const APP_VERSION="2026-09-15-cgu-gate";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -6026,6 +6044,13 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
   const displayName=pseudo||defaultPseudo(currentUser.username);
   const [showUpgrade,setShowUpgrade]=useState(false);
+  const [needCgu,setNeedCgu]=useState(false);
+  useEffect(()=>{
+    if(!currentUser||currentUser.role==="admin"){setNeedCgu(false);return;}
+    let alive=true;
+    supa.hasAcceptedCgu(CGU_VERSION).then(v=>{ if(alive&&v===false)setNeedCgu(true); });
+    return()=>{alive=false;};
+  },[currentUser]);
   const [cramPrompt,setCramPrompt]=useState(null); // {title, groupId, num, chapterId}
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
@@ -7375,6 +7400,33 @@ function ResetPasswordView({onDone}){
     </div>
   </div>;
 }
+// Les comptes créés avant la mise en place des preuves n'ont accepté aucune
+// version des CGU. On la demande une fois, à la connexion. Pas de croix ni de
+// clic à côté pour fermer : soit on accepte, soit on se déconnecte.
+function CguGateModal({onAccepted,onLogout}){
+  const [ok,setOk]=useState(false),[busy,setBusy]=useState(false),[err,setErr]=useState("");
+  const accept=async()=>{
+    if(!ok||busy)return;
+    setBusy(true);setErr("");
+    const done=await supa.acceptCgu(CGU_VERSION);
+    setBusy(false);
+    if(done)onAccepted(); else setErr("Enregistrement impossible. Réessaie dans un instant.");
+  };
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,zIndex:9999}}>
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"26px 24px",maxWidth:440,width:"100%",maxHeight:"90vh",overflowY:"auto"}}>
+      <p style={{fontFamily:serif,fontSize:20,margin:"0 0 10px"}}>Nos conditions d'utilisation</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.65}}>MyFlashCard s'est doté de conditions générales et d'une politique de confidentialité. Pour continuer à utiliser ton compte, merci de les accepter — ça ne prend qu'un instant.</p>
+      <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.text,marginBottom:14}}>
+        <input type="checkbox" checked={ok} onChange={e=>{setOk(e.target.checked);setErr("");}} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/>
+        <span>J'ai lu et j'accepte les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Conditions Générales d'Utilisation</a> de MyFlashCard.</span>
+      </label>
+      <p style={{fontSize:11,color:C.textLt,margin:"0 0 16px",lineHeight:1.6}}>MFC SAS traite les informations de ton compte pour fournir les services MyFlashCard. Pour en savoir plus sur tes données et tes droits, consulte la <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>.</p>
+      {err&&<p style={{fontSize:12,color:C.again,margin:"0 0 12px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{err}</p>}
+      <Btn fill full onClick={accept} disabled={!ok||busy}>{busy?"Enregistrement…":"Accepter et continuer"}</Btn>
+      <button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",display:"block",margin:"12px auto 0"}}>Se déconnecter</button>
+    </div>
+  </div>;
+}
 function App(){
   const [supaError,setSupaError]=useState(null);
   const [view,setView]=useState("loading"),[currentUser,setCurrentUser]=useState(null),[cards,setCards]=useState([]),[prog,setProg]=useState({}),[settings,setSettings]=useState(DEFAULT_SETTINGS),[accounts,setAccounts]=useState([]),[studyCtx,setStudyCtx]=useState(null),[paymentStatus,setPaymentStatus]=useState(null);
@@ -8578,6 +8630,7 @@ function App(){
   if(recoveryMode)return <ResetPasswordView onDone={()=>{ setRecoveryMode(false); setView("login"); }}/>;
   return <>
     {renderView()}
+    {needCgu&&<CguGateModal onAccepted={()=>setNeedCgu(false)} onLogout={logout}/>}
     {updateReady&&!updateDismissed&&<UpdateBanner
       pending={pendingSaves}
       onDismiss={()=>setUpdateDismissed(true)}
