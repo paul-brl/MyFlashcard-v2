@@ -1653,12 +1653,12 @@ const PURCHASE_NOTICE_HURRY = "Vraiment pressé ? Écris-nous et on ouvre ton ac
 
 // ─── Offre de lancement : −20 % ──────────────────────────────────────────────
 // Réservée aux comptes créés AVANT le 1er septembre — ce qui inclut tous les
-// comptes déjà existants — et affichée jusqu'au 15 septembre à minuit.
+// comptes déjà existants — et affichée jusqu'au 30 septembre à minuit.
 // Les dates sont en heure de Paris (UTC+2 en septembre).
 const PROMO = {
   rate: 0.20,
   signupBefore: "2026-09-01T00:00:00+02:00",
-  endsAt:       "2026-09-16T00:00:00+02:00", // le 15 septembre à minuit
+  endsAt:       "2026-10-01T00:00:00+02:00", // le 30 septembre à minuit, 
   label: "Offre de lancement",
 };
 const promoActive = () => Date.now() < new Date(PROMO.endsAt).getTime();
