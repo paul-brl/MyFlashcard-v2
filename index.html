@@ -672,16 +672,6 @@ const supa = {
       const d = await r.json(); return Array.isArray(d) && d.length > 0;
     } catch { return false; }
   },
-  updatePassword: async (email, newPassword) => {
-    try {
-      const r = await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(email)}`, {
-        method: "PATCH", headers: { ...H, "Prefer": "return=minimal" },
-        body: JSON.stringify({ password: newPassword }),
-      });
-      return r.ok;
-    } catch { return false; }
-  },
-  // Persist purchased groups to Supabase — called after every individual subject purchase
   updateGroups: async (username, groups, planId) => {
     try {
       const body = { groups };
@@ -7523,7 +7513,7 @@ function App(){
     if(pointsSyncTimer.current)clearTimeout(pointsSyncTimer.current);
     pointsSyncTimer.current=setTimeout(()=>{
       const d=todayPoints(username);
-      supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
+      supa.upsertDailyPoints(currentUser.username,dateKey(),d.points,d.cards,rankDisplayName(currentUser.username,prefs.anon),prefs.anon);
     },2000);
   },[]);
   const uname=currentUser?currentUser.username:null;
