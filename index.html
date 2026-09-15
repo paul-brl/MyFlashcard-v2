@@ -857,7 +857,7 @@ const supa = {
   },
   getLeaderboard: async (day) => {
     try {
-      const r=await fetch(`${SUPA_URL}/rest/v1/daily_points?day=eq.${day}&select=username,points,cards,display_name,anonymous&order=points.desc&limit=200`,{headers:H});
+      const r=await fetch(`${SUPA_URL}/rest/v1/daily_points_public?day=eq.${day}&select=user_id,points,cards,display_name,anonymous&order=points.desc&limit=200`,{headers:H});
       if(!r.ok) return null;
       const rows=await r.json();
       return Array.isArray(rows)?rows:null;
@@ -956,7 +956,7 @@ const supa = {
   // rend cette vérification négligeable même appelée toutes les minutes.
   getForumMeta: async () => {
     try {
-      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts?select=id,username,created_at&order=created_at.desc&limit=500`,{headers:H});
+      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts_public?select=id,user_id,created_at&order=created_at.desc&limit=500`,{headers:H});
       if(!r.ok) return null;
       const d=await r.json();
       return Array.isArray(d)?d:null;
@@ -966,8 +966,11 @@ const supa = {
     try {
       // Un message masqué n'est pas filtré dans le navigateur : il n'est tout
       // simplement pas envoyé aux étudiants. Seul l'administrateur le reçoit.
-      const hiddenFilter = isAdmin ? "" : "&hidden=is.false";
-      const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts?select=id,username,display_name,role,body,parent_id,created_at,hidden${hiddenFilter}&order=created_at.asc&limit=1000`,{headers:H});
+      // L'étudiant lit la vue publique : ni e-mail, ni message masqué. Seul
+      // l'administrateur interroge la table elle-même.
+      const r=isAdmin
+        ? await fetch(`${SUPA_URL}/rest/v1/forum_posts?select=id,user_id,username,display_name,role,body,parent_id,created_at,hidden&order=created_at.asc&limit=1000`,{headers:H})
+        : await fetch(`${SUPA_URL}/rest/v1/forum_posts_public?select=id,user_id,display_name,role,body,parent_id,created_at&order=created_at.asc&limit=1000`,{headers:H});
       if(!r.ok) return null;
       const d=await r.json();
       return Array.isArray(d)?d:null;
@@ -1130,7 +1133,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-14-delete";
+const APP_VERSION="2026-09-14-vues";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -1264,7 +1267,10 @@ const forumSeenKey = u => `mfc-forum-seen-${u}`;
 const getForumSeen = u => { try { return localStorage.getItem(forumSeenKey(u)) || ""; } catch { return ""; } };
 const setForumSeen = (u, iso) => { try { if (iso) localStorage.setItem(forumSeenKey(u), iso); } catch {} };
 // Date du message le plus récent écrit par quelqu'un d'autre que soi.
-const latestOtherPost = (rows, username) => (rows||[])
+// Les vues publiques ne renvoient plus l'e-mail : on reconnaît ses propres
+// messages à l'identifiant Auth, jamais au nom d'utilisateur.
+const latestOtherPost = (rows, uid) => (rows||[])
+  .filter(p => p && p.user_id !== uid && p.created_at)
   .filter(p => p && p.username !== username && p.created_at)
   .reduce((max, p) => (p.created_at > max ? p.created_at : max), "");
 // ─── Cours PDF : identifiants et petit magasin partagé ────────────────────────
@@ -4742,13 +4748,13 @@ function RankTab({username,tick}){
         ):(
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
             {board.map((row,i)=>{
-              const me=row.username===username;
+              const me=!!row.user_id&&row.user_id===sbUserId();
               const r=rankFor(row.points||0);
               const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
-              return <div key={row.username+i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",borderTop:i?`1px solid ${C.border}`:"none",background:me?C.accentBg:"transparent"}}>
+              return <div key={(row.user_id||"x")+i}style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",borderTop:i?`1px solid ${C.border}`:"none",background:me?C.accentBg:"transparent"}}>
                 <span style={{fontFamily:mono,fontSize:12,color:C.textLt,minWidth:30,textAlign:"right"}}>{medal||`#${i+1}`}</span>
                 <span style={{flex:1,fontSize:13,fontWeight:me?600:400,color:me?C.accent:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  {row.anonymous?"Anonyme":(row.display_name||rankDisplayName(row.username,false))}{me&&<span style={{fontFamily:mono,fontSize:9,marginLeft:8,color:C.accent}}>TOI</span>}
+                  {row.anonymous?"Anonyme":(row.display_name||"Étudiant")}{me&&<span style={{fontFamily:mono,fontSize:9,marginLeft:8,color:C.accent}}>TOI</span>}
                 </span>
                 <span style={{fontFamily:mono,fontSize:10,padding:"2px 8px",borderRadius:10,background:r.bg,color:r.col,fontWeight:700,whiteSpace:"nowrap"}}>{RANK_ICONS[r.tier]} {r.name}</span>
                 <strong style={{fontFamily:serif,fontSize:16,minWidth:52,textAlign:"right"}}>{row.points}</strong>
@@ -4882,7 +4888,7 @@ function ForumTab({currentUser,pseudo,onRead}){
     const rows=await supa.getForumPosts(isAdmin);
     setPosts(rows);
     // Consulter le forum marque tout comme lu — uniquement dans ce navigateur.
-    if(onRead&&Array.isArray(rows))onRead(latestOtherPost(rows,currentUser.username));
+    if(onRead&&Array.isArray(rows))onRead(latestOtherPost(rows,sbUserId()));
   },[onRead,currentUser.username]);
   useEffect(()=>{load();},[load]);
   const nameColor=role=>role==="admin"?C.again:C.easy;
@@ -4906,7 +4912,7 @@ function ForumTab({currentUser,pseudo,onRead}){
     }finally{setPosting(false);}
   };
   // Un message ne peut être supprimé que par son auteur.
-  const canDelete=p=>!!p&&p.username===currentUser.username;
+  const canDelete=p=>!!p&&!!p.user_id&&p.user_id===sbUserId();
   // Supprime un message. S'il s'agit d'un message principal, ses réponses sont
   // supprimées avec lui : sans cela elles resteraient en base sans parent et
   // disparaîtraient silencieusement de l'affichage.
@@ -6040,7 +6046,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   const refreshForumUnread=useCallback(async()=>{
     const meta=await supa.getForumMeta();
     if(!Array.isArray(meta))return;
-    const latest=latestOtherPost(meta,currentUser.username);
+    const latest=latestOtherPost(meta,sbUserId());
     setForumLatest(latest);
     const seen=getForumSeen(currentUser.username);
     if(!seen){ setForumSeen(currentUser.username,latest||new Date().toISOString()); setForumUnread(0); return; }
