@@ -7120,7 +7120,6 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
             {canWithdraw(p)&&<Btn small style={{marginTop:10}} onClick={()=>{setWdFor(p);setWdErr("");}}>Exercer mon droit de rétractation</Btn>}
           </div>
          );})}
-      </SettingsSection>
              {wdDone&&<p style={{fontSize:12.5,color:C.good,margin:"8px 0 0",lineHeight:1.6}}>✓ Ta rétractation est enregistrée. Un accusé de réception vient de t'être envoyé par e-mail.</p>}
         {purchases&&purchases.length>0&&<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0",lineHeight:1.6}}>Tu disposes de 14 jours après l'achat pour te rétracter, sans avoir à te justifier. Le formulaire type figure en annexe des <a href="/cgv.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>CGV</a>.</p>}
       </SettingsSection>
