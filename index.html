@@ -3981,6 +3981,20 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
   const [tab,setTab]=useState("cards"),[subView,setSubView]=useState("list"),[editCard,setEditCard]=useState(null);
   const [cardKey,setCardKey]=useState(0);
   const [saveFlash,setSaveFlash]=useState(false);
+  // ─── Conserver la position dans la liste ────────────────────────────────────
+  // Pendant l'édition, la liste passe en display:none : la page s'effondre en
+  // hauteur et le navigateur ramène le défilement en haut. On mémorise donc le
+  // défilement au moment d'ouvrir l'éditeur (création ou modification), pour le
+  // restaurer une fois revenu sur la liste — l'admin reste là où il était,
+  // qu'il ait créé une carte entre deux positions ou modifié une carte existante.
+  const scrollYRef=useRef(0);
+  const openEditor=useCallback((c)=>{scrollYRef.current=window.scrollY;setEditCard(c||null);setSubView("editor");},[]);
+  useEffect(()=>{
+    if(subView==="list"){
+      const y=scrollYRef.current;
+      requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,y)));
+    }
+  },[subView]);
   const handleSave=async(cardOrCards)=>{
     // onSaveCard renvoie false si tout ou partie de l'enregistrement a échoué.
     // Dans ce cas on NE réinitialise PAS l'éditeur : l'image et les zones déjà
@@ -4003,9 +4017,9 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
         <CardEditor key={cardKey} card={editCard} onSave={handleSave} onCancel={()=>setSubView("list")} officialCards={cards} onSortCards={onSortCards}/>
       </div>
     )}
-    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>{setEditCard(null);setSubView("editor");}}>+ Nouvelle carte</Btn>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>openEditor(null)}>+ Nouvelle carte</Btn>}/>
     <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="reports" label="⚑ Signalements"/></div>
-    {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>{setEditCard(null);setSubView("editor");}} onEdit={c=>{setEditCard(c);setSubView("editor");}} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
+    {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>openEditor(null)} onEdit={c=>openEditor(c)} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="lessons"&&<AdminLessons cards={cards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
     {tab==="reports"&&<AdminReports/>}
