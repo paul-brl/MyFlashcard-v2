@@ -257,6 +257,17 @@
     }
 
     /* Barres d'onglets : défilement horizontal plutôt que chevauchement */
+    /* Champ mot de passe : notre bouton "œil" maison affiche/masque la saisie.
+       Sans ces règles, Edge/IE ajoute son propre icône de révélation (-ms-reveal)
+       et Chrome/Safari peuvent superposer leur bouton d'auto-remplissage : les
+       deux se chevauchent avec notre bouton et donnent une icône qui semble
+       cassée ou ne réagit pas au clic. On masque les icônes natives pour ne
+       garder que la nôtre.                                                    */
+    input[type="password"]::-ms-reveal,
+    input[type="password"]::-ms-clear { display: none; }
+    input::-webkit-credentials-auto-fill-button,
+    input::-webkit-strong-password-auto-fill-button { visibility: hidden; pointer-events: none; position: absolute; right: 0; }
+
     .mfc-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
     @media (max-width: 640px) {
       .mfc-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
@@ -782,19 +793,119 @@ const supa = {
     } catch { return null; }
   },
   // ─── User personal cards (user_cards table) ──────────────────────────────────
-  getUserCards: async (username) => {
+  // Même principe que getCardsMeta/getCardsContent pour les cartes officielles,
+  // appliqué aux cartes personnelles : les métadonnées (classement, intégration)
+  // sont chargées d'un coup, SANS le recto/verso, qui n'arrive qu'à la demande —
+  // quand l'étudiant déplie un chapitre, ouvre l'édition d'une carte, ou que la
+  // carte entre dans une file de révision. Ça reste privé à son compte : la
+  // séparation par table (user_cards, pas cards) ne change pas.
+  //
+  // card_type est tenté dans la sélection pour reconnaître une carte d'occlusion
+  // sans télécharger son contenu — exactement comme pour les cartes officielles.
+  // Si la colonne n'existe pas encore côté Supabase, on retombe silencieusement
+  // sur une sélection sans elle plutôt que de casser le chargement : le type sera
+  // alors simplement déterminé un peu plus tard, dès que le contenu arrive.
+  getUserCardsMeta: async (username) => {
+    const mapRow=c=>({ id:c.id, front:null, back:null, groupId:c.group_id, num:c.personal_course_name?null:c.num, chapterId:c.chapter_id||1, packetId:c.packet_id, username, isUserCard:true, integrated:c.integrated||false, personalCourseName:c.personal_course_name||null, card_type:c.card_type||null });
+    const withType="id,group_id,num,chapter_id,packet_id,integrated,personal_course_name,card_type";
+    const withoutType="id,group_id,num,chapter_id,packet_id,integrated,personal_course_name";
     try {
-      const r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=*`, { headers: H });
+      let r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${withType}`, { headers: H });
+      if (!r.ok) r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${withoutType}`, { headers: H });
       if (!r.ok) return null; // HTTP error: table might not exist, auth error, etc.
       const d = await r.json();
       if (!Array.isArray(d)) return null; // Supabase returned an error object
-      return d.map(c => ({ id:c.id, front:c.front, back:c.back, groupId:c.group_id, num:c.personal_course_name?null:c.num, chapterId:c.chapter_id||1, packetId:c.packet_id, username:c.username, isUserCard:true, integrated:c.integrated||false, personalCourseName:c.personal_course_name||null }));
+      return d.map(mapRow);
     } catch { return null; } // Network error
   },
+  // Téléchargement brut du recto/verso d'une ou plusieurs cartes personnelles,
+  // sans passer par le cache — réservé aux appels internes, comme
+  // fetchCardsContentRaw pour les cartes officielles.
+  fetchUserCardsContentRaw: async (ids) => {
+    if(!ids||ids.length===0)return {};
+    const CHUNK=100;
+    const result={};
+    try {
+      const chunks=[];
+      for(let i=0;i<ids.length;i+=CHUNK)chunks.push(ids.slice(i,i+CHUNK));
+      await Promise.all(chunks.map(async chunk=>{
+        const idList=chunk.map(id=>`"${id}"`).join(',');
+        const r=await fetch(`${SUPA_URL}/rest/v1/user_cards?select=id,front,back,card_type&id=in.(${idList})`,{headers:H});
+        const d=await r.json();
+        if(r.ok&&Array.isArray(d))d.forEach(c=>{result[c.id]={front:c.front,back:c.back,card_type:c.card_type||null};});
+      }));
+    } catch(e){console.warn("fetchUserCardsContentRaw error:",e);}
+    return result;
+  },
+  // Recto/verso des cartes personnelles, servi d'abord depuis le cache disque —
+  // même mécanisme que getCardsContent (même magasin IndexedDB « content »),
+  // mais avec des clés préfixées par le pseudo du compte : deux comptes utilisés
+  // sur le même appareil ne partagent donc jamais leur cache de contenu privé.
+  getUserCardsContent: async (username, ids) => {
+    if(!ids||ids.length===0)return {};
+    const uniq=[...new Set(ids)];
+    const keyOf=id=>`u:${username}:${id}`;
+    const cached=await idbGetMany("content",uniq.map(keyOf));
+    const now=Date.now();
+    const result={};
+    const missing=[];
+    const stale=[];
+    uniq.forEach(id=>{
+      const hit=cached[keyOf(id)];
+      if(hit&&hit.front!==undefined){
+        result[id]={front:hit.front,back:hit.back,card_type:hit.card_type||null};
+        if(now-(hit.ts||0)>CONTENT_TTL)stale.push(id);
+      } else missing.push(id);
+    });
+    if(missing.length>0){
+      const fresh=await supa.fetchUserCardsContentRaw(missing);
+      Object.assign(result,fresh);
+      const entries=Object.entries(fresh).map(([id,c])=>[keyOf(id),{front:c.front,back:c.back,card_type:c.card_type,ts:now}]);
+      if(entries.length)idbSetMany("content",entries);
+    }
+    if(stale.length>0){
+      const toCheck=stale.slice(0,120);
+      setTimeout(()=>{
+        supa.fetchUserCardsContentRaw(toCheck).then(fresh=>{
+          const entries=Object.entries(fresh).map(([id,c])=>[keyOf(id),{front:c.front,back:c.back,card_type:c.card_type,ts:Date.now()}]);
+          if(entries.length)idbSetMany("content",entries);
+        }).catch(()=>{});
+      },1500);
+    }
+    return result;
+  },
   upsertUserCard: async (card) => {
-    const r=await fetch(`${SUPA_URL}/rest/v1/user_cards`, {
+    const body={ id:card.id, username:card.username, front:card.front, back:card.back, group_id:card.groupId, num:card.personalCourseName?null:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, integrated:card.integrated||false, personal_course_name:card.personalCourseName||null, card_type:card.card_type||'text' };
+    let r=await fetch(`${SUPA_URL}/rest/v1/user_cards`, {
       method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
-      body: JSON.stringify({ id:card.id, username:card.username, front:card.front, back:card.back, group_id:card.groupId, num:card.personalCourseName?null:card.num, chapter_id:card.chapterId||1, packet_id:card.packetId, integrated:card.integrated||false, personal_course_name:card.personalCourseName||null }),
+      body: JSON.stringify(body),
+    });
+    if(!r.ok){
+      // Colonne card_type pas encore créée côté Supabase (ancien schéma) : on
+      // retente sans elle plutôt que de bloquer tout enregistrement de carte.
+      const {card_type,...withoutType}=body;
+      r=await fetch(`${SUPA_URL}/rest/v1/user_cards`, {
+        method:"POST", headers:{...H,"Prefer":"resolution=merge-duplicates"},
+        body: JSON.stringify(withoutType),
+      });
+    }
+    if(!r.ok){
+      let msg=`HTTP ${r.status}`;
+      try{const t=await r.text();if(t)msg+=` — ${t}`;}catch{}
+      throw new Error(msg);
+    }
+    // Cache local immédiat : la copie sur cet appareil est à jour dès
+    // l'écriture, sans attendre une revalidation.
+    idbSet("content",`u:${card.username}:${card.id}`,{front:card.front,back:card.back,card_type:card.card_type||'text',ts:Date.now()});
+  },
+  // Bascule « intégré » d'une carte personnelle : un PATCH ciblé sur cette seule
+  // colonne, jamais un upsert complet — sinon une carte pas encore chargée
+  // (front/back encore à null le temps du chargement paresseux) écraserait son
+  // propre contenu en base avec du vide.
+  setUserCardIntegrated: async (id, integrated) => {
+    const r=await fetch(`${SUPA_URL}/rest/v1/user_cards?id=eq.${encodeURIComponent(id)}`,{
+      method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+      body: JSON.stringify({ integrated }),
     });
     if(!r.ok){
       let msg=`HTTP ${r.status}`;
@@ -1597,8 +1708,14 @@ const mergeIntegrated = (cards, username) => {
   const localIds = getIntegratedIds(username);
   return cards.map(c => ({...c, integrated: c.integrated || localIds.has(c.id)}));
 };
-const getUCache = u => { try { return JSON.parse(localStorage.getItem(`mx6-ucache-${u}`)||'[]'); } catch { return []; } };
-const setUCache = (u, cards) => { try { localStorage.setItem(`mx6-ucache-${u}`, JSON.stringify(cards)); } catch {} };
+// Cache d'amorçage (affichage instantané avant la réponse de Supabase) : SEULES
+// les métadonnées sont conservées ici, jamais le recto/verso. Un étudiant avec
+// beaucoup de cartes d'occlusion pouvait auparavant saturer le localStorage
+// (quelques Mo par image) ; le contenu vit désormais uniquement dans le cache
+// disque IndexedDB (magasin « content », voir supa.getUserCardsContent), à
+// l'identique des cartes officielles.
+const getUCache = u => { try { return JSON.parse(localStorage.getItem(`mx6-ucache-${u}`)||'[]').map(c=>({...c,front:c.front??null,back:c.back??null})); } catch { return []; } };
+const setUCache = (u, cards) => { try { localStorage.setItem(`mx6-ucache-${u}`, JSON.stringify(cards.map(({front,back,...meta})=>meta))); } catch {} };
 // ─── Adaptations personnelles des cartes officielles ──────────────────────────
 // Un étudiant peut reformuler une question, compléter une réponse ou ajouter une
 // image sur une carte officielle. Sa version vit dans un espace qui n'appartient
@@ -2639,9 +2756,14 @@ function ThemeToggle({theme,onToggle,compact}){
   </button>;
 }
 function Nav({left,center,right,theme,onToggleTheme}){return <div className="mfc-nav" style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,gap:12}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div className="mfc-nav-center" style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,textAlign:"center"}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{right}{onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme} compact/>}</div></div>;}
-function PasswordField({label,value,onChange,placeholder,onKeyDown,hint}){
+function PasswordField({label,value,onChange,placeholder,onKeyDown,hint,autoComplete}){
   const [show,setShow]=useState(false);
-  return <div><Lbl>{label}</Lbl><div style={{position:"relative"}}><input style={{...iLine,paddingRight:36}} type={show?"text":"password"} placeholder={placeholder||"••••••••"} value={value} onChange={onChange} onKeyDown={onKeyDown}/><button type="button" onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:16,padding:"2px 4px",lineHeight:1}}>{show?"🙈":"👁"}</button></div>{hint&&<p style={{fontSize:11,color:C.textLt,margin:"5px 0 0",lineHeight:1.5}}>{hint}</p>}</div>;
+  // Le bouton "œil" est le seul contrôle d'affichage voulu ici : autoComplete
+  // précis (plutôt que la valeur par défaut du navigateur) et les règles CSS
+  // globales sur ::-ms-reveal / le bouton d'auto-remplissage webkit évitent
+  // qu'une icône native ne vienne se superposer à la nôtre et la rende
+  // inutilisable en apparence.
+  return <div><Lbl>{label}</Lbl><div style={{position:"relative"}}><input style={{...iLine,paddingRight:36}} type={show?"text":"password"} placeholder={placeholder||"••••••••"} value={value} onChange={onChange} onKeyDown={onKeyDown} autoComplete={autoComplete||"current-password"}/><button type="button" onClick={()=>setShow(s=>!s)} aria-label={show?"Masquer le mot de passe":"Afficher le mot de passe"} title={show?"Masquer le mot de passe":"Afficher le mot de passe"} style={{position:"absolute",right:4,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:16,padding:"2px 4px",lineHeight:1,zIndex:1}}>{show?"🙈":"👁"}</button></div>{hint&&<p style={{fontSize:11,color:C.textLt,margin:"5px 0 0",lineHeight:1.5}}>{hint}</p>}</div>;
 }
 function PasswordStrength({password}){
   if(!password)return null;
@@ -2755,7 +2877,7 @@ function ForgotPasswordModal({onClose,accounts,onPasswordReset}){
       <><p style={{fontFamily:serif,fontSize:20,margin:"0 0 4px"}}>Mot de passe oublié</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>{step===1?"Saisis ton adresse email pour recevoir un code de réinitialisation.":`Code envoyé à ${email}. Saisis le code et ton nouveau mot de passe.`}</p>
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:22}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:24,height:24,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"var(--c-onSolid)":C.textLt,fontSize:11,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:32,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
         {step===1&&(<div><Lbl>Adresse email</Lbl><input style={iLine} type="email" placeholder="votre@email.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleSendCode()} autoFocus/>{error&&<p style={{fontSize:12,color:C.again,margin:"12px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:20,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Envoyer le code →"}</Btn></div>)}
-        {step===2&&(<div style={{display:"flex",flexDirection:"column",gap:16}}><div><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:28,fontWeight:700,letterSpacing:10,textAlign:"center",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} autoFocus/><p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",textAlign:"center"}}>Vérifie tes spams · expire dans 10 min</p></div><div><PasswordField label="Nouveau mot de passe" value={password} onChange={e=>setPassword(e.target.value)}/><PasswordStrength password={password}/></div><PasswordField label="Confirmer le mot de passe" value={confirm} onChange={e=>setConfirm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleReset()}/>{error&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:0}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px"}} onClick={handleReset} disabled={saving||code.length!==6}>{saving?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Réinitialisation…</>:"Réinitialiser le mot de passe →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(cooldown>0)return;handleSendCode();}} disabled={cooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:cooldown>0?"not-allowed":"pointer",color:cooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:cooldown>0?0.6:1}}>{cooldown>0?`Renvoyer (${cooldown}s)`:"Renvoyer un code"}</button></div></div>)}
+        {step===2&&(<div style={{display:"flex",flexDirection:"column",gap:16}}><div><Lbl>Code de vérification</Lbl><input style={{...iLine,fontSize:28,fontWeight:700,letterSpacing:10,textAlign:"center",fontFamily:mono,borderBottom:`2px solid ${C.accent}`}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,""))} autoFocus/><p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",textAlign:"center"}}>Vérifie tes spams · expire dans 10 min</p></div><div><PasswordField label="Nouveau mot de passe" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="new-password"/><PasswordStrength password={password}/></div><PasswordField label="Confirmer le mot de passe" value={confirm} onChange={e=>setConfirm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&handleReset()} autoComplete="new-password"/>{error&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:0}}>{error}</p>}<Btn fill full style={{fontSize:14,padding:"12px"}} onClick={handleReset} disabled={saving||code.length!==6}>{saving?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Réinitialisation…</>:"Réinitialiser le mot de passe →"}</Btn><div style={{display:"flex",justifyContent:"center",gap:16}}><button onClick={()=>{setStep(1);setCode("");setError("");}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline"}}>← Modifier l'email</button><button onClick={()=>{if(cooldown>0)return;handleSendCode();}} disabled={cooldown>0||sending} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:cooldown>0?"not-allowed":"pointer",color:cooldown>0?C.textLt:C.accent,textDecoration:"underline",opacity:cooldown>0?0.6:1}}>{cooldown>0?`Renvoyer (${cooldown}s)`:"Renvoyer un code"}</button></div></div>)}
       </>
     )}
   </Modal>;
@@ -2824,7 +2946,7 @@ function RegisterView({onRegister,onBack,accounts}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:24}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"var(--c-onSolid)":C.textLt,fontSize:12,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:40,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
       <p style={{textAlign:"center",fontSize:12,color:C.textLt,margin:"0 0 20px"}}>{step===1?"Étape 1 — Informations":"Étape 2 — Confirmation email"}</p>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
-        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid var(--c-utilSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p></div><div><Lbl>Numéro de téléphone</Lbl><input style={{...iLine,borderColor:form.phone&&!validatePhone(form.phone)?C.again:C.border}} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/>{form.phone&&!validatePhone(form.phone)?<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Numéro invalide — format français ou international</p>:<p style={{fontSize:10.5,color:C.textLt,margin:"4px 0 0",lineHeight:1.5}}>Obligatoire · uniquement pour te joindre au sujet de ton compte</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()}/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div><div style={{display:"flex",flexDirection:"column",gap:12,marginTop:20}}><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}><input type="checkbox" checked={cguOk} onChange={e=>{setCguOk(e.target.checked);setError("");}} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>J'ai lu et j'accepte les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Conditions Générales d'Utilisation</a> de MyFlashCard.</span></label><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.textMed}}><input type="checkbox" checked={marketingOk} onChange={e=>setMarketingOk(e.target.checked)} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>{MARKETING_WORDING} <span style={{color:C.textLt}}>(facultatif)</span></span></label><p style={{fontSize:11,color:C.textLt,lineHeight:1.6,margin:"2px 0 0"}}>MFC SAS traite les informations renseignées afin de créer et gérer votre compte et de fournir les services MyFlashCard. Pour en savoir plus sur l'utilisation de vos données et vos droits, consultez notre <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>.</p></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
+        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid var(--c-utilSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p></div><div><Lbl>Numéro de téléphone</Lbl><input style={{...iLine,borderColor:form.phone&&!validatePhone(form.phone)?C.again:C.border}} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/>{form.phone&&!validatePhone(form.phone)?<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Numéro invalide — format français ou international</p>:<p style={{fontSize:10.5,color:C.textLt,margin:"4px 0 0",lineHeight:1.5}}>Obligatoire · uniquement pour te joindre au sujet de ton compte</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))} autoComplete="new-password"/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()} autoComplete="new-password"/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div><div style={{display:"flex",flexDirection:"column",gap:12,marginTop:20}}><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}><input type="checkbox" checked={cguOk} onChange={e=>{setCguOk(e.target.checked);setError("");}} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>J'ai lu et j'accepte les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Conditions Générales d'Utilisation</a> de MyFlashCard.</span></label><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.textMed}}><input type="checkbox" checked={marketingOk} onChange={e=>setMarketingOk(e.target.checked)} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>{MARKETING_WORDING} <span style={{color:C.textLt}}>(facultatif)</span></span></label><p style={{fontSize:11,color:C.textLt,lineHeight:1.6,margin:"2px 0 0"}}>MFC SAS traite les informations renseignées afin de créer et gérer votre compte et de fournir les services MyFlashCard. Pour en savoir plus sur l'utilisation de vos données et vos droits, consultez notre <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>.</p></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
         {step===2&&<div>
           <div style={{textAlign:"center",marginBottom:24}}>
             <p style={{fontSize:40,margin:"0 0 12px"}}>✉️</p>
@@ -4291,10 +4413,50 @@ function StatsTab({username,progress,allCards,onUnbury,onStudyPerso}){
   const totalCorrect=stats.total.correct;
   const successRate=totalCards>0?Math.round(totalCorrect/totalCards*100):0;
   const totalSeconds=stats.total.seconds;
+  const [buriedSearch,setBuriedSearch]=useState("");
   const buriedCards=useMemo(()=>{
     if(!progress||!allCards)return[];
-    return allCards.filter(c=>progress[c.id]?.buried===true);
+    // Triées par ordre de priorité (prioritaire > importante > utile), en tenant
+    // compte d'un éventuel changement d'importance (packetOverride) — pas
+    // seulement le paquet d'origine de la carte.
+    const prioRank={prioritaire:0,important:1,utile:2};
+    return allCards.filter(c=>progress[c.id]?.buried===true)
+      .sort((a,b)=>(prioRank[effPkt(a,progress)]??9)-(prioRank[effPkt(b,progress)]??9));
   },[progress,allCards]);
+  // ─── Contenu chargé à la demande ───────────────────────────────────────────
+  // Les cartes (officielles comme personnelles) n'arrivent qu'en métadonnées :
+  // le recto/verso des cartes enfouies listées ici est donc récupéré à part,
+  // routé vers la bonne table selon l'origine de chaque carte — exactement le
+  // même principe que dans l'onglet « Mes flashcards » ou en pleine révision.
+  const [buriedContent,setBuriedContent]=useState({});
+  const buriedIdsKey=useMemo(()=>buriedCards.map(c=>c.id).join(','),[buriedCards]);
+  useEffect(()=>{
+    if(!buriedIdsKey)return;
+    const officialIds=buriedCards.filter(c=>!c.isUserCard&&c.front==null&&!buriedContent[c.id]).map(c=>c.id);
+    const userIds=buriedCards.filter(c=>c.isUserCard&&c.front==null&&!buriedContent[c.id]).map(c=>c.id);
+    if(officialIds.length===0&&userIds.length===0)return;
+    let cancelled=false;
+    Promise.all([
+      officialIds.length?supa.getCardsContent(officialIds):{},
+      userIds.length?supa.getUserCardsContent(username,userIds):{},
+    ]).then(([a,b])=>{
+      if(cancelled)return;
+      const merged={...a,...b};
+      if(Object.keys(merged).length>0)setBuriedContent(prev=>({...prev,...merged}));
+    }).catch(()=>{});
+    return()=>{cancelled=true;};
+  },[buriedIdsKey]);
+  const buriedCardsFiltered=useMemo(()=>{
+    const q=buriedSearch.trim().toLowerCase();
+    if(!q)return buriedCards;
+    return buriedCards.filter(c=>{
+      const full={...c,...(buriedContent[c.id]||{})};
+      const grp=GROUPS.find(g=>g.id===c.groupId);
+      const chName=getChapters(c.groupId,c.num)[c.chapterId-1];
+      const hay=[full.front,full.back,grp?.label,chName,`cours ${c.num}`,IMP_LABELS[effPkt(c,progress)]].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  },[buriedCards,buriedSearch,progress,buriedContent]);
   const flameCount=Math.min(streak,10);
   const flames=streak>0?"🔥".repeat(flameCount):"-";
   const heatDays=useMemo(()=>{
@@ -4405,32 +4567,40 @@ function StatsTab({username,progress,allCards,onUnbury,onStudyPerso}){
       <MethodStats username={username} progress={progress} allCards={allCards} onStudyPerso={onStudyPerso}/>
       {buriedCards.length>0&&(
         <div style={{marginTop:24,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
-          <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg,display:"flex",flexWrap:"wrap",gap:10,justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
               <span style={{fontSize:16}}>🙈</span>
               <p style={{fontFamily:serif,fontSize:15,margin:0}}>Cartes enfouies</p>
               <span style={{fontFamily:mono,fontSize:9,padding:"2px 7px",borderRadius:10,background:"var(--c-toast)",color:"var(--c-onSolid)",fontWeight:700}}>{buriedCards.length}</span>
             </div>
-            <p style={{fontSize:11,color:C.textLt,margin:0}}>Exclues de tes révisions · clique pour désenfouir</p>
+            <p style={{fontSize:11,color:C.textLt,margin:0}}>Triées par priorité · clique pour désenfouir</p>
+          </div>
+          <div style={{padding:"12px 18px",borderBottom:`1px solid ${C.border}`}}>
+            <input value={buriedSearch} onChange={e=>setBuriedSearch(e.target.value)} placeholder="🔎 Rechercher une carte enfouie (texte, chapitre, cours…)" style={{...iLine,fontSize:12.5}}/>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:0}}>
-            {buriedCards.map((card,i)=>{
+            {buriedCardsFiltered.length===0?(
+              <p style={{padding:"18px",fontSize:12.5,color:C.textLt,margin:0,textAlign:"center"}}>Aucune carte enfouie ne correspond à « {buriedSearch} ».</p>
+            ):buriedCardsFiltered.map((card,i)=>{
+              const full={...card,...(buriedContent[card.id]||{})};
+              const loaded=full.front!=null;
               const grp=GROUPS.find(g=>g.id===card.groupId);
               const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
+              const pkt=effPkt(card,progress);
               return(
                 <div key={card.id} style={{display:"flex",alignItems:"center",padding:"10px 18px",gap:12,borderTop:i>0?`1px solid ${C.border}`:"none"}}>
-                  <div style={{width:3,background:pC(card.packetId),borderRadius:2,alignSelf:"stretch",flexShrink:0}}/>
+                  <div style={{width:3,background:pC(pkt),borderRadius:2,alignSelf:"stretch",flexShrink:0}}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:4}}>
-                      <Tag color={pC(card.packetId)} bg={pB(card.packetId)} small>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
+                      <Tag color={pC(pkt)} bg={pB(pkt)} small>{IMP_LABELS[pkt]||PACKETS.find(p=>p.id===pkt)?.label}</Tag>
                       {grp&&<Tag color={C.textMed} bg={C.bg} small>{grp.label}</Tag>}
                       <Tag color={C.textMed} bg={C.bg} small>Cours {card.num}</Tag>
                       {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{card.chapterId} {chName}</Tag>}
                       {card.isUserCard&&<Tag color={"var(--c-violet)"} bg={"var(--c-violetBg)"} small>✏️ Perso</Tag>}
                     </div>
-                    {isOcclusion(card)?<p style={{fontFamily:serif,fontSize:12,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{card.front}</p>}
+                    {!loaded?<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Chargement…</p>:isOcclusion(full)?<p style={{fontFamily:serif,fontSize:12,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{full.front}</p>}
                   </div>
-                  <button onClick={()=>onUnbury&&onUnbury(card.id)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.good}`,background:C.goodBg,color:C.good,whiteSpace:"nowrap",flexShrink:0}}>👁 Désenfouir</button>
+                  <button onClick={()=>onUnbury&&onUnbury(card.id)} title="Remettre cette carte dans tes révisions — elle repartira comme une carte neuve" style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.good}`,background:C.goodBg,color:C.good,whiteSpace:"nowrap",flexShrink:0}}>👁 Désenfouir</button>
                 </div>
               );
             })}
@@ -4441,7 +4611,7 @@ function StatsTab({username,progress,allCards,onUnbury,onStudyPerso}){
   );
 }
 // ─── MyCardsTab ──────────────────────────────────────────────────────────────
-function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progress,onStudyUser,onStudyPersonal,jplans}){
+function MyCardsTab({userCards,username,onNew,onEdit,onDelete,onToggleIntegration,progress,onStudyUser,onStudyPersonal,jplans}){
   const [delId,setDelId]=useState(null);
   // Cartes sur un cours officiel (numéroté, créé par un administrateur) vs
   // cartes sur un cours personnel (nommé librement, visible uniquement par
@@ -4479,6 +4649,24 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
     const availNums=[...new Set(groupCards.map(c=>c.num))].sort((a,b)=>a-b);
     const courseCards=activeCours?groupCards.filter(c=>c.num===activeCours):[];
     const chapterIds=[...new Set(courseCards.map(c=>c.chapterId))].sort((a,b)=>a-b);
+    // ─── Contenu chargé à la demande ───────────────────────────────────────────
+    // Les cartes personnelles n'arrivent qu'en métadonnées (voir
+    // supa.getUserCardsMeta) : le recto/verso n'est téléchargé que pour le
+    // chapitre effectivement déplié, exactement comme la liste des cartes
+    // officielles côté admin.
+    const [contentMap,setContentMap]=useState({});
+    const expandedChCards=useMemo(()=>expandedCh!=null?courseCards.filter(c=>c.chapterId===expandedCh):[],[expandedCh,courseCards]);
+    const expandedChIdsKey=useMemo(()=>expandedChCards.map(c=>c.id).join(','),[expandedChCards]);
+    useEffect(()=>{
+      if(!expandedChIdsKey)return;
+      const missing=expandedChCards.filter(c=>c.front==null&&!contentMap[c.id]).map(c=>c.id);
+      if(missing.length===0)return;
+      let cancelled=false;
+      supa.getUserCardsContent(username,missing).then(data=>{
+        if(!cancelled&&Object.keys(data).length>0)setContentMap(prev=>({...prev,...data}));
+      }).catch(()=>{});
+      return()=>{cancelled=true;};
+    },[expandedChIdsKey]);
     function UserPktBtn({chapterId,pk}){
       const pkCards=courseCards.filter(c=>c.chapterId===chapterId&&c.packetId===pk.id);
       const due=dueIn(pkCards);
@@ -4531,9 +4719,11 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
             </div>
             {expanded&&<div style={{background:"var(--c-listBg)"}}>
               {chCards.map(card=>{
+                const full={...card,...(contentMap[card.id]||{})};
                 const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
                 const isIntegrated=card.integrated;
                 const dueCard=cardDueIn(card);
+                const loaded=full.front!=null;
                 return<div key={card.id} style={{borderTop:`1px solid ${C.border}`,padding:"10px 18px 10px 46px",display:"flex",alignItems:"flex-start",gap:12}}>
                   <div style={{width:3,height:"100%",background:pC(card.packetId),borderRadius:2,flexShrink:0,marginTop:2}}/>
                   <div style={{flex:1,minWidth:0}}>
@@ -4542,16 +4732,16 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
                       {dueCard&&<Tag color={C.accent} bg={C.accentBg} small>À réviser</Tag>}
                       {isIntegrated&&<Tag color={C.good} bg={C.goodBg} small>🔗 Intégré</Tag>}
                     </div>
-                    {isOcclusion(card)?<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<>
-                      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",lineHeight:1.4}}>{card.front}</p>
-                      <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{card.back}</p>
+                    {!loaded?<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Chargement…</p>:isOcclusion(full)?<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<>
+                      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",lineHeight:1.4}}>{full.front}</p>
+                      <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{full.back}</p>
                     </>}
                   </div>
                   <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
                     <button onClick={()=>onToggleIntegration(card)} title={isIntegrated?"Retirer des onglets semestres":"Intégrer dans les onglets semestres"} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1.5px solid ${isIntegrated?C.good:C.border}`,background:isIntegrated?C.goodBg:"transparent",color:isIntegrated?C.good:C.textMed,whiteSpace:"nowrap"}}>
                       {isIntegrated?"🔗 Intégré":"➕ Intégrer"}
                     </button>
-                    <button onClick={()=>onEdit(card)} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
+                    <button onClick={async()=>{const cached=contentMap[card.id];const content=cached||(await supa.getUserCardsContent(username,[card.id]))[card.id];onEdit({...card,...(content||{})});}} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
                     <button onClick={()=>setDelId(card.id)} title="Supprimer définitivement cette carte" style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,whiteSpace:"nowrap"}}>🗑 Supprimer</button>
                   </div>
                 </div>;
@@ -4568,6 +4758,20 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
     const courseCards=personalUserCards.filter(c=>c.personalCourseName===courseName);
     const subjectIds=[...new Set(courseCards.map(c=>c.groupId))];
     const subjectLabels=subjectIds.map(gid=>GROUPS.find(g=>g.id===gid)?.label).filter(Boolean);
+    // Même chargement à la demande que GroupPanel : le contenu de ces cartes
+    // n'arrive qu'une fois ce cours personnel déplié.
+    const [contentMap,setContentMap]=useState({});
+    const courseIdsKey=useMemo(()=>courseCards.map(c=>c.id).join(','),[courseCards]);
+    useEffect(()=>{
+      if(!expanded||!courseIdsKey)return;
+      const missing=courseCards.filter(c=>c.front==null&&!contentMap[c.id]).map(c=>c.id);
+      if(missing.length===0)return;
+      let cancelled=false;
+      supa.getUserCardsContent(username,missing).then(data=>{
+        if(!cancelled&&Object.keys(data).length>0)setContentMap(prev=>({...prev,...data}));
+      }).catch(()=>{});
+      return()=>{cancelled=true;};
+    },[expanded,courseIdsKey]);
     function PersonalPktBtn({pk}){
       const pkCards=courseCards.filter(c=>c.packetId===pk.id);
       const due=dueIn(pkCards);
@@ -4595,8 +4799,10 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
       </div>
       {expanded&&<div style={{background:"var(--c-listBg)"}}>
         {courseCards.map(card=>{
+          const full={...card,...(contentMap[card.id]||{})};
           const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
           const dueCard=cardDueIn(card);
+          const loaded=full.front!=null;
           return<div key={card.id} style={{borderTop:`1px solid ${C.border}`,padding:"10px 18px",display:"flex",alignItems:"flex-start",gap:12}}>
             <div style={{width:3,height:"100%",background:pC(card.packetId),borderRadius:2,flexShrink:0,marginTop:2}}/>
             <div style={{flex:1,minWidth:0}}>
@@ -4604,13 +4810,13 @@ function MyCardsTab({userCards,onNew,onEdit,onDelete,onToggleIntegration,progres
                 <Tag color={pC(card.packetId)} bg={pB(card.packetId)} small>{pkLabel}</Tag>
                 {dueCard&&<Tag color={C.accent} bg={C.accentBg} small>À réviser</Tag>}
               </div>
-              {isOcclusion(card)?<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<>
-                <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",lineHeight:1.4}}>{card.front}</p>
-                <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{card.back}</p>
+              {!loaded?<p style={{fontSize:12,color:C.textLt,margin:0,fontStyle:"italic"}}>Chargement…</p>:isOcclusion(full)?<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:0}}>🖼 Image Occlusion</p>:<>
+                <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 2px",lineHeight:1.4}}>{full.front}</p>
+                <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{full.back}</p>
               </>}
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-              <button onClick={()=>onEdit(card)} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
+              <button onClick={async()=>{const cached=contentMap[card.id];const content=cached||(await supa.getUserCardsContent(username,[card.id]))[card.id];onEdit({...card,...(content||{})});}} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
               <button onClick={()=>setDelId(card.id)} title="Supprimer définitivement cette carte" style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,whiteSpace:"nowrap"}}>🗑 Supprimer</button>
             </div>
           </div>;
@@ -6311,7 +6517,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
       ):activeTab==="stats"&&!isAdmin?(
         <StatsTab username={currentUser.username} progress={progress} allCards={allCardsProp||[...cards,...(userCards||[]).filter(c=>c.integrated)]} onUnbury={onUnbury} onStudyPerso={onStudyPerso}/>
       ):activeTab==="mes-cartes"&&!isAdmin?(
-        <MyCardsTab userCards={userCards||[]} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal} jplans={jplans}/>
+        <MyCardsTab userCards={userCards||[]} username={currentUser.username} onNew={onNewUserCard} onEdit={onEditUserCard} onDelete={onDeleteUserCard} onToggleIntegration={onToggleIntegration} progress={progress} onStudyUser={onStudyUser} onStudyPersonal={onStudyPersonal} jplans={jplans}/>
       ):activeTab==="shop"&&!isAdmin&&PURCHASES_VISIBLE?(
         <ShopTab userGroups={userGroups} fullGroups={fullGroups} planId={planId} username={currentUser.username} cards={allCards} progress={progress} settings={settings} onStudy={onStudy} onShowPacks={()=>setShowUpgrade(true)} promo={promo}/>
       ):activeTab==="cours1"||activeTab==="cours2"?(
@@ -6479,7 +6685,7 @@ function CardAdaptModal({card,onSave,onReset,onClose}){
   </Modal>;
 }
 // ─── Study ────────────────────────────────────────────────────────────────────
-function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,theme,onToggleTheme,onUndo,onQueueChange}){
+function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,username,theme,onToggleTheme,onUndo,onQueueChange}){
   // ─── Cartes mises en attente (méthodes des J et personnalisée) ──────────────
   // Une carte reportée ne quitte pas la session : elle attend ici que sa minuterie
   // expire, puis revient d'elle-même en fin de file — sans jamais interrompre la
@@ -6489,7 +6695,7 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
   const [waiting,setWaiting]=useState([]);
   const [wTick,setWTick]=useState(0);
   const [recallFlash,setRecallFlash]=useState(null);
-  const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0),[confirmDelCard,setConfirmDelCard]=useState(null),[delFlash,setDelFlash]=useState(false);
+  const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0),[confirmDelCard,setConfirmDelCard]=useState(null),[delFlash,setDelFlash]=useState(false),[confirmBury,setConfirmBury]=useState(false);
   // Adaptation personnelle de la carte affichée.
   const [adaptCard,setAdaptCard]=useState(null),[adaptFlash,setAdaptFlash]=useState(null);
   // ─── Préchargement glissant ────────────────────────────────────────────────
@@ -6508,10 +6714,19 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     //    On n'accepte que les réponses réellement remplies : une carte disparue du
     //    serveur renverrait un recto vide, et la réécrire à chaque passage
     //    relancerait cet effet en boucle sans fin.
-    const need=win.filter(c=>!c.front).map(c=>c.id);
-    if(need.length){
-      supa.getCardsContent(need).then(content=>{
-        if(!alive||!content)return;
+    // Les cartes personnelles (isUserCard) vivent dans user_cards, pas dans
+    // cards : leur contenu est donc récupéré via getUserCardsContent, sinon
+    // cet appel les chercherait dans la mauvaise table et ne les trouverait
+    // jamais — la carte resterait vide indéfiniment une fois atteinte.
+    const needOfficial=win.filter(c=>!c.front&&!c.isUserCard).map(c=>c.id);
+    const needUser=win.filter(c=>!c.front&&c.isUserCard).map(c=>c.id);
+    if(needOfficial.length||needUser.length){
+      Promise.all([
+        needOfficial.length?supa.getCardsContent(needOfficial):{},
+        needUser.length&&username?supa.getUserCardsContent(username,needUser):{},
+      ]).then(([a,b])=>{
+        if(!alive)return;
+        const content={...a,...b};
         const usable={};
         Object.entries(content).forEach(([id,c])=>{ if(c&&c.front)usable[id]=c; });
         if(!Object.keys(usable).length)return;
@@ -6532,7 +6747,7 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
       prefetchPlainImage(bc.img);
     });
     return()=>{alive=false;};
-  },[idx,localQ,overrides]);
+  },[idx,localQ,overrides,username]);
   // Le battement qui fait revenir les cartes en attente. Cinq secondes : assez fin
   // pour un report d'une minute, assez lâche pour ne rien coûter.
   useEffect(()=>{
@@ -6698,8 +6913,12 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     setUndoFlash({id:Date.now(),points:lost});
     setTimeout(()=>setUndoFlash(f=>f?null:f),2200);
   };
+  // Enfouir demande confirmation : l'opération remet le niveau d'apprentissage
+  // de la carte à zéro (elle repartira comme une carte neuve au désenfouissage),
+  // ce qui doit être clair pour l'étudiant avant qu'il ne clique.
   const handleBury=()=>{
     onBury&&onBury(card);
+    setConfirmBury(false);
     setBuryFlash(true);
     setTimeout(()=>setBuryFlash(false),1500);
     const q=[...localQ];q.splice(idx,1);
@@ -6793,7 +7012,7 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     return d>=1?Math.round(d):0;
   })();
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
-    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"var(--c-goldBg)",border:"1px solid #e6d3a3",color:"var(--c-gold)"}}>🏆 +{sessionPts}</span>}{mode!=="anki"&&waiting.length>0&&<button onClick={pullWaiting} title="Ces cartes reviendront d'elles-mêmes — clique pour les reprendre tout de suite" style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",borderRadius:10,background:C.hardBg,border:`1px solid ${C.hard}`,color:C.hard}}>⏳ {waiting.length} en attente</button>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span>{canUndo&&<button onClick={handleUndoClick} title="Revenir à la carte précédente pour corriger sa note" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,display:"flex",alignItems:"center",gap:4}}>↩ Précédente</button>}{!isAdmin&&!card.isUserCard&&onSaveOverride&&<button onClick={()=>setAdaptCard(card)} title="Reformuler cette carte pour toi — ta version reste privée et ne change rien pour les autres" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${card.isEdited?"var(--c-violet)":C.border}`,background:card.isEdited?"var(--c-violetBg)":"transparent",color:card.isEdited?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:4}}>✏️ {card.isEdited?"Ma version":"Adapter"}</button>}{!isAdmin&&card.isUserCard&&onDeleteUserCard&&<button onClick={()=>setConfirmDelCard(card)} title="Supprimer définitivement cette carte que tu as créée" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,display:"flex",alignItems:"center",gap:4}}>🗑 Supprimer ma carte</button>}{<button onClick={handleBury} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button>}</div>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"var(--c-goldBg)",border:"1px solid #e6d3a3",color:"var(--c-gold)"}}>🏆 +{sessionPts}</span>}{mode!=="anki"&&waiting.length>0&&<button onClick={pullWaiting} title="Ces cartes reviendront d'elles-mêmes — clique pour les reprendre tout de suite" style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",borderRadius:10,background:C.hardBg,border:`1px solid ${C.hard}`,color:C.hard}}>⏳ {waiting.length} en attente</button>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span>{canUndo&&<button onClick={handleUndoClick} title="Revenir à la carte précédente pour corriger sa note" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,display:"flex",alignItems:"center",gap:4}}>↩ Précédente</button>}{!isAdmin&&!card.isUserCard&&onSaveOverride&&<button onClick={()=>setAdaptCard(card)} title="Reformuler cette carte pour toi — ta version reste privée et ne change rien pour les autres" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${card.isEdited?"var(--c-violet)":C.border}`,background:card.isEdited?"var(--c-violetBg)":"transparent",color:card.isEdited?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:4}}>✏️ {card.isEdited?"Ma version":"Adapter"}</button>}{!isAdmin&&card.isUserCard&&onDeleteUserCard&&<button onClick={()=>setConfirmDelCard(card)} title="Supprimer définitivement cette carte que tu as créée" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,display:"flex",alignItems:"center",gap:4}}>🗑 Supprimer ma carte</button>}{<button onClick={()=>setConfirmBury(true)} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button>}</div>}/>
     <div style={{height:3,background:C.border}}><div style={{height:3,background:col,width:`${(idx/Math.max(1,localQ.length))*100}%`,transition:"width 0.3s"}}/></div>
     {cram&&<div style={{background:"var(--c-violetBg)",borderBottom:"1px solid var(--c-violetSoft)",padding:"8px 24px",textAlign:"center"}}><p style={{fontSize:12,color:"var(--c-violet)",margin:0,fontWeight:500}}>🗓️ Révision en avance — ces cartes comptent normalement, avec un gain réduit à la hauteur de l'avance prise</p></div>}
     {undoFlash&&<div key={undoFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:"var(--c-toast)",color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease",textAlign:"center"}}>↩ Retour sur la carte précédente{undoFlash.points>0?` — ${undoFlash.points} point${undoFlash.points>1?"s":""} retiré${undoFlash.points>1?"s":""}`:""}</div>}
@@ -6807,6 +7026,12 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
       <p style={{fontSize:13,color:C.textMed,margin:"0 0 8px",lineHeight:1.6}}>Cette carte que tu as créée sera définitivement effacée de ton compte, ainsi que sa place dans tes révisions.</p>
       <p style={{fontSize:12,color:C.textLt,margin:"0 0 22px",lineHeight:1.6}}>Les cartes officielles de MyFlashcard et les révisions des autres étudiants ne sont pas touchées.</p>
       <div style={{display:"flex",gap:10}}><Btn fill danger onClick={handleDeleteOwnCard}>Supprimer</Btn><Btn onClick={()=>setConfirmDelCard(null)}>Annuler</Btn></div>
+    </Modal>}
+    {confirmBury&&<Modal onClose={()=>setConfirmBury(false)} width={380}>
+      <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>🙈 Enfouir cette carte ?</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 8px",lineHeight:1.6}}>Elle disparaîtra de tes révisions jusqu'à ce que tu la désenfouisses toi-même, depuis <strong>Statistiques → Cartes enfouies</strong>.</p>
+      <p style={{fontSize:12.5,color:C.imp,background:C.impBg,border:`1px solid ${C.imp}`,borderRadius:6,padding:"8px 12px",margin:"0 0 22px",lineHeight:1.6}}>⚠️ Son niveau d'apprentissage repart à zéro : au désenfouissage, elle reviendra comme une carte neuve, pas à l'endroit où elle était.</p>
+      <div style={{display:"flex",gap:10}}><Btn fill onClick={handleBury}>🙈 Enfouir</Btn><Btn onClick={()=>setConfirmBury(false)}>Annuler</Btn></div>
     </Modal>}
     {gainFlash&&<div key={gainFlash.id} style={{position:"fixed",top:88,right:24,zIndex:210,background:"var(--c-goldBg)",border:"1.5px solid #b7791f",color:"var(--c-goldText)",borderRadius:10,padding:"10px 16px",fontFamily:font,boxShadow:"0 6px 20px rgba(0,0,0,0.12)",animation:"pointsPop 0.35s ease",textAlign:"right"}}>
       <div style={{fontFamily:serif,fontSize:22,fontWeight:600,lineHeight:1}}>+{gainFlash.points} pts</div>
@@ -7428,8 +7653,8 @@ function ResetPasswordView({onDone}){
             <p style={{fontFamily:serif,fontSize:21,margin:"0 0 6px"}}>Nouveau mot de passe</p>
             <p style={{fontSize:13,color:C.textMed,margin:"0 0 22px",lineHeight:1.6}}>Choisis un mot de passe que tu retiendras.</p>
             <div style={{display:"flex",flexDirection:"column",gap:18}}>
-              <div><PasswordField label="Nouveau mot de passe" value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}}/><PasswordStrength password={pwd}/></div>
-              <PasswordField label="Confirmer" value={confirm} onChange={e=>{setConfirm(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()}/>
+              <div><PasswordField label="Nouveau mot de passe" value={pwd} onChange={e=>{setPwd(e.target.value);setErr("");}} autoComplete="new-password"/><PasswordStrength password={pwd}/></div>
+              <PasswordField label="Confirmer" value={confirm} onChange={e=>{setConfirm(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()} autoComplete="new-password"/>
             </div>
             {err&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{err}</p>}
             <Btn fill full style={{marginTop:22,fontSize:14,padding:"12px"}} onClick={submit} disabled={busy}>{busy?"Enregistrement…":"Enregistrer →"}</Btn>
@@ -8097,11 +8322,15 @@ function App(){
     supa.upsertProfile(newAcc.username,chosen).catch(()=>{});
     setCurrentUser(u);storage.set("mx6-session",u);
   },[]);
+  // Chargement des cartes personnelles : métadonnées seules (comme
+  // getCardsMeta pour les cartes officielles), jamais le recto/verso — chargé
+  // à la demande par supa.getUserCardsContent, appelé depuis enrichCards ou
+  // depuis l'onglet « Mes flashcards » quand un chapitre est déplié.
   useEffect(()=>{
     if(!currentUser||currentUser.role==="admin"){setUserCards([]);return;}
     const cached=mergeIntegrated(getUCache(currentUser.username),currentUser.username);
     if(cached.length>0)setUserCards(cached);
-    supa.getUserCards(currentUser.username).then(uc=>{
+    supa.getUserCardsMeta(currentUser.username).then(uc=>{
       if(uc===null){
         console.warn("user_cards fetch failed — using localStorage cache");
         return;
@@ -8281,6 +8510,10 @@ function App(){
     },4000);
     return()=>clearTimeout(timer);
   },[currentUser?.username]);
+  // Un PATCH ciblé sur la seule colonne « integrated », jamais un upsert
+  // complet : la carte cliquée depuis la liste peut très bien ne pas avoir
+  // encore son contenu chargé (chargement paresseux) — un upsert aurait alors
+  // écrasé front/back en base avec du vide.
   const handleToggleIntegration=useCallback(async(card)=>{
     const updated={...card,integrated:!card.integrated};
     const ids=getIntegratedIds(currentUser.username);
@@ -8291,34 +8524,8 @@ function App(){
       setUCache(currentUser.username,newCards);
       return newCards;
     });
-    supa.upsertUserCard(updated).catch(e=>console.error("upsertUserCard failed:",e));
+    supa.setUserCardIntegrated(card.id,updated.integrated).catch(e=>console.error("setUserCardIntegrated failed:",e));
   },[currentUser]);
-  // Les cartes personnelles se révisent avec les trois mêmes méthodes que les
-  // cartes officielles. « method » vient du sélecteur de l'onglet Mes cartes ;
-  // sans lui, on retombe sur Anki — le comportement d'avant.
-  const startUserCardStudy=useCallback((gid,num,chapterId,pkId,method="anki")=>{
-    const filtered=userCards.filter(c=>
-      c.groupId===gid&&c.num===num&&
-      (chapterId===null||c.chapterId===chapterId)&&
-      (pkId===null||c.packetId===pkId)
-    );
-    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
-    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
-    const grp=GROUPS.find(g=>g.id===gid);
-    const chName=chapterId?getChapters(gid,num)[chapterId-1]:"";
-    const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
-    const label=`${METHOD_PREFIX[mode]} Personnel · ${grp?.label} · Cours ${num}${chName?" · "+chName:""}${pkLabel?" · "+pkLabel:""}`;
-    setStudyCtx({label,queue,mode});
-    setView("study");
-  },[userCards,prog,settings,jplans]);
-  const startPersonalCourseStudy=useCallback((courseName,pkId,method="anki")=>{
-    const filtered=userCards.filter(c=>c.personalCourseName===courseName&&(pkId===null||c.packetId===pkId));
-    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
-    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
-    const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
-    setStudyCtx({label:`${METHOD_PREFIX[mode]} Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`,queue,mode});
-    setView("study");
-  },[userCards,prog,settings,jplans]);
   const allCards=useMemo(()=>[
     ...cards,
     ...userCards.filter(c=>c.integrated)
@@ -8334,10 +8541,19 @@ function App(){
   // cartes — de quoi commencer immédiatement — et le reste arrive en arrière-plan
   // pendant que l'étudiant travaille, sans jamais l'interrompre.
   const HEAD_BATCH=8;
+  // Les cartes personnelles (isUserCard) vivent dans une table à part
+  // (user_cards) et sont donc chargées via getUserCardsContent plutôt que
+  // getCardsContent — même principe de chargement paresseux que les cartes
+  // officielles, juste routé vers la bonne table pour chacune.
   const enrichCards=useCallback(async(queue)=>{
     const need=queue.filter(c=>!c.front);
-    const head=need.slice(0,HEAD_BATCH).map(c=>c.id);
-    const headContent=head.length?await supa.getCardsContent(head):{};
+    const headOfficial=need.filter(c=>!c.isUserCard).slice(0,HEAD_BATCH).map(c=>c.id);
+    const headUser=need.filter(c=>c.isUserCard).slice(0,HEAD_BATCH).map(c=>c.id);
+    const [officialContent,userContent]=await Promise.all([
+      headOfficial.length?supa.getCardsContent(headOfficial):{},
+      headUser.length&&currentUser?supa.getUserCardsContent(currentUser.username,headUser):{},
+    ]);
+    const headContent={...officialContent,...userContent};
     // L'adaptation personnelle est posée PAR-DESSUS le contenu officiel, juste
     // après son chargement. La version d'origine reste attachée à la carte, ce
     // qui permet à l'étudiant de la consulter et d'y revenir quand il veut.
@@ -8356,10 +8572,43 @@ function App(){
     // Le reste de la file part se charger en arrière-plan dès que la session est
     // ouverte : l'étudiant révise pendant ce temps, et comme le cache est
     // persistant, la prochaine session sur ce paquet s'ouvrira instantanément.
-    const rest=out.filter(c=>!c.front).map(c=>c.id);
-    if(rest.length)setTimeout(()=>{ supa.getCardsContent(rest).catch(()=>{}); },600);
+    const restOfficial=out.filter(c=>!c.front&&!c.isUserCard).map(c=>c.id);
+    const restUser=out.filter(c=>!c.front&&c.isUserCard).map(c=>c.id);
+    if(restOfficial.length)setTimeout(()=>{ supa.getCardsContent(restOfficial).catch(()=>{}); },600);
+    if(restUser.length&&currentUser)setTimeout(()=>{ supa.getUserCardsContent(currentUser.username,restUser).catch(()=>{}); },600);
     return out;
-  },[overrides]);
+  },[overrides,currentUser]);
+  // Les cartes personnelles se révisent avec les trois mêmes méthodes que les
+  // cartes officielles. « method » vient du sélecteur de l'onglet Mes cartes ;
+  // sans lui, on retombe sur Anki — le comportement d'avant. La file est passée
+  // par enrichCards avant l'ouverture de la session, comme pour les cartes
+  // officielles : sans ça, une carte chargée en métadonnées seules (front:null)
+  // s'afficherait vide en pleine révision.
+  const startUserCardStudy=useCallback(async(gid,num,chapterId,pkId,method="anki")=>{
+    const filtered=userCards.filter(c=>
+      c.groupId===gid&&c.num===num&&
+      (chapterId===null||c.chapterId===chapterId)&&
+      (pkId===null||c.packetId===pkId)
+    );
+    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
+    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
+    const fullQueue=await enrichCards(queue);
+    const grp=GROUPS.find(g=>g.id===gid);
+    const chName=chapterId?getChapters(gid,num)[chapterId-1]:"";
+    const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
+    const label=`${METHOD_PREFIX[mode]} Personnel · ${grp?.label} · Cours ${num}${chName?" · "+chName:""}${pkLabel?" · "+pkLabel:""}`;
+    setStudyCtx({label,queue:fullQueue,mode});
+    setView("study");
+  },[userCards,prog,settings,jplans,enrichCards]);
+  const startPersonalCourseStudy=useCallback(async(courseName,pkId,method="anki")=>{
+    const filtered=userCards.filter(c=>c.personalCourseName===courseName&&(pkId===null||c.packetId===pkId));
+    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
+    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
+    const fullQueue=await enrichCards(queue);
+    const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
+    setStudyCtx({label:`${METHOD_PREFIX[mode]} Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`,queue:fullQueue,mode});
+    setView("study");
+  },[userCards,prog,settings,jplans,enrichCards]);
   // ─── Reprise de session ─────────────────────────────────────────────────────
   // Appelé par StudyView à chaque carte notée : on ne garde que les identifiants
   // des cartes restantes, ce qui reste minuscule même sur une session de 500 cartes.
@@ -8402,7 +8651,10 @@ function App(){
     if(gid==="__user__"){
       const queue=buildQueue(userCards,prog,settings,getNewShownToday(),true);
       if(!queue.length){alert(getEmptyQueueMsg(userCards,prog,settings,getNewShownToday()));return;}
-      setStudyCtx({label:"Mes flashcards personnelles",queue});setView("study");return;
+      // Les cartes personnelles sont chargées en métadonnées seules : comme pour
+      // toute autre file, on passe par enrichCards avant d'ouvrir la session.
+      const fullQueue=await enrichCards(queue);
+      setStudyCtx({label:"Mes flashcards personnelles",queue:fullQueue});setView("study");return;
     }
     // ─── Garde-fou d'accès ────────────────────────────────────────────────────
     // La restriction ne repose pas seulement sur l'interface : même en forçant
@@ -8609,9 +8861,22 @@ function App(){
     }
     return revoked;
   },[currentUser,syncDailyPoints]);
+  // ─── Enfouir une carte ────────────────────────────────────────────────────
+  // Enfouir remet le niveau d'apprentissage Anki à zéro (state/step/reps/
+  // lapses/intervalle/échéance/historique effacés) : quand l'étudiant la
+  // désenfouira, elle repart comme une carte neuve plutôt que de reprendre à
+  // l'endroit exact où elle était. C'est annoncé à l'étudiant au moment même
+  // de l'enfouissage (voir la modale de confirmation dans StudyView). Les
+  // autres méthodes (plan de J, révision perso) et l'importance choisie
+  // (packetOverride) ne sont pas concernées et sont préservées.
   const handleBury=useCallback((card)=>{
     const existing=prog[card.id]||{};
-    saveProg({...prog,[card.id]:{...existing,buried:true}},card.id);
+    const preserved={};
+    if(existing.packetOverride)preserved.packetOverride=existing.packetOverride;
+    if(existing.j)preserved.j=existing.j;
+    if(existing.p)preserved.p=existing.p;
+    if(existing.firstSeen)preserved.firstSeen=existing.firstSeen;
+    saveProg({...prog,[card.id]:{...preserved,buried:true}},card.id);
   },[prog,saveProg]);
   const handleUnbury=useCallback((cardId)=>{
     const existing=prog[cardId]||{};
@@ -8647,7 +8912,7 @@ function App(){
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
   if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onStudyCram={startCramStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)} theme={theme} onToggleTheme={toggleTheme} resumeInfo={resumeInfo} onResume={resumeStudySession} onDismissResume={dismissResume} studyMode={studyMode} onChangeMode={changeStudyMode} jplans={jplans} onSaveJPlan={handleSaveJPlan} onStudyJ={startJStudy} onStudyPerso={startPersoStudy} promo={promo}/>;
-  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue}/>;
+  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} username={currentUser?.username} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo} theme={theme} onToggleTheme={toggleTheme}/>;
   return null;
