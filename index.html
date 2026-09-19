@@ -1389,7 +1389,22 @@ const activeGroupsFromPurchases = rows => [...new Set(
 // Tant qu'elle vaut null — table injoignable, compte admin, lecture pas encore
 // faite — on retombe sur l'ancien calcul : jamais de perte d'accès par accident.
 let PAID_FROM_PURCHASES = null;
-const setPaidFromPurchases = rows => { PAID_FROM_PURCHASES = rows ? activeGroupsFromPurchases(rows) : null; };
+// Achats ciblant UN SEUL cours (pas la matière entière). Chaque ligne de la
+// table purchases peut porter une colonne "courses" — tableau de chaînes
+// "groupId:num" (ex. "cell-bio:2") — en plus (ou à la place) de "groups".
+// Cela permet d'offrir un cours précis à un compte donné sans lui ouvrir
+// toute la matière ni impacter les autres étudiants.
+const activeCoursesFromPurchases = rows => [...new Set(
+  (rows||[])
+    .filter(p => p.status === "paid_active"
+      && (!p.access_end_date || new Date(`${p.access_end_date}T23:59:59`) >= new Date()))
+    .flatMap(p => Array.isArray(p.courses) ? p.courses : [])
+)];
+let PAID_COURSES_FROM_PURCHASES = null;
+const setPaidFromPurchases = rows => {
+  PAID_FROM_PURCHASES = rows ? activeGroupsFromPurchases(rows) : null;
+  PAID_COURSES_FROM_PURCHASES = rows ? activeCoursesFromPurchases(rows) : null;
+};
 const derivePaidGroups = (acc, username) => {
   if (Array.isArray(PAID_FROM_PURCHASES)) return [...PAID_FROM_PURCHASES];
   const planId = toSubscriptionPlan(acc?.plan_id || acc?.planId);
@@ -1415,6 +1430,7 @@ const isLessonAccessible = (groupId, num, userGroups, fullGroups) => {
 const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
   if ((fullGroups||[]).includes(groupId)) return true;
   if (isFreeCourse(groupId, num) && (userGroups||[]).includes(groupId)) return true;
+  if (Array.isArray(PAID_COURSES_FROM_PURCHASES) && PAID_COURSES_FROM_PURCHASES.includes(`${groupId}:${num}`)) return true;
   return false;
 };
 // ─── Forum : mémoire de lecture (100 % locale) ───────────────────────────────
