@@ -1832,7 +1832,7 @@ const promoActive = () => Date.now() < new Date(PROMO.endsAt).getTime();
 // c'est un ancien inscrit, il est donc éligible.
 const promoEligible = acc => {
   if(!promoActive())return false;
-  if(!acc)return false;
+  if(!acc)return true;
   const t=acc.created_at||acc.createdAt;
   if(!t)return true;
   const d=new Date(t).getTime();
