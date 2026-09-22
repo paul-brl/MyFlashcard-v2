@@ -1868,8 +1868,8 @@ const CHAPTERS = {
   },
   "histo": {
     1: ["Reproduction et méiose","Gamétogenèse masculine","Gamétogenèse féminine","Fécondation","Développement embryonnaire","Cellules souches embryonnaires"],
-    2: ["Epithélium","Tissus conjonctifs","Tissus adipeux","Tissus cartilagineux"],
-    3: ["Tissus musculaires","Tissus nerveux","Eléments figurés du sang","Tissus osseux"],
+    2: ["Epithélium","Tissus conjonctifs","Tissus adipeux","Tissus cartilagineux","Tissus osseux"],
+    3: ["Tissus musculaires","Tissus nerveux","Eléments figurés du sang"],
   },
   "biochem": {
     1: ["Thermodynamique","Enzymes","Métabolisme"],
@@ -4173,7 +4173,7 @@ function UpgradeModal({currentPlanId,username,onClose,promo}){
       {payErr&&<p style={{fontSize:12,color:C.again,margin:"0 0 12px",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{payErr}</p>}
       <Btn fill full onClick={startCheckout} disabled={!cgvOk||!!redirectingTo}>{redirectingTo?"Redirection…":`Commander et payer — ${priceOf(confirmPlan)}`}</Btn>
       <Btn full style={{marginTop:8}} onClick={()=>setConfirmPlan(null)} disabled={!!redirectingTo}>Annuler</Btn>
-      <p style={{fontSize:11,color:C.textLt,margin:"12px 0 0",lineHeight:1.6,textAlign:"center"}}>Paiement sécurisé par Stripe. MyFlashCard ne voit jamais ton numéro de carte.</p>
+      <p style={{fontSize:11,color:C.textLt,margin:"12px 0 0",lineHeight:1.6,textAlign:"center"}}>Paiement sécurisé par Stripe. MyFlashCard ne voit jamais ton numéro de carte. Une facture est émise pour chaque achat : si Apple Pay affiche « adresse de facturation requise », choisis « Carte » et saisis ton adresse.</p>
     </Modal>}
     <Btn full onClick={onClose}>Fermer</Btn>
   </Modal>;
