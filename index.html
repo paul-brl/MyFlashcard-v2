@@ -1946,7 +1946,7 @@ const isFreeCourse = (groupId, num) =>
 //    effacée quand l'accès se referme : les cartes sont seulement masquées, et
 //    tout réapparaît tel quel dès que l'étudiant achète la matière / le cours.
 const TEMP_FREE_ACTIVE = true;
-const TEMP_FREE_COURSES = ["cell-bio:2", "histo:2", "biochem:3"];
+const TEMP_FREE_COURSES = ["cell-bio:2", "histo:2"];
 const isTempFreeCourse = (groupId, num) =>
   TEMP_FREE_ACTIVE && TEMP_FREE_COURSES.includes(`${groupId}:${num}`);
 const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
