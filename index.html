@@ -1931,7 +1931,7 @@ const FREE_GROUP_IDS = ["cell-bio","histo","biochem","biomol","biophys"]; // acc
 // Cours offerts EN PLUS du cours 1, matière par matière. C'est le seul endroit à
 // modifier pour ouvrir (ou refermer) un cours supplémentaire à tout le monde.
 // Exemple : "biochem":[2] → la Biochimie cours 2 est offerte comme le cours 1.
-const FREE_EXTRA_COURSE_NUMS = { "biochem":[2] };
+const FREE_EXTRA_COURSE_NUMS = { };
 // Un cours est offert si sa matière fait partie des matières gratuites ET que
 // c'est le cours 1 ou l'un des cours supplémentaires ouverts ci-dessus.
 const isFreeCourse = (groupId, num) =>
