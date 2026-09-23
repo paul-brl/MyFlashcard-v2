@@ -1945,7 +1945,7 @@ const isFreeCourse = (groupId, num) =>
 //  · La progression (table progress, plans J, points, overrides) n'est JAMAIS
 //    effacée quand l'accès se referme : les cartes sont seulement masquées, et
 //    tout réapparaît tel quel dès que l'étudiant achète la matière / le cours.
-const TEMP_FREE_ACTIVE = true;
+const TEMP_FREE_ACTIVE = false;
 const TEMP_FREE_COURSES = ["cell-bio:2", "histo:2"];
 const isTempFreeCourse = (groupId, num) =>
   TEMP_FREE_ACTIVE && TEMP_FREE_COURSES.includes(`${groupId}:${num}`);
