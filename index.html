@@ -1430,6 +1430,7 @@ const isLessonAccessible = (groupId, num, userGroups, fullGroups) => {
 const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
   if ((fullGroups||[]).includes(groupId)) return true;
   if (isFreeCourse(groupId, num) && (userGroups||[]).includes(groupId)) return true;
+  if (isTempFreeCourse(groupId, num)) return true; // offre temporaire, voir TEMP_FREE_COURSES
   if (Array.isArray(PAID_COURSES_FROM_PURCHASES) && PAID_COURSES_FROM_PURCHASES.includes(`${groupId}:${num}`)) return true;
   return false;
 };
@@ -1936,6 +1937,18 @@ const FREE_EXTRA_COURSE_NUMS = { "biochem":[2] };
 const isFreeCourse = (groupId, num) =>
   FREE_GROUP_IDS.includes(groupId) &&
   (num === 1 || (FREE_EXTRA_COURSE_NUMS[groupId] || []).includes(num));
+// ─── Offre TEMPORAIRE (jusqu'à la mise en vente) ─────────────────────────────
+// Cours ouverts gratuitement à TOUS les comptes, le temps de la mise en vente.
+// Pour les retirer le jour J : passer TEMP_FREE_ACTIVE à false (rien d'autre).
+//  · Les étudiants qui avaient déjà ces cours (achat, déblocage manuel dans
+//    purchases/paid_groups) ne voient aucune différence et les GARDENT ensuite.
+//  · La progression (table progress, plans J, points, overrides) n'est JAMAIS
+//    effacée quand l'accès se referme : les cartes sont seulement masquées, et
+//    tout réapparaît tel quel dès que l'étudiant achète la matière / le cours.
+const TEMP_FREE_ACTIVE = true;
+const TEMP_FREE_COURSES = ["cell-bio:2", "histo:2", "biochem:3"];
+const isTempFreeCourse = (groupId, num) =>
+  TEMP_FREE_ACTIVE && TEMP_FREE_COURSES.includes(`${groupId}:${num}`);
 const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
 const SEM2 = GROUPS.filter(g=>g.sem===2).map(g=>g.id);
 const ALL  = [...SEM1,...SEM2];
