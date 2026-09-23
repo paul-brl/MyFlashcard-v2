@@ -809,34 +809,13 @@ const supa = {
     const mapRow=c=>({ id:c.id, front:null, back:null, groupId:c.group_id, num:c.personal_course_name?null:c.num, chapterId:c.chapter_id||1, packetId:c.packet_id, username, isUserCard:true, integrated:c.integrated||false, personalCourseName:c.personal_course_name||null, card_type:c.card_type||null });
     const withType="id,group_id,num,chapter_id,packet_id,integrated,personal_course_name,card_type";
     const withoutType="id,group_id,num,chapter_id,packet_id,integrated,personal_course_name";
-    // Supabase plafonne chaque réponse à 1000 lignes : au-delà, les cartes en
-    // trop disparaissaient silencieusement. On pagine donc, comme getCardsMeta,
-    // avec un tri stable (order=id) pour que les pages ne se chevauchent pas.
-    const BATCH=1000;
-    const base=sel=>`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${sel}&order=id.asc`;
     try {
-      let sel=withType;
-      let r = await fetch(`${base(sel)}&limit=${BATCH}&offset=0`, { headers: { ...H, "Prefer":"count=exact" } });
-      if (!r.ok) { sel=withoutType; r = await fetch(`${base(sel)}&limit=${BATCH}&offset=0`, { headers: { ...H, "Prefer":"count=exact" } }); }
+      let r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${withType}`, { headers: H });
+      if (!r.ok) r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${withoutType}`, { headers: H });
       if (!r.ok) return null; // HTTP error: table might not exist, auth error, etc.
-      const first = await r.json();
-      if (!Array.isArray(first)) return null; // Supabase returned an error object
-      let total=first.length;
-      const range=r.headers.get("content-range"); // "0-999/1430"
-      if(range&&range.includes("/")){const t=parseInt(range.split("/")[1],10);if(!isNaN(t))total=t;}
-      let all=first;
-      if(total>first.length){
-        const offsets=[];
-        for(let off=first.length;off<total;off+=BATCH)offsets.push(off);
-        const pages=await Promise.all(offsets.map(async off=>{
-          const pr=await fetch(`${base(sel)}&limit=${BATCH}&offset=${off}`,{headers:H});
-          const pd=await pr.json();
-          if(!pr.ok||!Array.isArray(pd))throw new Error("page user_cards");
-          return pd;
-        }));
-        pages.forEach(rows=>{all=all.concat(rows);});
-      }
-      return all.map(mapRow);
+      const d = await r.json();
+      if (!Array.isArray(d)) return null; // Supabase returned an error object
+      return d.map(mapRow);
     } catch { return null; } // Network error
   },
   // Téléchargement brut du recto/verso d'une ou plusieurs cartes personnelles,
@@ -1451,6 +1430,7 @@ const isLessonAccessible = (groupId, num, userGroups, fullGroups) => {
 const isCourseAccessible = (groupId, num, userGroups, fullGroups) => {
   if ((fullGroups||[]).includes(groupId)) return true;
   if (isFreeCourse(groupId, num) && (userGroups||[]).includes(groupId)) return true;
+  if (isTempFreeCourse(groupId, num)) return true; // offre temporaire, voir TEMP_FREE_COURSES
   if (Array.isArray(PAID_COURSES_FROM_PURCHASES) && PAID_COURSES_FROM_PURCHASES.includes(`${groupId}:${num}`)) return true;
   return false;
 };
@@ -1814,7 +1794,7 @@ const validatePhone = p => {
 // AUCUNE fonctionnalité n'est supprimée : la boutique, la modale d'abonnement,
 // les liens Stripe et la logique de déblocage restent intacts dans le code.
 // Pour réactiver la vente : passer cette constante à true (une seule ligne).
-const PURCHASES_ENABLED = false;
+const PURCHASES_ENABLED = true;
 // ─── Boutique visible mais fermée ────────────────────────────────────────────
 // PURCHASES_VISIBLE gouverne l'AFFICHAGE, PURCHASES_ENABLED gouverne l'ACHAT.
 // À true / false, l'étudiant voit toute l'offre — packs semestre et matières à
@@ -1951,12 +1931,24 @@ const FREE_GROUP_IDS = ["cell-bio","histo","biochem","biomol","biophys"]; // acc
 // Cours offerts EN PLUS du cours 1, matière par matière. C'est le seul endroit à
 // modifier pour ouvrir (ou refermer) un cours supplémentaire à tout le monde.
 // Exemple : "biochem":[2] → la Biochimie cours 2 est offerte comme le cours 1.
-const FREE_EXTRA_COURSE_NUMS = { "biochem":[2] };
+const FREE_EXTRA_COURSE_NUMS = { };
 // Un cours est offert si sa matière fait partie des matières gratuites ET que
 // c'est le cours 1 ou l'un des cours supplémentaires ouverts ci-dessus.
 const isFreeCourse = (groupId, num) =>
   FREE_GROUP_IDS.includes(groupId) &&
   (num === 1 || (FREE_EXTRA_COURSE_NUMS[groupId] || []).includes(num));
+// ─── Offre TEMPORAIRE (jusqu'à la mise en vente) ─────────────────────────────
+// Cours ouverts gratuitement à TOUS les comptes, le temps de la mise en vente.
+// Pour les retirer le jour J : passer TEMP_FREE_ACTIVE à false (rien d'autre).
+//  · Les étudiants qui avaient déjà ces cours (achat, déblocage manuel dans
+//    purchases/paid_groups) ne voient aucune différence et les GARDENT ensuite.
+//  · La progression (table progress, plans J, points, overrides) n'est JAMAIS
+//    effacée quand l'accès se referme : les cartes sont seulement masquées, et
+//    tout réapparaît tel quel dès que l'étudiant achète la matière / le cours.
+const TEMP_FREE_ACTIVE = false;
+const TEMP_FREE_COURSES = ["cell-bio:2", "histo:2"];
+const isTempFreeCourse = (groupId, num) =>
+  TEMP_FREE_ACTIVE && TEMP_FREE_COURSES.includes(`${groupId}:${num}`);
 const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
 const SEM2 = GROUPS.filter(g=>g.sem===2).map(g=>g.id);
 const ALL  = [...SEM1,...SEM2];
