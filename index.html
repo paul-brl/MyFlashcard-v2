@@ -738,6 +738,17 @@ const supa = {
       });
       ok = r.ok;
    } catch {}
+    // Annonces : décocher la case vaut désinscription, la recocher réabonne.
+    // Requête séparée : si la colonne n'existe pas encore, la case elle-même
+    // continue de s'enregistrer normalement.
+    if (ok) {
+      try {
+        await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`, {
+          method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+          body: JSON.stringify({ email_opt_out: !optIn }),
+        });
+      } catch {}
+    }
     // Trace horodatée du choix : une NOUVELLE ligne à chaque changement, jamais
     // une modification de l'ancienne. user_id est posé par la base (auth.uid()).
     try {
@@ -4047,11 +4058,12 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>openEditor(null)}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="reports" label="⚑ Signalements"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="reports" label="⚑ Signalements"/><TB id="announce" label="✉ Annonces"/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>openEditor(null)} onEdit={c=>openEditor(c)} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="lessons"&&<AdminLessons cards={cards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
     {tab==="reports"&&<AdminReports/>}
+    {tab==="announce"&&<AdminAnnounce accounts={accounts}/>}
   <Footer/>
   </div>;
 }
@@ -5382,6 +5394,144 @@ function AdminReports(){
         {done.length>0&&<p style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"20px 0 8px"}}>Historique</p>}
         {done.map(r=><Card key={r.id} r={r}/>)}
       </>}
+  </div>;
+}
+// ─── Annonces par e-mail (espace administrateur) ──────────────────────────────
+// Envoie un message à tous les comptes étudiants, sauf ceux qui se sont
+// désinscrits (accounts.email_opt_out). L'envoi réel se fait côté serveur, dans l'Edge
+// Function « send-announcement » (voir supabase/functions/send-announcement) :
+// le navigateur ne voit jamais la clé d'envoi ni la liste des adresses.
+const ANN_DEFAULT_SUBJECT="L'offre MyFlashCard est disponible";
+const ANN_DEFAULT_MESSAGE=`Salut {{pseudo}},
+
+Bonne nouvelle : l'offre est maintenant disponible, tu peux la prendre directement depuis ton espace sur le site.
+
+Si tu as la moindre question avant de te décider, je suis dispo pour un appel : réponds simplement à ce mail et on cale un créneau.
+
+À très vite,
+Paul`;
+const annCall=async payload=>{
+  try{
+    const r=await fetch(`${EDGE_URL}/send-announcement`,{method:"POST",headers:{...H,"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const d=await r.json().catch(()=>({}));
+    return {ok:r.ok,status:r.status,...d};
+  }catch(e){ return {ok:false,status:0,error:"fonction injoignable"}; }
+};
+function AdminAnnounce({accounts}){
+  // Compte local (liste déjà chargée par l'espace admin) : affiché tout de suite,
+  // puis remplacé par le compte du serveur, qui fait foi.
+  const localCount=useMemo(()=>new Set((accounts||[]).filter(a=>!a.email_opt_out).map(a=>String(a.email||a.username||"").toLowerCase()).filter(Boolean)).size,[accounts]);
+  const [info,setInfo]=useState(null),[infoErr,setInfoErr]=useState("");
+  const [subject,setSubject]=useState(ANN_DEFAULT_SUBJECT),[message,setMessage]=useState(ANN_DEFAULT_MESSAGE);
+  const [busy,setBusy]=useState(""),[notice,setNotice]=useState(null),[confirm,setConfirm]=useState(false);
+  const load=useCallback(async()=>{
+    const d=await annCall({mode:"count"});
+    if(d.ok){setInfo(d);setInfoErr("");}
+    else setInfoErr(d.status===404||d.status===0?"La fonction d'envoi n'est pas encore déployée sur Supabase.":`Erreur : ${d.error||d.status}`);
+  },[]);
+  useEffect(()=>{load();},[load]);
+  const count=info?info.count:localCount;
+  const ready=subject.trim()&&message.trim();
+  const preview=message.replace(/\{\{\s*pseudo\s*\}\}/gi,"Léa");
+  const sendTest=async()=>{
+    setBusy("test");setNotice(null);
+    const d=await annCall({mode:"test",subject,message});
+    setNotice(d.ok?{ok:true,text:`Mail de test envoyé à ${d.to}. Vérifie ta boîte (et les spams).`}:{ok:false,text:`Échec du test : ${d.error||d.status}`});
+    setBusy("");
+  };
+  const report=d=>{
+    if(!d.ok){
+      if(d.status===409){setNotice({ok:false,text:`La liste a changé entre-temps (${d.count} destinataires). Vérifie et relance.`});load();return;}
+      setNotice({ok:false,text:`Échec de l'envoi : ${d.error||d.status}`});return;
+    }
+    const parts=[`${d.sent} mail${d.sent>1?"s":""} envoyé${d.sent>1?"s":""}`];
+    if(d.failed)parts.push(`${d.failed} en échec (${(d.errors||[]).join(", ")})`);
+    if(d.remaining)parts.push(`${d.remaining} restant${d.remaining>1?"s":""} : plafond atteint, reprends l'envoi depuis l'historique (demain si tu es sur l'offre gratuite de Resend)`);
+    setNotice({ok:!d.failed,text:parts.join(" · ")+"."});
+    load();
+  };
+  const sendAll=async()=>{
+    setConfirm(false);setBusy("send");setNotice(null);
+    report(await annCall({mode:"send",subject,message,expected:count}));
+    setBusy("");
+  };
+  const resume=async id=>{
+    setBusy(id);setNotice(null);
+    report(await annCall({mode:"send",announcement_id:id}));
+    setBusy("");
+  };
+  const box={background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"16px 18px",marginBottom:16};
+  return <div style={{maxWidth:700,margin:"0 auto",padding:24}}>
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Annonces par e-mail</p>
+    <p style={{fontSize:12,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Le message part à tous les étudiants inscrits, sauf ceux qui se sont désinscrits des e-mails. Chaque mail contient un lien de désinscription, et un étudiant ne reçoit jamais deux fois la même annonce.</p>
+    <div style={{...box,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+      <span style={{fontFamily:serif,fontSize:32,color:C.accent}}>{count}</span>
+      <span style={{fontSize:13,color:C.textMed}}>étudiant{count>1?"s":""} recevr{count>1?"ont":"a"} l'annonce{!info&&!infoErr?" (vérification…)":""}</span>
+      {infoErr&&<p style={{flexBasis:"100%",fontSize:11.5,color:C.again,margin:"6px 0 0"}}>{infoErr} Le chiffre ci-dessus vient de la liste des comptes chargée dans l'espace admin.</p>}
+    </div>
+    <div style={box}>
+      <Lbl>Objet</Lbl>
+      <input style={{...iLine,marginBottom:18}} maxLength={150} value={subject} onChange={e=>setSubject(e.target.value)}/>
+      <Lbl>Message</Lbl>
+      <textarea value={message} onChange={e=>setMessage(e.target.value)} rows={12} maxLength={10000} style={{fontFamily:font,fontSize:14,color:C.text,background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,padding:"10px 12px",width:"100%",boxSizing:"border-box",resize:"vertical",lineHeight:1.6,outline:"none"}}/>
+      <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>{"{{pseudo}}"} est remplacé par le pseudo de chaque étudiant. Les liens https://… deviennent cliquables.</p>
+    </div>
+    <div style={box}>
+      <Lbl>Aperçu</Lbl>
+      <p style={{fontSize:13,fontWeight:600,margin:"0 0 10px",color:C.text}}>{subject.replace(/\{\{\s*pseudo\s*\}\}/gi,"Léa")||"(sans objet)"}</p>
+      <p style={{fontSize:13,color:C.text,margin:0,lineHeight:1.65,whiteSpace:"pre-wrap"}}>{preview||"(message vide)"}</p>
+      <p style={{fontSize:11,color:C.textLt,margin:"14px 0 0",borderTop:`1px solid ${C.border}`,paddingTop:10}}>Tu reçois ce mail parce que tu as un compte sur MyFlashCard. <u>Se désinscrire</u></p>
+    </div>
+    <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
+      <Btn onClick={sendTest} disabled={!ready||!!busy||!!infoErr}>{busy==="test"?"Envoi…":"✉ M'envoyer un test"}</Btn>
+      <Btn fill onClick={()=>setConfirm(true)} disabled={!ready||!!busy||!!infoErr||!count}>{busy==="send"?"Envoi en cours…":`Envoyer à ${count} étudiant${count>1?"s":""}`}</Btn>
+    </div>
+    {notice&&<p style={{fontSize:12.5,lineHeight:1.6,margin:"0 0 20px",padding:"10px 12px",borderRadius:6,background:notice.ok?C.goodBg:C.againBg,color:notice.ok?C.good:C.again}}>{notice.text}</p>}
+    {info?.history?.length>0&&<>
+      <p style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"24px 0 8px"}}>Historique</p>
+      {info.history.map(h=><div key={h.id} style={{...box,padding:"12px 16px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <div>
+          <p style={{fontSize:13,margin:"0 0 4px",color:C.text}}>{h.subject}</p>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            <Tag color={C.textLt} bg={C.bg} small>{new Date(h.created_at).toLocaleString("fr-FR")}</Tag>
+            <Tag color={h.sent>=h.total?C.good:C.imp} bg={h.sent>=h.total?C.goodBg:C.impBg} small>{h.sent}/{h.total} envoyés</Tag>
+          </div>
+        </div>
+        {h.sent<h.total&&<Btn small onClick={()=>resume(h.id)} disabled={!!busy}>{busy===h.id?"Envoi…":"Reprendre l'envoi"}</Btn>}
+      </div>)}
+    </>}
+    {confirm&&<Modal onClose={()=>setConfirm(false)}>
+      <p style={{fontFamily:serif,fontSize:18,margin:"0 0 8px"}}>Envoyer l'annonce ?</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 8px",lineHeight:1.6}}>« {subject} » va partir à <strong>{count} étudiant{count>1?"s":""}</strong>. Un mail envoyé ne peut pas être rappelé.</p>
+      {info&&count>info.maxPerRun&&<p style={{fontSize:12,color:C.imp,margin:"0 0 8px",lineHeight:1.6}}>Plafond actuel : {info.maxPerRun} mails par envoi. Les {count-info.maxPerRun} autres partiront quand tu cliqueras sur « Reprendre l'envoi ».</p>}
+      <div style={{display:"flex",gap:10,marginTop:18}}><Btn fill onClick={sendAll}>Envoyer</Btn><Btn onClick={()=>setConfirm(false)}>Annuler</Btn></div>
+    </Modal>}
+  </div>;
+}
+// ─── Page de désinscription (lien en bas des annonces : /?unsub=…&t=…) ─────────
+// Affichée à la place de l'application, sans connexion. Le clic sur le bouton
+// est nécessaire : un antivirus qui ouvre le lien tout seul ne désinscrit personne.
+function UnsubscribePage({email,token}){
+  const [state,setState]=useState("idle");
+  const go=async()=>{
+    setState("busy");
+    try{
+      const r=await fetch(`${EDGE_URL}/unsubscribe`,{method:"POST",headers:{"Content-Type":"application/json",apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`},body:JSON.stringify({email,token})});
+      setState(r.ok?"done":"error");
+    }catch{ setState("error"); }
+  };
+  return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:16,color:C.text}}>
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"32px 28px",maxWidth:420,width:"100%",textAlign:"center"}}>
+      <p style={{fontFamily:serif,fontSize:22,margin:"0 0 12px"}}>MyFlashCard</p>
+      {state==="done"
+        ?<p style={{fontSize:14,color:C.textMed,lineHeight:1.6,margin:0}}>C'est fait : <strong>{email}</strong> ne recevra plus nos annonces par e-mail. Tu peux changer d'avis à tout moment dans les réglages de ton compte.</p>
+        :<>
+          <p style={{fontSize:14,color:C.textMed,lineHeight:1.6,margin:"0 0 20px"}}>Ne plus recevoir les annonces de MyFlashCard sur <strong>{email}</strong> ?</p>
+          <Btn fill full onClick={go} disabled={state==="busy"}>{state==="busy"?"…":"Me désinscrire"}</Btn>
+          {state==="error"&&<p style={{fontSize:12,color:C.again,margin:"12px 0 0"}}>Le lien est invalide ou le service ne répond pas. Réessaie, ou écris-nous à contact@myflashcard.fr.</p>}
+        </>}
+      <a href="/" style={{display:"inline-block",marginTop:20,fontSize:12,color:C.textLt}}>Retour au site</a>
+    </div>
   </div>;
 }
 // ─── Cours PDF : composants partagés ──────────────────────────────────────────
@@ -9001,7 +9151,8 @@ function App(){
     />}
   </>;
 }
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+const UNSUB_PARAMS=new URLSearchParams(window.location.search);
+ReactDOM.createRoot(document.getElementById('root')).render(UNSUB_PARAMS.get("unsub")&&UNSUB_PARAMS.get("t")?<UnsubscribePage email={UNSUB_PARAMS.get("unsub")} token={UNSUB_PARAMS.get("t")}/>:<App/>);
 </script>
 </body>
 </html>
