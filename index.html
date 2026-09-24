@@ -4137,12 +4137,13 @@ function PromoPricesBanner({onSeeOffer,planId,fullGroups}){
   const subPrices=buyableSubjects(planId,fullGroups).map(p=>parsePrice(p.price)).filter(x=>x!=null);
   const minSub=subPrices.length?Math.min(...subPrices):null;
   return <div style={{background:C.surface,borderBottom:`1px solid ${C.border}`}}>
-    <div style={{maxWidth:960,margin:"0 auto",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px 22px",flexWrap:"wrap"}}>
+    <style>{`@media (max-width:600px){.mfc-promo-prices{display:none!important}.mfc-promo-inner{padding:8px 16px!important}}`}</style>
+    <div className="mfc-promo-inner" style={{maxWidth:960,margin:"0 auto",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px 22px",flexWrap:"wrap"}}>
       <div style={{minWidth:0}}>
         <p style={{fontFamily:serif,fontSize:17,margin:0,color:C.text}}>Les offres sont là : <strong style={{color:C.good}}>−{Math.round(PROMO.rate*100)} %</strong></p>
         <p style={{fontSize:11.5,fontWeight:600,color:C.imp,margin:"2px 0 0",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>Jusqu'au {new Date(new Date(PROMO.endsAt).getTime()-1000).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})} à minuit · <PromoCountdown compact tone={C.imp}/></p>
       </div>
-      <div style={{display:"flex",gap:"4px 16px",flexWrap:"wrap",fontSize:12.5,color:C.textMed}}>
+      <div className="mfc-promo-prices" style={{display:"flex",gap:"4px 16px",flexWrap:"wrap",fontSize:12.5,color:C.textMed}}>
         {plans.map(p=><span key={p.id} style={{whiteSpace:"nowrap"}}>{short[p.id]} <s style={{color:C.textLt}}>{p.price}</s> <strong style={{color:C.text,fontSize:14}}>{promoLabel(p.price)}</strong></span>)}
         {minSub!=null&&<span style={{whiteSpace:"nowrap"}}>Matières à l'unité dès <strong style={{color:C.text,fontSize:14}}>{promoLabel(minSub+" €")}</strong></span>}
       </div>
@@ -5543,7 +5544,7 @@ function AdminAnnounce({accounts}){
   // puis remplacé par le compte du serveur, qui fait foi.
   const [audience,setAudience]=useState("non_buyers");
   const isBuyerAcc=a=>isPaidPlan(a.plan_id||a.planId)||(Array.isArray(a.paid_groups)?a.paid_groups.length>0:(Array.isArray(a.groups)&&a.groups.some(g=>!FREE_GROUP_IDS.includes(g))));
-  const localCount=useMemo(()=>new Set((accounts||[]).filter(a=>!a.email_opt_out&&(audience==="all"||!isBuyerAcc(a))).map(a=>String(a.email||a.username||"").toLowerCase()).filter(Boolean)).size,[accounts,audience]);
+  const localCount=useMemo(()=>new Set((accounts||[]).filter(a=>!a.email_opt_out&&(audience==="all"||(audience==="newsletter"?a.marketing_opt_in===true:!isBuyerAcc(a)))).map(a=>String(a.email||a.username||"").toLowerCase()).filter(Boolean)).size,[accounts,audience]);
   const [info,setInfo]=useState(null),[infoErr,setInfoErr]=useState("");
   const [subject,setSubject]=useState(ANN_DEFAULT_SUBJECT),[message,setMessage]=useState(ANN_DEFAULT_MESSAGE);
   const [busy,setBusy]=useState(""),[notice,setNotice]=useState(null),[confirm,setConfirm]=useState(false);
@@ -5589,14 +5590,15 @@ function AdminAnnounce({accounts}){
     <p style={{fontSize:12,color:C.textMed,margin:"0 0 20px",lineHeight:1.6}}>Le message part à tous les étudiants inscrits, sauf ceux qui se sont désinscrits des e-mails. Chaque mail contient un lien de désinscription, et un étudiant ne reçoit jamais deux fois la même annonce.</p>
     <div style={{...box,display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
       <span style={{fontFamily:serif,fontSize:32,color:C.accent}}>{count}</span>
-      <span style={{fontSize:13,color:C.textMed}}>{audience==="non_buyers"?"non-acheteur":"étudiant"}{count>1?"s":""} recevr{count>1?"ont":"a"} l'annonce{!info&&!infoErr?" (vérification…)":""}</span>
+      <span style={{fontSize:13,color:C.textMed}}>{audience==="non_buyers"?"non-acheteur":audience==="newsletter"?"abonné":"étudiant"}{count>1?"s":""} recevr{count>1?"ont":"a"} l'annonce{!info&&!infoErr?" (vérification…)":""}</span>
       {infoErr&&<p style={{flexBasis:"100%",fontSize:11.5,color:C.again,margin:"6px 0 0"}}>{infoErr} Le chiffre ci-dessus vient de la liste des comptes chargée dans l'espace admin.</p>}
     </div>
     <div style={box}>
       <Lbl>Destinataires</Lbl>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
-        {[["non_buyers","N'ont encore rien acheté"],["all","Tous les inscrits"]].map(([id,l])=><button key={id} onClick={()=>setAudience(id)} style={{fontFamily:font,fontSize:12.5,fontWeight:600,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${audience===id?C.accent:C.border}`,background:audience===id?C.accentBg:"transparent",color:audience===id?C.accent:C.textMed}}>{l}{info?.counts?` · ${info.counts[id]}`:""}</button>)}
+        {[["non_buyers","N'ont encore rien acheté"],["newsletter","Abonnés à la newsletter"],["all","Tous les inscrits"]].map(([id,l])=><button key={id} onClick={()=>setAudience(id)} style={{fontFamily:font,fontSize:12.5,fontWeight:600,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${audience===id?C.accent:C.border}`,background:audience===id?C.accentBg:"transparent",color:audience===id?C.accent:C.textMed}}>{l}{info?.counts&&info.counts[id]!=null?` · ${info.counts[id]}`:""}</button>)}
       </div>
+      {audience==="newsletter"&&<p style={{fontSize:11.5,color:C.textMed,margin:"-10px 0 16px",lineHeight:1.5}}>Seulement les étudiants qui ont coché « J'accepte de recevoir par e-mail les actualités, nouveautés et offres », acheteurs compris.</p>}
       {audience==="all"&&<p style={{fontSize:11.5,color:C.imp,margin:"-10px 0 16px",lineHeight:1.5}}>Attention : les étudiants qui ont déjà payé recevront aussi ce message. Vérifie qu'il ne leur propose pas d'acheter ce qu'ils ont déjà.</p>}
       <Lbl>Objet</Lbl>
       <input style={{...iLine,marginBottom:18}} maxLength={150} value={subject} onChange={e=>setSubject(e.target.value)}/>
@@ -5623,7 +5625,7 @@ function AdminAnnounce({accounts}){
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             <Tag color={C.textLt} bg={C.bg} small>{new Date(h.created_at).toLocaleString("fr-FR")}</Tag>
             <Tag color={h.sent>=h.total?C.good:C.imp} bg={h.sent>=h.total?C.goodBg:C.impBg} small>{h.sent}/{h.total} envoyés</Tag>
-            <Tag color={C.textMed} bg={C.bg} small>{h.audience==="non_buyers"?"Non-acheteurs":"Tous"}</Tag>
+            <Tag color={C.textMed} bg={C.bg} small>{h.audience==="non_buyers"?"Non-acheteurs":h.audience==="newsletter"?"Newsletter":"Tous"}</Tag>
           </div>
         </div>
         {h.sent<h.total&&<Btn small onClick={()=>resume(h.id)} disabled={!!busy}>{busy===h.id?"Envoi…":"Reprendre l'envoi"}</Btn>}
@@ -6604,7 +6606,10 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   const fullGroups=currentUser.plan?.fullGroups||[];
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
   const displayName=pseudo||defaultPseudo(currentUser.username);
-  const [showUpgrade,setShowUpgrade]=useState(false);
+  const [showUpgrade,setShowUpgradeRaw]=useState(false),[semNotice,setSemNotice]=useState(false);
+  // Un cadenas sur une matière d'un semestre qui n'est pas en vente n'ouvre pas
+  // la fenêtre d'achat : il explique que ce semestre arrivera plus tard.
+  const setShowUpgrade=v=>{const g=typeof v==="string"?GROUPS.find(x=>x.id===v):null;if(g&&!isSemOffered(g.sem)){setSemNotice(true);return;}setShowUpgradeRaw(v);};
   const [cramPrompt,setCramPrompt]=useState(null); // {title, groupId, num, chapterId}
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
@@ -6800,8 +6805,10 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   const tabHasAccess=hasTabAccess(TABS.find(t=>t.id===activeTab));
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text,paddingTop:paymentStatus?56:0}}>
     <PaymentBanner status={paymentStatus} onClose={onClosePaymentBanner}/>
+    <div style={{position:"sticky",top:0,zIndex:20}}>
     {!isAdmin&&promoShowFor(promo,currentUser.plan?.planId,fullGroups)&&<PromoPricesBanner planId={currentUser.plan?.planId} fullGroups={fullGroups} onSeeOffer={()=>setShowUpgrade(true)}/>}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<span style={{fontFamily:serif,fontSize:20}}>MyFlashcard</span>} center="Tableau de bord" right={<><Btn small onClick={onSettings}>Paramètres</Btn>{isAdmin&&<Btn small onClick={onAdmin}>Admin</Btn>}<button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",color:C.textLt,cursor:"pointer"}}>Déconnexion</button></>}/>
+    </div>
     <div className="mfc-page" style={{maxWidth:760,margin:"0 auto",padding:"28px 24px"}}>
       <div className="mfc-planbar" style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 18px",marginBottom:20,flexWrap:"wrap",gap:12}}>
         <div style={{minWidth:0,flex:"1 1 auto"}}>
@@ -6883,7 +6890,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
           <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
             <p style={{fontSize:32,margin:"0 0 12px"}}>🔒</p>
             <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>{TABS.find(t=>t.id===activeTab)?.label}</p>
-            <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_VISIBLE&&tabOffered?<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Il s'ouvre à <strong>{promo?promoLabel(TABS.find(t=>t.id===activeTab)?.price):TABS.find(t=>t.id===activeTab)?.price}</strong>{promo&&<> <span style={{textDecoration:"line-through",color:C.textLt}}>{TABS.find(t=>t.id===activeTab)?.price}</span> avec l'offre de lancement</>}.</>:<>Les cours de ce semestre ne sont pas encore proposés.<br/>Ils arriveront plus tard dans l'année.</>}</p>
+            <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_VISIBLE&&tabOffered?<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Il s'ouvre à <strong>{promo?promoLabel(TABS.find(t=>t.id===activeTab)?.price):TABS.find(t=>t.id===activeTab)?.price}</strong>{promo&&<> <span style={{textDecoration:"line-through",color:C.textLt}}>{TABS.find(t=>t.id===activeTab)?.price}</span> avec l'offre de lancement</>}.</>:<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront disponibles le semestre prochain.</>}</p>
             {!isAdmin&&PURCHASES_VISIBLE&&tabOffered&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>{PURCHASES_ENABLED?"💳 S'abonner →":"👀 Voir les offres →"}</button>}
           </div>
         )
@@ -6911,12 +6918,17 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
         <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
           <p style={{fontSize:32,margin:"0 0 12px"}}>🔒</p>
           <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>{TABS.find(t=>t.id===activeTab)?.label}</p>
-          <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_VISIBLE&&tabOffered?<>Ce contenu n'est pas inclus dans ton offre actuelle.<br/>Il s'ouvre à <strong>{promo?promoLabel(TABS.find(t=>t.id===activeTab)?.price):TABS.find(t=>t.id===activeTab)?.price}</strong>{promo&&<> <span style={{textDecoration:"line-through",color:C.textLt}}>{TABS.find(t=>t.id===activeTab)?.price}</span> avec l'offre de lancement</>}.</>:<>Ce semestre n'est pas encore proposé.<br/>Il arrivera plus tard dans l'année.</>}</p>
+          <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_VISIBLE&&tabOffered?<>Ce contenu n'est pas inclus dans ton offre actuelle.<br/>Il s'ouvre à <strong>{promo?promoLabel(TABS.find(t=>t.id===activeTab)?.price):TABS.find(t=>t.id===activeTab)?.price}</strong>{promo&&<> <span style={{textDecoration:"line-through",color:C.textLt}}>{TABS.find(t=>t.id===activeTab)?.price}</span> avec l'offre de lancement</>}.</>:<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront disponibles le semestre prochain.</>}</p>
           {!isAdmin&&PURCHASES_VISIBLE&&tabOffered&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>{PURCHASES_ENABLED?"💳 S'abonner →":"👀 Voir les offres →"}</button>}
         </div>
       )}
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
+    {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
+      <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
+      <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront disponibles le semestre prochain.</p>
+      <Btn full onClick={()=>setSemNotice(false)}>J'ai compris</Btn>
+    </Modal>}
     {openLesson&&<PdfViewer lesson={openLesson.lesson} subtitle={openLesson.subtitle} onClose={()=>setOpenLesson(null)}/>}
     {cramPrompt&&<CramPacketModal title={cramPrompt.title} onClose={()=>setCramPrompt(null)} onPick={pkId=>{onStudyCram(cramPrompt.groupId,cramPrompt.num,cramPrompt.chapterId,pkId);setCramPrompt(null);}}/>}
     {showMethod&&studyMode==="anki"&&<AnkiMethodModal settings={settings} onClose={()=>setShowMethod(false)}/>}
