@@ -6609,7 +6609,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   const [showUpgrade,setShowUpgradeRaw]=useState(false),[semNotice,setSemNotice]=useState(false);
   // Un cadenas sur une matière d'un semestre qui n'est pas en vente n'ouvre pas
   // la fenêtre d'achat : il explique que ce semestre arrivera plus tard.
-  const setShowUpgrade=v=>{const g=typeof v==="string"?GROUPS.find(x=>x.id===v):null;if(g&&!isSemOffered(g.sem)){setSemNotice(true);return;}setShowUpgradeRaw(v);};
+  const setShowUpgrade=v=>{const g=typeof v==="string"?GROUPS.find(x=>x.id===v):null;if(g&&(g.sem===2||!isSemOffered(g.sem))){setSemNotice(true);return;}setShowUpgradeRaw(v);};
   const [cramPrompt,setCramPrompt]=useState(null); // {title, groupId, num, chapterId}
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
   const gModes=[{id:"prioritaire",label:"Prioritaire",col:C.prio,bg:C.prioBg},{id:"important",label:"Important",col:C.imp,bg:C.impBg},{id:"utile",label:"Utile",col:C.util,bg:C.utilBg},{id:null,label:"Toutes",col:C.accent,bg:C.accentBg}];
@@ -6624,7 +6624,10 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   // Le semestre affiché est-il encore proposé à la vente ? Sinon, on montre le
   // contenu verrouillé sans prix ni bouton : promettre un tarif pour une offre
   // qu'on ne vend pas serait pire que de ne rien dire.
-  const tabOffered=isSemOffered(TABS.find(t=>t.id===activeTab)?.sem);
+  // Semestre 2 : jamais de prix ni de bouton d'achat sur l'écran verrouillé,
+  // quel que soit l'état de la vente. Seul un message d'information s'affiche.
+  const tabSem=TABS.find(t=>t.id===activeTab)?.sem;
+  const tabOffered=tabSem!==2&&isSemOffered(tabSem);
   const {lessons,byKey:lessonsByKey,loading:lessonsLoading}=useLessons();
   // ─── Forum : compteur de messages non lus ─────────────────────────────────
   // Le décompte se fait sur les messages écrits par d'autres que soi, postérieurs
@@ -6890,8 +6893,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
           <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
             <p style={{fontSize:32,margin:"0 0 12px"}}>🔒</p>
             <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>{TABS.find(t=>t.id===activeTab)?.label}</p>
-            <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_VISIBLE&&tabOffered?<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Il s'ouvre à <strong>{promo?promoLabel(TABS.find(t=>t.id===activeTab)?.price):TABS.find(t=>t.id===activeTab)?.price}</strong>{promo&&<> <span style={{textDecoration:"line-through",color:C.textLt}}>{TABS.find(t=>t.id===activeTab)?.price}</span> avec l'offre de lancement</>}.</>:<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront disponibles le semestre prochain.</>}</p>
-            {!isAdmin&&PURCHASES_VISIBLE&&tabOffered&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>{PURCHASES_ENABLED?"💳 S'abonner →":"👀 Voir les offres →"}</button>}
+            <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
           </div>
         )
       ):tabHasAccess?(
@@ -6918,15 +6920,14 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
         <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"48px 24px",textAlign:"center",background:C.surface}}>
           <p style={{fontSize:32,margin:"0 0 12px"}}>🔒</p>
           <p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>{TABS.find(t=>t.id===activeTab)?.label}</p>
-          <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>{PURCHASES_VISIBLE&&tabOffered?<>Ce contenu n'est pas inclus dans ton offre actuelle.<br/>Il s'ouvre à <strong>{promo?promoLabel(TABS.find(t=>t.id===activeTab)?.price):TABS.find(t=>t.id===activeTab)?.price}</strong>{promo&&<> <span style={{textDecoration:"line-through",color:C.textLt}}>{TABS.find(t=>t.id===activeTab)?.price}</span> avec l'offre de lancement</>}.</>:<>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront disponibles le semestre prochain.</>}</p>
-          {!isAdmin&&PURCHASES_VISIBLE&&tabOffered&&<button onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:14,fontWeight:600,padding:"12px 28px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent}}>{PURCHASES_ENABLED?"💳 S'abonner →":"👀 Voir les offres →"}</button>}
+          <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
         </div>
       )}
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
     {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
       <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
-      <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront disponibles le semestre prochain.</p>
+      <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
       <Btn full onClick={()=>setSemNotice(false)}>J'ai compris</Btn>
     </Modal>}
     {openLesson&&<PdfViewer lesson={openLesson.lesson} subtitle={openLesson.subtitle} onClose={()=>setOpenLesson(null)}/>}
