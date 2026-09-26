@@ -1694,8 +1694,34 @@ const revokeStat = (username, correct, elapsedMs, wasNewCard=false) => {
   saveStats(username,st);
 };
 // ─── Préférences de classement public ────────────────────────────────────────
-const getRankPrefs  = u => ({share:false,anon:false,...(storage.get(`mx6-rankprefs-${u}`)||{})});
-const saveRankPrefs = (u,p) => storage.set(`mx6-rankprefs-${u}`,p);
+// Par défaut, tout étudiant participe au classement public en « Anonyme » :
+// il doit choisir lui-même « Ne pas apparaître » pour en sortir.
+// Migration unique (RANK_PREFS_MIGRATION) : les préférences enregistrées avant
+// ce changement — y compris un retrait volontaire — sont remises sur
+// « Anonyme » une fois. Les choix faits ensuite sont respectés.
+const RANK_PREFS_MIGRATION = "2026-09-26-anon-par-defaut";
+// Un étudiant anonyme n'est affiché dans le classement public qu'à partir de
+// ce nombre de points dans la journée.
+const ANON_MIN_POINTS = 50;
+const getRankPrefs  = u => {
+  const stored=storage.get(`mx6-rankprefs-${u}`)||{};
+  if(stored.migration!==RANK_PREFS_MIGRATION){
+    const migrated={...stored,share:true,anon:true,migration:RANK_PREFS_MIGRATION};
+    if(u)storage.set(`mx6-rankprefs-${u}`,migrated);
+    return migrated;
+  }
+  return {share:true,anon:true,...stored};
+};
+const saveRankPrefs = (u,p) => storage.set(`mx6-rankprefs-${u}`,{...p,migration:RANK_PREFS_MIGRATION});
+// Envoi des points du jour au classement public, selon les préférences :
+// retrait → ligne supprimée ; anonyme sous le seuil → ligne supprimée aussi
+// (rien n'est publié tant qu'il n'a pas ANON_MIN_POINTS) ; sinon mise à jour.
+const pushDailyPoints = async (username,prefs) => {
+  if(!username)return;
+  const d=todayPoints(username);
+  if(!prefs.share||(prefs.anon&&d.points<ANON_MIN_POINTS)){ await supa.deleteDailyPoints(username); return; }
+  await supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
+};
 // Le classement utilise le pseudonyme choisi par l'utilisateur (et retombe sur le
 // pseudo par défaut dérivé du nom d'utilisateur si aucun n'a été défini).
 const rankDisplayName = (username,anon) => anon?"Anonyme":getPseudo(username);
@@ -5077,23 +5103,16 @@ function RankTab({username,tick}){
     let alive=true;
     (async()=>{
       setBoard(b=>b===undefined?undefined:b);
-      if(prefs.share){
-        const d=todayPoints(username);
-        await supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
-      }
+      await pushDailyPoints(username,prefs);
       const rows=await supa.getLeaderboard(dateKey());
-      if(alive) setBoard(rows);
+      // Les anonymes ne s'affichent qu'à partir de ANON_MIN_POINTS points.
+      if(alive) setBoard(Array.isArray(rows)?rows.filter(r=>!r.anonymous||(r.points||0)>=ANON_MIN_POINTS):rows);
     })();
     return()=>{alive=false;};
   },[username,prefs.share,prefs.anon,tick,refresh]);
   const applyPrefs=async p=>{
     setPrefs(p); saveRankPrefs(username,p);
-    if(p.share){
-      const d=todayPoints(username);
-      await supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,p.anon),p.anon);
-    } else {
-      await supa.deleteDailyPoints(username);
-    }
+    await pushDailyPoints(username,p);
     setRefresh(r=>r+1);
   };
   // Historique 30 jours
@@ -5164,12 +5183,15 @@ function RankTab({username,tick}){
 
       {sub==="board"&&<div>
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:14}}>
-          <p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Le classement public est <strong>facultatif</strong>. Tu peux y participer sous ton nom d'utilisateur ou de façon anonyme, et te retirer à tout moment (ta ligne est alors supprimée).</p>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Par défaut, tu participes au classement public de façon <strong>anonyme</strong>, à partir de {ANON_MIN_POINTS} points dans la journée. Tu peux aussi y apparaître sous ton pseudo, ou t'en retirer à tout moment (ta ligne est alors supprimée).</p>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <Toggle on={prefs.share} col="var(--c-gold)" onClick={()=>applyPrefs({...prefs,share:!prefs.share})}>Participer au classement public</Toggle>
-            <Toggle on={prefs.anon} col={C.accent} onClick={()=>prefs.share&&applyPrefs({...prefs,anon:!prefs.anon})}>Apparaître comme « Anonyme »</Toggle>
+            <Toggle on={prefs.share&&prefs.anon} col={C.accent} onClick={()=>applyPrefs({...prefs,share:true,anon:true})}>🕶️ Anonyme</Toggle>
+            <Toggle on={prefs.share&&!prefs.anon} col="var(--c-gold)" onClick={()=>applyPrefs({...prefs,share:true,anon:false})}>👤 Sous mon pseudo</Toggle>
+            <Toggle on={!prefs.share} col={C.textMed} onClick={()=>applyPrefs({...prefs,share:false})}>🚫 Ne pas apparaître</Toggle>
           </div>
-          {prefs.share&&<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0"}}>Tu apparais sous le nom : <strong style={{color:C.text}}>{myName}</strong></p>}
+          {prefs.share&&(prefs.anon&&pts<ANON_MIN_POINTS
+            ?<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0"}}>Tu apparaîtras comme <strong style={{color:C.text}}>Anonyme</strong> dès {ANON_MIN_POINTS} points aujourd'hui — encore <strong style={{color:C.text}}>{ANON_MIN_POINTS-pts}</strong> point{ANON_MIN_POINTS-pts>1?"s":""}.</p>
+            :<p style={{fontSize:11,color:C.textLt,margin:"10px 0 0"}}>Tu apparais sous le nom : <strong style={{color:C.text}}>{myName}</strong></p>)}
         </div>
         {board===undefined?(
           <p style={{fontSize:13,color:C.textLt,padding:"20px 0",textAlign:"center"}}>Chargement du classement…</p>
@@ -8194,10 +8216,7 @@ function App(){
     const prefs=getRankPrefs(username);
     if(!prefs.share)return; // participation au classement public desactivee
     if(pointsSyncTimer.current)clearTimeout(pointsSyncTimer.current);
-    pointsSyncTimer.current=setTimeout(()=>{
-      const d=todayPoints(username);
-      supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
-    },2000);
+    pointsSyncTimer.current=setTimeout(()=>{ pushDailyPoints(username,prefs); },2000);
   },[]);
   const uname=currentUser?currentUser.username:null;
   useEffect(()=>{
