@@ -4173,6 +4173,18 @@ function StudyPromoEnd({onOpen,count}){
   </div>;
 }
 
+// Fin de session pour un étudiant qui possède déjà tout le Semestre 1 : il a
+// acheté tout ce qui est en vente, on le félicite au lieu de lui proposer
+// d'acheter. (À revoir le jour où le Semestre 2 sera mis en vente.)
+const ownsFullSem1=(planId,fullGroups)=>{const own=ownedGroups(planId,fullGroups);return SEM1.every(g=>own.has(g));};
+function StudyClientEnd({count}){
+  return <div style={{marginTop:18,maxWidth:380,width:"100%",background:C.surface,border:`1.5px solid ${C.good}`,borderRadius:12,padding:"14px 16px",textAlign:"left"}}>
+    {count>0&&<p style={{fontFamily:mono,fontSize:10,letterSpacing:1.5,textTransform:"uppercase",color:C.good,margin:"0 0 6px"}}>{count} carte{count>1?"s":""} révisée{count>1?"s":""} en une session</p>}
+    <p style={{fontSize:13.5,fontWeight:600,margin:"0 0 4px",color:C.text}}>Bravo, belle série ! 🎉</p>
+    <p style={{fontSize:12.5,color:C.textMed,margin:0,lineHeight:1.55}}>Merci de faire partie de MyFlashCard. Continue à ce rythme : c'est la régularité qui fait la différence.</p>
+  </div>;
+}
+
 // Le prix : barré et remplacé quand la remise s'applique.
 function PriceTag({price,promo,size=18,align="right"}){
   if(!promo||!isPayablePrice(price))return <p style={{fontSize:size,fontWeight:300,margin:0,color:C.text,textAlign:align,whiteSpace:"nowrap"}}>{price}</p>;
@@ -7044,7 +7056,10 @@ function CardAdaptModal({card,onSave,onReset,onClose}){
 // ─── Study ────────────────────────────────────────────────────────────────────
 function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,username,theme,onToggleTheme,onUndo,onQueueChange,allCards,onUnbury,promo,planId,fullGroups}){
   const [promoOpen,setPromoOpen]=useState(false),[promoPillHidden,setPromoPillHidden]=useState(false);
-  const promoOn=!isAdmin&&promoShowFor(promo,planId,fullGroups);
+  // Un compte qui possède tout le Semestre 1 a tout acheté : aucune incitation
+  // à l'achat pendant la révision, et un message de félicitations en fin de série.
+  const isSem1Client=!isAdmin&&ownsFullSem1(planId,fullGroups);
+  const promoOn=!isAdmin&&!isSem1Client&&promoShowFor(promo,planId,fullGroups);
   const promoModal=promoOpen&&<UpgradeModal currentPlanId={planId} username={username} onClose={()=>setPromoOpen(false)} promo={promo} fullGroups={fullGroups}/>;
   // ─── Cartes mises en attente (méthodes des J et personnalisée) ──────────────
   // Une carte reportée ne quitte pas la session : elle attend ici que sa minuterie
@@ -7156,6 +7171,15 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
   const [canUndo,setCanUndo]=useState(false);
   const [undoFlash,setUndoFlash]=useState(null);
   const card=localQ[idx];
+  // Nombre de cartes enfouies, pour le badge du bouton « Désenfouir » — accessible
+  // directement depuis la session en cours, sans passer par l'onglet Statistiques.
+  // ⚠️ Ce hook DOIT rester avant tout `return` anticipé (squelette, cartes en
+  // attente, « Session terminée ») : placé après, React voit un nombre de hooks
+  // différent d'un rendu à l'autre et plante toute l'application en fin de série.
+  const buriedCount=useMemo(()=>{
+    if(!allCards||!progress)return 0;
+    return allCards.filter(c=>progress[c.id]?.buried===true).length;
+  },[allCards,progress]);
   // Filet de sécurité : avec le préchargement glissant, le contenu d'une carte
   // est pratiquement toujours prêt avant qu'elle ne s'affiche. Ce squelette ne
   // sert donc plus qu'aux cas extrêmes (réseau très lent sur la toute première
@@ -7339,7 +7363,7 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
       <p style={{fontSize:13,color:C.textMed,margin:0,maxWidth:380,lineHeight:1.7}}>Tu as vu toutes les autres — le paquet n'est pas terminé tant qu'il reste celles-ci.</p>
     </div>;
   }
-  if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p>{cram&&<p style={{fontSize:12,color:C.textLt,margin:0,maxWidth:340,lineHeight:1.6}}>🗓️ Révision en avance : ces cartes ont bien été reprogrammées, avec un gain proportionné à l'avance que tu avais prise.</p>}{sessionPts>0&&<p style={{fontFamily:mono,fontSize:12,color:"var(--c-gold)",margin:0}}>🏆 +{sessionPts} points aujourd'hui</p>}<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap",justifyContent:"center"}}>{canUndo&&<Btn onClick={handleUndoClick}>↩ Revenir à la dernière carte</Btn>}<Btn fill onClick={onBack}>← Tableau de bord</Btn></div>{promoOn&&<StudyPromoEnd count={stats.total} onOpen={()=>setPromoOpen(true)}/>}{promoModal}</div>;
+  if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p>{cram&&<p style={{fontSize:12,color:C.textLt,margin:0,maxWidth:340,lineHeight:1.6}}>🗓️ Révision en avance : ces cartes ont bien été reprogrammées, avec un gain proportionné à l'avance que tu avais prise.</p>}{sessionPts>0&&<p style={{fontFamily:mono,fontSize:12,color:"var(--c-gold)",margin:0}}>🏆 +{sessionPts} points aujourd'hui</p>}<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap",justifyContent:"center"}}>{canUndo&&<Btn onClick={handleUndoClick}>↩ Revenir à la dernière carte</Btn>}<Btn fill onClick={onBack}>← Tableau de bord</Btn></div>{isSem1Client&&<StudyClientEnd count={stats.total}/>}{promoOn&&<StudyPromoEnd count={stats.total} onOpen={()=>setPromoOpen(true)}/>}{promoModal}</div>;
   const col=pC(card.packetId),grp=GROUPS.find(g=>g.id===card.groupId);
   const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
   const cardProg=progress?.[card.id];
@@ -7371,12 +7395,6 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     const d=(new Date(cardProg.next).getTime()-Date.now())/86400000;
     return d>=1?Math.round(d):0;
   })();
-  // Nombre de cartes enfouies, pour le badge du bouton « Désenfouir » — accessible
-  // directement depuis la session en cours, sans passer par l'onglet Statistiques.
-  const buriedCount=useMemo(()=>{
-    if(!allCards||!progress)return 0;
-    return allCards.filter(c=>progress[c.id]?.buried===true).length;
-  },[allCards,progress]);
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Retour</button>} center={label} right={<div style={{display:"flex",alignItems:"center",gap:8}}>{sessionPts>0&&<span style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,background:"var(--c-goldBg)",border:"1px solid #e6d3a3",color:"var(--c-gold)"}}>🏆 +{sessionPts}</span>}{mode!=="anki"&&waiting.length>0&&<button onClick={pullWaiting} title="Ces cartes reviendront d'elles-mêmes — clique pour les reprendre tout de suite" style={{fontFamily:mono,fontSize:10,fontWeight:700,padding:"3px 9px",cursor:"pointer",borderRadius:10,background:C.hardBg,border:`1px solid ${C.hard}`,color:C.hard}}>⏳ {waiting.length} en attente</button>}<span style={{fontSize:12,color:C.textLt}}>{idx+1} / {localQ.length}</span>{canUndo&&<button onClick={handleUndoClick} title="Revenir à la carte précédente pour corriger sa note" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,display:"flex",alignItems:"center",gap:4}}>↩ Précédente</button>}{!isAdmin&&!card.isUserCard&&onSaveOverride&&<button onClick={()=>setAdaptCard(card)} title="Reformuler cette carte pour toi — ta version reste privée et ne change rien pour les autres" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${card.isEdited?"var(--c-violet)":C.border}`,background:card.isEdited?"var(--c-violetBg)":"transparent",color:card.isEdited?"var(--c-violet)":C.textMed,display:"flex",alignItems:"center",gap:4}}>✏️ {card.isEdited?"Ma version":"Adapter"}</button>}{!isAdmin&&card.isUserCard&&onDeleteUserCard&&<button onClick={()=>setConfirmDelCard(card)} title="Supprimer définitivement cette carte que tu as créée" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,display:"flex",alignItems:"center",gap:4}}>🗑 Supprimer ma carte</button>}{<button onClick={()=>setConfirmBury(true)} title="Enfouir cette carte (ne plus la réviser)" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>🙈 Enfouir</button>}{allCards&&onUnbury&&<button onClick={()=>setShowBuried(true)} title="Voir et désenfouir tes cartes enfouies" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textLt,display:"flex",alignItems:"center",gap:4}}>👁 Désenfouir{buriedCount>0&&<span style={{fontFamily:mono,fontSize:9,padding:"1px 6px",borderRadius:10,background:"var(--c-toast)",color:"var(--c-onSolid)",fontWeight:700}}>{buriedCount}</span>}</button>}</div>}/>
     <div style={{height:3,background:C.border}}><div style={{height:3,background:col,width:`${(idx/Math.max(1,localQ.length))*100}%`,transition:"width 0.3s"}}/></div>
