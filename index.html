@@ -3898,6 +3898,26 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     }).catch(e=>console.warn("Content load failed:",e));
     return()=>{cancelled=true;};
   },[filteredIdsKey]);
+  // Ouverture de l'éditeur : le recto/verso est TOUJOURS relu sur le serveur.
+  // Avant, la copie chargée à l'affichage de la liste (contentMap) passait
+  // devant la version qui venait d'être enregistrée : l'éditeur rouvrait donc
+  // l'ancienne version. Et sur un autre appareil, le cache pouvait servir une
+  // copie de plusieurs heures — qu'un nouvel enregistrement aurait réécrite
+  // par-dessus la correction. Repli hors ligne : la carte en mémoire, puis le cache.
+  const openCardEditor=async card=>{
+    let content=null;
+    try{
+      const fresh=(await supa.fetchCardsContentRaw([card.id]))[card.id];
+      if(fresh){
+        content=fresh;
+        idbSet("content",card.id,{front:fresh.front,back:fresh.back,ts:Date.now()});
+        setContentMap(prev=>({...prev,[card.id]:fresh}));
+      }
+    }catch{}
+    if(!content&&card.front!=null)content={front:card.front,back:card.back};
+    if(!content)content=contentMap[card.id]||(await supa.getCardsContent([card.id]))[card.id]||null;
+    onEdit({...card,...(content||{})});
+  };
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
   const canReorder=fc!=="all";
   const handleDragStart=(e,idx)=>{if(!canReorder)return;setDragIdx(idx);e.dataTransfer.effectAllowed="move";};
@@ -4044,7 +4064,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               </div>
               <div style={{display:"flex",flexDirection:"column",justifyContent:"flex-start",gap:6,padding:"10px 12px",paddingTop:12,flexShrink:0,alignSelf:"flex-start"}}>
                 <button onClick={()=>setPreviewIdx(idx)} title="Aperçu" style={{fontFamily:font,fontSize:13,padding:"4px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:C.bg,color:C.textMed,lineHeight:1}}>👁</button>
-                <Btn small fill onClick={async()=>{const cached=contentMap[card.id];const content=cached||(await supa.getCardsContent([card.id]))[card.id];onEdit({...card,...(content||{})});}}>✏</Btn>
+                <Btn small fill onClick={()=>openCardEditor(card)}>✏</Btn>
                 <Btn small danger onClick={()=>setDelId(card.id)}>🗑</Btn>
               </div>
             </div>
@@ -5152,7 +5172,7 @@ function MyCardsTab({userCards,username,onNew,onEdit,onDelete,onToggleIntegratio
             </div>
             {expanded&&<div style={{background:"var(--c-listBg)"}}>
               {chCards.map(card=>{
-                const full={...card,...(contentMap[card.id]||{})};
+                const full=card.front!=null?card:{...card,...(contentMap[card.id]||{})};
                 const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
                 const isIntegrated=card.integrated;
                 const dueCard=cardDueIn(card);
@@ -5174,7 +5194,7 @@ function MyCardsTab({userCards,username,onNew,onEdit,onDelete,onToggleIntegratio
                     <button onClick={()=>onToggleIntegration(card)} title={isIntegrated?"Retirer des onglets semestres":"Intégrer dans les onglets semestres"} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1.5px solid ${isIntegrated?C.good:C.border}`,background:isIntegrated?C.goodBg:"transparent",color:isIntegrated?C.good:C.textMed,whiteSpace:"nowrap"}}>
                       {isIntegrated?"🔗 Intégré":"➕ Intégrer"}
                     </button>
-                    <button onClick={async()=>{const cached=contentMap[card.id];const content=cached||(await supa.getUserCardsContent(username,[card.id]))[card.id];onEdit({...card,...(content||{})});}} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
+                    <button onClick={async()=>{if(card.front!=null){onEdit(card);return;}const cached=contentMap[card.id];const content=cached||(await supa.getUserCardsContent(username,[card.id]))[card.id];onEdit({...card,...(content||{})});}} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
                     <button onClick={()=>setDelId(card.id)} title="Supprimer définitivement cette carte" style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,whiteSpace:"nowrap"}}>🗑 Supprimer</button>
                   </div>
                 </div>;
@@ -5232,7 +5252,7 @@ function MyCardsTab({userCards,username,onNew,onEdit,onDelete,onToggleIntegratio
       </div>
       {expanded&&<div style={{background:"var(--c-listBg)"}}>
         {courseCards.map(card=>{
-          const full={...card,...(contentMap[card.id]||{})};
+          const full=card.front!=null?card:{...card,...(contentMap[card.id]||{})};
           const pkLabel=PACKETS.find(p=>p.id===card.packetId)?.label;
           const dueCard=cardDueIn(card);
           const loaded=full.front!=null;
@@ -5249,7 +5269,7 @@ function MyCardsTab({userCards,username,onNew,onEdit,onDelete,onToggleIntegratio
               </>}
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
-              <button onClick={async()=>{const cached=contentMap[card.id];const content=cached||(await supa.getUserCardsContent(username,[card.id]))[card.id];onEdit({...card,...(content||{})});}} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
+              <button onClick={async()=>{if(card.front!=null){onEdit(card);return;}const cached=contentMap[card.id];const content=cached||(await supa.getUserCardsContent(username,[card.id]))[card.id];onEdit({...card,...(content||{})});}} style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>✏</button>
               <button onClick={()=>setDelId(card.id)} title="Supprimer définitivement cette carte" style={{fontFamily:font,fontSize:11,padding:"5px 8px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.again}`,background:C.againBg,color:C.again,whiteSpace:"nowrap"}}>🗑 Supprimer</button>
             </div>
           </div>;
