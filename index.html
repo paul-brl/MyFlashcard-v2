@@ -718,6 +718,34 @@ const supa = {
       return r.ok;
     } catch { return false; }
   },
+  // ─── Admin : changer l'offre d'un étudiant ─────────────────────────────────
+  // PATCH ciblé (offre + matières uniquement) — contrairement à upsertAccount,
+  // n'écrase ni l'e-mail, ni le téléphone, ni la date d'inscription. Le serveur
+  // renvoie la ligne modifiée : si aucune ne revient, c'est que rien n'a été
+  // enregistré (droits insuffisants) et l'admin en est averti au lieu de croire
+  // que c'est fait.
+  adminSetPlan: async (username, planId, groups) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/accounts?username=eq.${encodeURIComponent(username)}`,{
+        method:"PATCH", headers:{...H,"Prefer":"return=representation"},
+        body:JSON.stringify({plan_id:planId,groups}),
+      });
+      const t=await r.text();
+      if(!r.ok){ let m=t; try{const j=JSON.parse(t);m=j.message||t;}catch{} return {ok:false,error:`HTTP ${r.status} — ${String(m).slice(0,200)}`}; }
+      let rows=[]; try{rows=JSON.parse(t);}catch{}
+      if(!Array.isArray(rows)||rows.length===0)return {ok:false,error:"Aucune ligne modifiée : Supabase a refusé la mise à jour (droits administrateur sur la table accounts ?)."};
+      return {ok:true,account:rows[0]};
+    } catch(e){ return {ok:false,error:`Réseau : ${e.message}`}; }
+  },
+  // Admin : tous les achats (table purchases). Renvoie null si illisible.
+  adminGetPurchases: async () => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/purchases?select=*&order=purchase_date.desc`,{headers:H});
+      if(!r.ok)return null;
+      const d=await r.json();
+      return Array.isArray(d)?d:null;
+    } catch { return null; }
+  },
   // Matières réellement payées. Écrit dans une requête SÉPARÉE de updateGroups :
   // si la colonne "paid_groups" n'existe pas encore côté Supabase, seul cet appel
   // échoue (silencieusement) et la mise à jour des groupes reste effective.
@@ -1084,13 +1112,16 @@ const supa = {
       const r=await fetch(`${SUPA_URL}/rest/v1/rpc/admin_leaderboard`,{method:"POST",headers:{...H,"Content-Type":"application/json"},body:JSON.stringify({p_day:day})});
       if(!r.ok){
         const t=await r.text().catch(()=>"");
-        if(r.status===404||/PGRST202|does not exist|42883/i.test(t))return null;
-        console.error("admin_leaderboard:",r.status,t.slice(0,200));
-        return false;
+        // Seul PGRST202 signifie « fonction introuvable » ; toute autre erreur
+        // (colonne absente, droits…) est renvoyée telle quelle pour être affichée.
+        if(/PGRST202/.test(t)||(r.status===404&&!t))return null;
+        console.error("admin_leaderboard:",r.status,t.slice(0,300));
+        let msg=t; try{const j=JSON.parse(t);msg=[j.message,j.details,j.hint].filter(Boolean).join(" — ");}catch{}
+        return {error:`HTTP ${r.status}${msg?` — ${msg.slice(0,300)}`:""}`};
       }
       const rows=await r.json();
-      return Array.isArray(rows)?rows:false;
-    } catch(e){ return false; }
+      return Array.isArray(rows)?rows:{error:"Réponse inattendue du serveur"};
+    } catch(e){ return {error:`Réseau : ${e.message}`}; }
   },
   getLeaderboard: async (day) => {
     try {
@@ -4245,7 +4276,33 @@ function AdminUsers({accounts,onSave,onDelete}){
     }catch(e){ setErr(`Envoi impossible : ${e.message}`); }
     finally{ setResetBusy(false); }
   };
-  const handleSave=()=>{if(!form.username.trim()){setErr("Email requis.");return;}const plan=PLANS.find(p=>p.id===form.planId);onSave({username:form.username,planId:form.planId,groups:plan?.groups||[]});setEditor(null);};
+  const [saving,setSaving]=useState(false);
+  const handleSave=async()=>{
+    if(!form.username.trim()){setErr("Email requis.");return;}
+    const plan=PLANS.find(p=>p.id===form.planId);
+    setSaving(true);setErr("");
+    const res=await onSave({username:form.username,planId:form.planId,groups:plan?.groups||[]});
+    setSaving(false);
+    if(res&&res.ok===false){setErr(`Non enregistré. ${res.error||""}`);return;}
+    setEditor(null);
+  };
+  // Achats réels (table purchases), rattachés à chaque compte : c'est ce qui
+  // ouvre vraiment les droits après un paiement Stripe, même quand la colonne
+  // « offre » du compte est restée sur « Accès gratuit ».
+  const [purchases,setPurchases]=useState(null);
+  useEffect(()=>{ supa.adminGetPurchases().then(setPurchases); },[]);
+  const purchasesByAccount=useMemo(()=>{
+    const out={};
+    if(!Array.isArray(purchases))return out;
+    const byUid={},byMail={};
+    accounts.forEach(a=>{ if(a.user_id)byUid[a.user_id]=a.username; [a.username,a.email].forEach(m=>{ if(m)byMail[String(m).toLowerCase()]=a.username; }); });
+    purchases.forEach(p=>{
+      const u=(p.user_id&&byUid[p.user_id])||[p.username,p.email,p.customer_email].map(m=>m&&byMail[String(m).toLowerCase()]).find(Boolean);
+      if(u)(out[u]=out[u]||[]).push(p);
+    });
+    return out;
+  },[purchases,accounts]);
+  const isActivePurchase=p=>p.status==="paid_active"&&(!p.access_end_date||new Date(`${p.access_end_date}T23:59:59`)>=new Date());
   const mainPlans=PLANS.slice(0,4);
   return <div style={{maxWidth:700,margin:"0 auto",padding:24}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><p style={{fontFamily:serif,fontSize:18,margin:0}}>Comptes étudiants</p><Btn small onClick={()=>setShowPhones(v=>!v)}>{showPhones?"Masquer les téléphones":"Afficher les téléphones"}</Btn></div>
@@ -4262,9 +4319,9 @@ function AdminUsers({accounts,onSave,onDelete}){
     </div>}
     {accounts.length>0&&shownAccounts.length===0&&<p style={{fontSize:13,color:C.textLt,textAlign:"center",padding:"24px 0"}}>Aucun étudiant ne correspond à « {search} ».</p>}
     {accounts.length===0?(<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"48px 24px",textAlign:"center"}}><p style={{fontSize:14,color:C.textLt,margin:"0 0 16px"}}>Aucun étudiant inscrit.</p></div>):(
-      <div style={{display:"flex",flexDirection:"column",gap:8}}>{shownAccounts.map(a=>{const planId=a.plan_id||a.planId;const plan=PLANS.find(p=>p.id===planId);return<div key={a.username} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><p style={{fontFamily:mono,fontSize:13,margin:"0 0 4px",color:C.text}}>{highlightMatch(a.username,search)}</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Tag color={C.accent} bg={C.accentBg} small>{plan?.label||planId}</Tag><Tag color={C.textMed} bg={C.bg} small>{plan?.price||"—"}</Tag>{a.phone&&showPhones&&<Tag color={C.util} bg={C.utilBg} small>{a.phone}</Tag>}{a.created_at&&<Tag color={C.textLt} bg={C.bg} small>{new Date(a.created_at).toLocaleDateString("fr-FR")}</Tag>}</div></div><div style={{display:"flex",gap:8}}><Btn small onClick={()=>openEdit(a)}>Modifier</Btn><Btn small danger onClick={()=>setDelUser(a.username)}>Supprimer</Btn></div></div>;})}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>{shownAccounts.map(a=>{const planId=a.plan_id||a.planId;const plan=PLANS.find(p=>p.id===planId);return<div key={a.username} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><p style={{fontFamily:mono,fontSize:13,margin:"0 0 4px",color:C.text}}>{highlightMatch(a.username,search)}</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Tag color={C.accent} bg={C.accentBg} small>{plan?.label||planId}</Tag><Tag color={C.textMed} bg={C.bg} small>{plan?.price||"—"}</Tag>{(purchasesByAccount[a.username]||[]).map(p=><Tag key={p.id} color={isActivePurchase(p)?C.good:C.textLt} bg={isActivePurchase(p)?C.goodBg:C.bg} small>{isActivePurchase(p)?"💳 ":""}{(PLANS.find(x=>x.id===p.offer)?.label)||p.offer||"Achat"}{isActivePurchase(p)?" payé":p.status==="refunded"?" remboursé":p.status==="withdrawal_requested"?" · rétractation":" expiré"}</Tag>)}{a.phone&&showPhones&&<Tag color={C.util} bg={C.utilBg} small>{a.phone}</Tag>}{a.created_at&&<Tag color={C.textLt} bg={C.bg} small>{new Date(a.created_at).toLocaleDateString("fr-FR")}</Tag>}</div></div><div style={{display:"flex",gap:8}}><Btn small onClick={()=>openEdit(a)}>Modifier</Btn><Btn small danger onClick={()=>setDelUser(a.username)}>Supprimer</Btn></div></div>;})}</div>
     )}
-    {editor!==null&&<Modal onClose={()=>setEditor(null)} width={380}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 20px"}}>Modifier</p><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Email / Identifiant</Lbl><input style={iLine} value={form.username} disabled/></div><div><Lbl>Mot de passe</Lbl><p style={{fontSize:11.5,color:C.textMed,margin:"6px 0 8px",lineHeight:1.6}}>Les mots de passe sont chiffrés chez Supabase et ne sont lisibles par personne, administrateurs compris. Pour dépanner un étudiant, envoie-lui un lien de réinitialisation.</p>{resetSent===form.username?<p style={{fontSize:12,color:C.good,margin:0}}>✓ Lien envoyé à {resetSent}</p>:<Btn small onClick={()=>sendReset(form.username)} disabled={resetBusy}>{resetBusy?"Envoi…":"✉ Envoyer un lien de réinitialisation"}</Btn>}</div><div><Lbl>Abonnement</Lbl><div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>{mainPlans.map(o=><button key={o.id} onClick={()=>setForm(p=>({...p,planId:o.id}))} style={{fontFamily:font,fontSize:13,padding:"10px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${form.planId===o.id?C.accent:C.border}`,background:form.planId===o.id?C.accentBg:"transparent",color:form.planId===o.id?C.accent:C.textMed,textAlign:"left"}}>{form.planId===o.id&&"✓ "}{o.label} — {o.price}</button>)}</div></div></div>{err&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:"14px 0 0"}}>{err}</p>}<div style={{display:"flex",gap:10,marginTop:24}}><Btn fill onClick={handleSave}>Mettre à jour</Btn><Btn onClick={()=>setEditor(null)}>Annuler</Btn></div></Modal>}
+    {editor!==null&&<Modal onClose={()=>setEditor(null)} width={380}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 20px"}}>Modifier</p><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Email / Identifiant</Lbl><input style={iLine} value={form.username} disabled/></div><div><Lbl>Mot de passe</Lbl><p style={{fontSize:11.5,color:C.textMed,margin:"6px 0 8px",lineHeight:1.6}}>Les mots de passe sont chiffrés chez Supabase et ne sont lisibles par personne, administrateurs compris. Pour dépanner un étudiant, envoie-lui un lien de réinitialisation.</p>{resetSent===form.username?<p style={{fontSize:12,color:C.good,margin:0}}>✓ Lien envoyé à {resetSent}</p>:<Btn small onClick={()=>sendReset(form.username)} disabled={resetBusy}>{resetBusy?"Envoi…":"✉ Envoyer un lien de réinitialisation"}</Btn>}</div><div><Lbl>Abonnement</Lbl><div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>{mainPlans.map(o=><button key={o.id} onClick={()=>setForm(p=>({...p,planId:o.id}))} style={{fontFamily:font,fontSize:13,padding:"10px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${form.planId===o.id?C.accent:C.border}`,background:form.planId===o.id?C.accentBg:"transparent",color:form.planId===o.id?C.accent:C.textMed,textAlign:"left"}}>{form.planId===o.id&&"✓ "}{o.label} — {o.price}</button>)}</div></div></div>{err&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:"14px 0 0"}}>{err}</p>}<div style={{display:"flex",gap:10,marginTop:24}}><Btn fill onClick={handleSave} disabled={saving}>{saving?"Enregistrement…":"Mettre à jour"}</Btn><Btn onClick={()=>setEditor(null)}>Annuler</Btn></div></Modal>}
     {delUser&&<Modal onClose={()=>setDelUser(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer {delUser} ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>L'étudiant ne pourra plus se connecter.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delUser);setDelUser(null);}}>Supprimer</Btn><Btn onClick={()=>setDelUser(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
@@ -5832,7 +5889,7 @@ function ForumTab({currentUser,pseudo,onRead}){
 // chacun. Les élèves qui ont choisi « Ne pas apparaître » n'y sont pas.
 function AdminRank(){
   const [day,setDay]=useState(dateKey());
-  const [rows,setRows]=useState(undefined); // undefined = chargement · null = fonction absente · false = erreur
+  const [rows,setRows]=useState(undefined); // undefined = chargement · null = fonction absente · {error} = erreur
   const [q,setQ]=useState("");
   const [onlyAnon,setOnlyAnon]=useState(false);
   const [reload,setReload]=useState(0);
@@ -5869,7 +5926,10 @@ function AdminRank(){
       <p style={{fontSize:13,color:C.textMed,margin:"0 0 6px"}}>⚠️ La fonction <code style={{fontFamily:mono,fontSize:11}}>admin_leaderboard</code> n'existe pas encore dans Supabase.</p>
       <p style={{fontSize:11,color:C.textLt,margin:0}}>À créer une fois dans l'éditeur SQL Supabase (voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_admin_rang.sql</code>).</p>
     </div>}
-    {rows===false&&<p style={{fontSize:13,color:C.again}}>Impossible de charger le classement. Vérifie que ton compte a bien le rôle administrateur, puis réessaie.</p>}
+    {rows&&!Array.isArray(rows)&&rows.error&&<div style={{...box,padding:16}}>
+      <p style={{fontSize:13,color:C.again,margin:"0 0 6px"}}>Impossible de charger le classement.</p>
+      <p style={{fontFamily:mono,fontSize:11,color:C.textMed,margin:0,wordBreak:"break-word"}}>{rows.error}</p>
+    </div>}
     {Array.isArray(rows)&&<>
       <p style={{fontFamily:mono,fontSize:11,color:C.textLt,margin:"0 0 8px"}}>{rows.length} élève{rows.length>1?"s":""} classé{rows.length>1?"s":""} · dont {nAnon} anonyme{nAnon>1?"s":""}</p>
       {shown.length===0?<p style={{fontSize:13,color:C.textLt}}>Personne dans le classement pour cette sélection.</p>:
@@ -9067,7 +9127,14 @@ function App(){
       .finally(()=>{endPendingSave();});
   },[cards,beginPendingSave,endPendingSave]);
   const handleDeleteCard=useCallback(async id=>{await supa.deleteCard(id);setCards(p=>p.filter(c=>c.id!==id));},[]);
-  const handleSaveUser=useCallback(async acc=>{await supa.upsertAccount(acc);setAccounts(p=>p.find(a=>a.username===acc.username)?p.map(a=>a.username===acc.username?{...a,...acc,plan_id:acc.planId}:a):[...p,{...acc,plan_id:acc.planId}]);},[]);
+  // Enregistrement confirmé par le serveur avant de mettre la liste à jour :
+  // l'admin ne voit plus « Semestre 1 » à l'écran alors que la base dit encore
+  // « Accès gratuit ». Renvoie {ok, error}.
+  const handleSaveUser=useCallback(async acc=>{
+    const res=await supa.adminSetPlan(acc.username,acc.planId,acc.groups);
+    if(res.ok)setAccounts(p=>p.map(a=>a.username===acc.username?{...a,...res.account,planId:res.account.plan_id}:a));
+    return res;
+  },[]);
   const handleDeleteUser=useCallback(async username=>{await supa.deleteAccount(username);setAccounts(p=>p.filter(a=>a.username!==username));},[]);
   const handleResetProgress=useCallback(async(cardIds,alsoResetPacketOrder=false)=>{
     if(!currentUser||!cardIds||!cardIds.length)return;
