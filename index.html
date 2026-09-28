@@ -344,6 +344,8 @@ const { useState, useEffect, useCallback, useMemo, useRef } = React;
 // ─── Supabase ────────────────────────────────────────────────────────────────
 // Le classement public (onglet Rang) utilise la table optionnelle "daily_points".
 // SQL à exécuter séparément dans Supabase : voir le fichier supabase_daily_points.sql
+// Les points eux-mêmes sont stockés dans la table "point_awards" (et la vue
+// "point_days") : voir le fichier supabase_point_awards.sql
 const SUPA_URL = "https://cytdlgvtwvofwrgqnkhe.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5dGRsZ3Z0d3ZvZndyZ3Fua2hlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMTU4MTIsImV4cCI6MjA5NDU5MTgxMn0.QLQrzrkAjDjEY1x0VJwMguteUYdcGJ_pREX03VElyOs";
 const EDGE_URL = `${SUPA_URL}/functions/v1`;
@@ -1018,6 +1020,60 @@ const supa = {
   deleteDailyPoints: async (username) => {
     try { await fetch(`${SUPA_URL}/rest/v1/daily_points?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {}
   },
+  // ─── Points (table « point_awards » + vue « point_days ») ─────────────────
+  // SQL à exécuter séparément dans Supabase : voir le fichier supabase_point_awards.sql
+  // Chaque appel renvoie :
+  //   true   → réussi
+  //   null   → la table n'existe pas encore : l'app reste en stockage local
+  //   "drop" → refus définitif (données invalides) : inutile de réessayer
+  //   false  → échec passager (réseau, jeton expiré…) : on réessaiera
+  _pointsStatus: async (r) => {
+    if(r.ok) return true;
+    let t=""; try{ t=await r.text(); }catch{}
+    if(r.status===404||/does not exist|42P01|PGRST205/i.test(t)) return null;
+    if(r.status>=400&&r.status<500&&![401,403,408,429].includes(r.status)){ console.error("point_awards:",r.status,t.slice(0,200)); return "drop"; }
+    return false;
+  },
+  insertPointAwards: async (rows) => {
+    if(!rows||!rows.length) return true;
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/point_awards?on_conflict=user_id,day,card_id`,{
+        method:"POST",
+        // Une carte déjà comptée ce jour-là (sur n'importe quel appareil) est
+        // simplement ignorée : l'anti-farming est garanti par la base elle-même.
+        headers:{...H,"Prefer":"resolution=ignore-duplicates,return=minimal"},
+        body:JSON.stringify(rows)
+      });
+      return await supa._pointsStatus(r);
+    } catch(e){ return false; }
+  },
+  deletePointAward: async (username, day, cardId) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/point_awards?username=eq.${encodeURIComponent(username)}&day=eq.${day}&card_id=eq.${encodeURIComponent(cardId)}`,{method:"DELETE",headers:{...H,"Prefer":"return=minimal"}});
+      return await supa._pointsStatus(r);
+    } catch(e){ return false; }
+  },
+  // Totaux par jour (60 derniers jours) : au plus 60 lignes, quel que soit le
+  // nombre de cartes révisées.
+  getPointDays: async (username, fromDay) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/point_days?username=eq.${encodeURIComponent(username)}&day=gte.${fromDay}&select=day,points,cards,age_new,age_young,age_mid,age_old,imp_prioritaire,imp_important,imp_utile`,{headers:H});
+      const s=await supa._pointsStatus(r);
+      if(s!==true) return s===null?null:false;
+      const rows=await r.json();
+      return Array.isArray(rows)?rows:false;
+    } catch(e){ return false; }
+  },
+  // Détail carte par carte d'une journée (sert à l'anti-farming du jour).
+  getPointAwards: async (username, day) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/point_awards?username=eq.${encodeURIComponent(username)}&day=eq.${day}&select=card_id,points,age,packet_id`,{headers:H});
+      const s=await supa._pointsStatus(r);
+      if(s!==true) return s===null?null:false;
+      const rows=await r.json();
+      return Array.isArray(rows)?rows:false;
+    } catch(e){ return false; }
+  },
   getLeaderboard: async (day) => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/daily_points_public?day=eq.${day}&select=user_id,points,cards,display_name,anonymous&order=points.desc&limit=200`,{headers:H});
@@ -1622,15 +1678,167 @@ function cardPointValue(prev,np,packetId){
   if(points<=0) return {points:0,age,base,bonus,packetId,ratio,reason:"early"};
   return {points,age,base,bonus,packetId,ratio,reason:"ok"};
 }
-// ─── Stockage des points (localStorage, par utilisateur) ─────────────────────
+// ─── Stockage des points (Supabase, table « point_awards ») ──────────────────
+// Chaque carte qui rapporte des points devient UNE ligne en base : (élève, jour,
+// carte, points, âge, importance). Conséquences :
+//  • les points ne dépendent plus du stockage du navigateur (qui peut être plein) ;
+//  • plusieurs appareils peuvent réviser le même jour : leurs lignes
+//    s'additionnent au lieu de s'écraser ;
+//  • l'anti-farming (une carte = une fois par jour) est garanti par la clé
+//    primaire de la table, sur tous les appareils à la fois.
+// POINTS_MEM garde en mémoire une copie de travail, lue de façon synchrone par
+// l'affichage. Le localStorage ne sert plus que de repli si la table n'existe
+// pas encore ; dès qu'elle existe, son contenu y est remonté une fois puis effacé.
+const POINTS_KEEP_DAYS = 60;
+const POINTS_MEM = {};    // username → {days:{…}}
+const POINTS_REMOTE = {}; // username → true (table en service) · false (absente) · undefined (pas encore vérifié)
 const emptyPointsDay = () => ({points:0,cards:0,byAge:{new:0,young:0,mid:0,old:0},byImp:{prioritaire:0,important:0,utile:0},scored:{}});
-const getPoints = u => { try{ const v=JSON.parse(localStorage.getItem(`mx6-points-${u}`)||"null"); return (v&&v.days)?v:{days:{}}; }catch{ return {days:{}}; } };
-const savePoints = (u,p) => { try{
+const readLocalPoints = u => { try{ const v=JSON.parse(localStorage.getItem(`mx6-points-${u}`)||"null"); return (v&&v.days)?v:{days:{}}; }catch{ return {days:{}}; } };
+// Renvoie une copie (l'objet « days » est neuf) : les useMemo qui en dépendent
+// voient bien un nouvel objet à chaque lecture.
+const getPoints = u => {
+  if(!POINTS_MEM[u]) POINTS_MEM[u]=readLocalPoints(u);
+  return {days:{...POINTS_MEM[u].days}};
+};
+const savePoints = (u,p) => {
   const keys=Object.keys(p.days).sort();
-  if(keys.length>60) keys.slice(0,keys.length-60).forEach(k=>{ delete p.days[k]; }); // on garde 60 jours
-  localStorage.setItem(`mx6-points-${u}`,JSON.stringify(p));
-}catch{} };
+  if(keys.length>POINTS_KEEP_DAYS) keys.slice(0,keys.length-POINTS_KEEP_DAYS).forEach(k=>{ delete p.days[k]; });
+  POINTS_MEM[u]=p;
+  if(POINTS_REMOTE[u]===true) return; // la base fait foi : rien à écrire dans le navigateur
+  try{ localStorage.setItem(`mx6-points-${u}`,JSON.stringify(p)); }
+  catch(e){ console.warn("Points : stockage du navigateur plein, conservation en mémoire et dans Supabase uniquement."); }
+};
 const todayPoints = u => { const p=getPoints(u); return p.days[dateKey()]||emptyPointsDay(); };
+// Reconstruit une journée complète à partir de ses cartes comptabilisées.
+function pointsDayFromCards(scored,scoredInfo){
+  const day=emptyPointsDay(); day.scoredInfo={};
+  Object.entries(scored).forEach(([cardId,pts])=>{
+    const info=scoredInfo[cardId]||{};
+    day.scored[cardId]=pts;
+    day.scoredInfo[cardId]={age:info.age||null,packetId:info.packetId||null};
+    day.points+=pts; day.cards+=1;
+    if(info.age&&day.byAge[info.age]!==undefined) day.byAge[info.age]+=pts;
+    if(info.packetId&&day.byImp[info.packetId]!==undefined) day.byImp[info.packetId]+=pts;
+  });
+  return day;
+}
+const pointsDayFromRows = rows => {
+  const scored={},info={};
+  rows.forEach(r=>{ scored[r.card_id]=r.points||0; info[r.card_id]={age:r.age,packetId:r.packet_id}; });
+  return pointsDayFromCards(scored,info);
+};
+// Journée vue par le serveur + cartes notées sur cet appareil qui n'y sont pas
+// encore arrivées (envoi en cours ou en attente de réseau).
+function mergePointsDay(server,local){
+  if(!local||!local.scored) return server;
+  const scored={...server.scored},info={...(server.scoredInfo||{})};
+  Object.entries(local.scored).forEach(([id,pts])=>{
+    if(scored[id]===undefined){ scored[id]=pts; info[id]=(local.scoredInfo||{})[id]||{}; }
+  });
+  return pointsDayFromCards(scored,info);
+}
+const pointAwardRow = (u,day,cardId,points,age,packetId) =>
+  ({username:u,day,card_id:String(cardId),points,age:age||null,packet_id:packetId||null});
+// File d'envoi, séquentielle par élève (un « annuler » part toujours après le
+// « gagner » qu'il annule). Une opération qui échoue est gardée, et toutes les
+// suivantes avec elle pour préserver l'ordre ; elles repartent au prochain envoi.
+const POINTS_CHAIN = {}, POINTS_PENDING = {};
+function queuePointsOp(u,op){
+  if(!u||POINTS_REMOTE[u]===false) return Promise.resolve();
+  const run=async()=>{
+    if(POINTS_REMOTE[u]===false) return;
+    const ops=(POINTS_PENDING[u]||[]).splice(0);
+    if(op) ops.push(op);
+    let blocked=false;
+    for(const o of ops){
+      if(blocked){ POINTS_PENDING[u].push(o); continue; }
+      const res=o.type==="add"
+        ? await supa.insertPointAwards([o.row])
+        : await supa.deletePointAward(u,o.day,o.cardId);
+      if(res===null){ POINTS_REMOTE[u]=false; POINTS_PENDING[u]=[]; return; } // table absente
+      if(res===false){ blocked=true; (POINTS_PENDING[u]=POINTS_PENDING[u]||[]).push(o); }
+      // true ou "drop" : l'opération est terminée
+    }
+  };
+  POINTS_CHAIN[u]=(POINTS_CHAIN[u]||Promise.resolve()).then(run,run);
+  return POINTS_CHAIN[u];
+}
+// Relance les envois en attente et attend qu'ils soient terminés.
+const flushPoints = u => queuePointsOp(u,null);
+// Ancien stockage du navigateur → lignes pour la table (reprise unique).
+function localPointsToRows(u,store){
+  const rows=[];
+  Object.entries(store.days||{}).forEach(([day,d])=>{
+    if(!d||!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+    const scored=d.scored||{},info=d.scoredInfo||{};
+    let sum=0;
+    Object.entries(scored).forEach(([cardId,pts])=>{
+      const p=Math.max(0,Math.min(20,Math.round(+pts||0)));
+      if(!p) return;
+      sum+=p;
+      const inf=info[cardId]||{};
+      rows.push(pointAwardRow(u,day,cardId,p,inf.age,inf.packetId));
+    });
+    // Points éventuels sans détail par carte : conservés sous forme de lignes
+    // « __historique__ » pour que le total de la journée reste exact.
+    let rest=Math.round((d.points||0)-sum),n=0;
+    while(rest>0){ const p=Math.min(13,rest); rows.push(pointAwardRow(u,day,`__historique__${++n}`,p,null,null)); rest-=p; }
+  });
+  return rows;
+}
+// Chargement à la connexion. Renvoie true si l'affichage doit être rafraîchi.
+async function loadPointsFromCloud(u){
+  if(!u) return false;
+  // 1. Reprise unique de ce qui était stocké dans ce navigateur.
+  const local=readLocalPoints(u);
+  if(Object.keys(local.days||{}).length){
+    const rows=localPointsToRows(u,local);
+    for(let i=0;i<rows.length;i+=500){
+      const res=await supa.insertPointAwards(rows.slice(i,i+500));
+      if(res===null){ POINTS_REMOTE[u]=false; return false; } // pas de table : on reste en local
+      if(res===false) return false; // réseau : on retentera au prochain chargement
+    }
+    // Tout est en base : on libère la place dans le navigateur.
+    try{ localStorage.removeItem(`mx6-points-${u}`); }catch{}
+  }
+  // 2. Lecture : totaux des 60 derniers jours + détail du jour.
+  const today=dateKey();
+  const from=dateKey(new Date(Date.now()-(POINTS_KEEP_DAYS-1)*86400000));
+  const [dayRows,todayRows]=await Promise.all([supa.getPointDays(u,from),supa.getPointAwards(u,today)]);
+  if(dayRows===null||todayRows===null){ POINTS_REMOTE[u]=false; return false; }
+  if(!dayRows||!todayRows) return false;
+  POINTS_REMOTE[u]=true;
+  const days={};
+  dayRows.forEach(r=>{
+    days[r.day]={
+      points:r.points||0,cards:r.cards||0,
+      byAge:{new:r.age_new||0,young:r.age_young||0,mid:r.age_mid||0,old:r.age_old||0},
+      byImp:{prioritaire:r.imp_prioritaire||0,important:r.imp_important||0,utile:r.imp_utile||0},
+      scored:{},
+    };
+  });
+  const mem=POINTS_MEM[u]&&POINTS_MEM[u].days[today];
+  days[today]=mergePointsDay(pointsDayFromRows(todayRows),mem);
+  POINTS_MEM[u]={days};
+  return true;
+}
+// Relit la journée depuis la base (points gagnés sur un autre appareil).
+async function refreshTodayPoints(u){
+  if(!u||POINTS_REMOTE[u]!==true) return;
+  await flushPoints(u);
+  const today=dateKey();
+  const rows=await supa.getPointAwards(u,today);
+  if(!Array.isArray(rows)) return;
+  const store=getPoints(u);
+  const merged=mergePointsDay(pointsDayFromRows(rows),store.days[today]);
+  // Une annulation faite ici mais pas encore parvenue au serveur reste annulée.
+  const pendingDel=(POINTS_PENDING[u]||[]).filter(o=>o.type==="del"&&o.day===today).map(o=>o.cardId);
+  if(pendingDel.length){
+    pendingDel.forEach(id=>{ delete merged.scored[id]; });
+    store.days[today]=pointsDayFromCards(merged.scored,merged.scoredInfo);
+  } else store.days[today]=merged;
+  POINTS_MEM[u]=store;
+}
 // Attribution effective. Renvoie null si la carte ne rapporte rien.
 // Anti-farming : une même carte ne peut rapporter des points qu'UNE SEULE FOIS
 // par jour, même si elle repasse plusieurs fois dans la file de révision.
@@ -1652,6 +1860,7 @@ function awardPoints(username,cardId,prev,np,packetId){
   if(packetId&&day.byImp[packetId]!==undefined) day.byImp[packetId]+=res.points;
   store.days[key]=day;
   savePoints(username,store);
+  queuePointsOp(username,{type:"add",row:pointAwardRow(username,key,cardId,res.points,res.age,packetId)});
   return {...res,total:day.points};
 }
 // Annule les points d'une carte pour la journée en cours (retour arrière).
@@ -1674,6 +1883,7 @@ function revokePoints(username,cardId){
   delete day.scored[cardId];
   store.days[key]=day;
   savePoints(username,store);
+  queuePointsOp(username,{type:"del",day:key,cardId:String(cardId)});
   return {points:pts,total:day.points};
 }
 // Annule une révision dans les statistiques (retour arrière).
@@ -1718,6 +1928,9 @@ const saveRankPrefs = (u,p) => storage.set(`mx6-rankprefs-${u}`,{...p,migration:
 // (rien n'est publié tant qu'il n'a pas ANON_MIN_POINTS) ; sinon mise à jour.
 const pushDailyPoints = async (username,prefs) => {
   if(!username)return;
+  // Total du jour relu en base : il inclut les autres appareils, et un appareil
+  // resté en retard ne peut plus écraser un score plus élevé.
+  await refreshTodayPoints(username);
   const d=todayPoints(username);
   if(!prefs.share||(prefs.anon&&d.points<ANON_MIN_POINTS)){ await supa.deleteDailyPoints(username); return; }
   await supa.upsertDailyPoints(username,dateKey(),d.points,d.cards,rankDisplayName(username,prefs.anon),prefs.anon);
@@ -2714,6 +2927,7 @@ function awardJPoints(username,cardId,j,packetId){
   if(packetId&&day.byImp[packetId]!==undefined)day.byImp[packetId]+=points;
   store.days[key]=day;
   savePoints(username,store);
+  queuePointsOp(username,{type:"add",row:pointAwardRow(username,key,cardId,points,age,packetId)});
   return {points,age,base,bonus,packetId,total:day.points};
 }
 // ─── Design ──────────────────────────────────────────────────────────────────
@@ -5094,7 +5308,8 @@ function RankTab({username,tick}){
   const [sub,setSub]=useState("board");
   const [prefs,setPrefs]=useState(()=>getRankPrefs(username));
   const [board,setBoard]=useState(undefined); // undefined = chargement · null = indisponible
-  const data=useMemo(()=>getPoints(username),[username,tick,refresh]);
+  const [synced,setSynced]=useState(0); // incrémenté quand le total du jour a été relu en base
+  const data=useMemo(()=>getPoints(username),[username,tick,refresh,synced]);
   const today=data.days[dateKey()]||emptyPointsDay();
   const pts=today.points;
   const ri=rankIndexFor(pts),rank=RANKS[ri],next=RANKS[ri+1]||null;
@@ -5104,6 +5319,7 @@ function RankTab({username,tick}){
     (async()=>{
       setBoard(b=>b===undefined?undefined:b);
       await pushDailyPoints(username,prefs);
+      if(alive) setSynced(n=>n+1);
       const rows=await supa.getLeaderboard(dateKey());
       // Les anonymes ne s'affichent qu'à partir de ANON_MIN_POINTS points.
       if(alive) setBoard(Array.isArray(rows)?rows.filter(r=>!r.anonymous||(r.points||0)>=ANON_MIN_POINTS):rows);
@@ -8216,9 +8432,17 @@ function App(){
     const prefs=getRankPrefs(username);
     if(!prefs.share)return; // participation au classement public desactivee
     if(pointsSyncTimer.current)clearTimeout(pointsSyncTimer.current);
-    pointsSyncTimer.current=setTimeout(()=>{ pushDailyPoints(username,prefs); },2000);
+    pointsSyncTimer.current=setTimeout(()=>{ pushDailyPoints(username,prefs).then(()=>setPointsTick(t=>t+1)); },2000);
   },[]);
   const uname=currentUser?currentUser.username:null;
+  // Points : relus depuis Supabase à chaque connexion (et remontée unique de
+  // l'ancien stockage du navigateur, qui est ensuite libéré).
+  useEffect(()=>{
+    if(!uname)return;
+    let alive=true;
+    loadPointsFromCloud(uname).then(changed=>{ if(alive&&changed)setPointsTick(t=>t+1); });
+    return()=>{alive=false;};
+  },[uname]);
   useEffect(()=>{
     if(!uname){ setJplans({}); setStudyMode("anki"); return; }
     // Le navigateur d'abord : l'affichage est immédiat, même hors ligne.
@@ -8688,7 +8912,7 @@ function App(){
   },[currentUser]);
   // ─── Suppression de compte (étudiant) ───────────────────────────────────────
   // Efface le compte côté Supabase (accounts, user_cards, progress, daily_points,
-  // profil/pseudo) ainsi que toutes les données locales de cet utilisateur, puis
+  // profil/pseudo ; point_awards part avec le compte, par cascade) ainsi que toutes les données locales de cet utilisateur, puis
   // déconnecte. Action déclenchée uniquement depuis les Réglages, après
   // confirmation par mot de passe.
   const handleDeleteAccount=useCallback(async()=>{
