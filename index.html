@@ -1074,6 +1074,24 @@ const supa = {
       return Array.isArray(rows)?rows:false;
     } catch(e){ return false; }
   },
+  // ─── Classement vu par l'administrateur (fonction « admin_leaderboard ») ───
+  // SQL à exécuter séparément dans Supabase : voir le fichier supabase_admin_rang.sql
+  // La fonction vérifie elle-même que l'appelant est administrateur : un élève
+  // qui l'appellerait reçoit une erreur, jamais les adresses.
+  // Renvoie un tableau, null si la fonction n'existe pas encore, false sinon.
+  adminLeaderboard: async (day) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/rpc/admin_leaderboard`,{method:"POST",headers:{...H,"Content-Type":"application/json"},body:JSON.stringify({p_day:day})});
+      if(!r.ok){
+        const t=await r.text().catch(()=>"");
+        if(r.status===404||/PGRST202|does not exist|42883/i.test(t))return null;
+        console.error("admin_leaderboard:",r.status,t.slice(0,200));
+        return false;
+      }
+      const rows=await r.json();
+      return Array.isArray(rows)?rows:false;
+    } catch(e){ return false; }
+  },
   getLeaderboard: async (day) => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/daily_points_public?day=eq.${day}&select=user_id,points,cards,display_name,anonymous&order=points.desc&limit=200`,{headers:H});
@@ -4134,7 +4152,82 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     {delId&&<Modal onClose={()=>setDelId(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>Action irréversible.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delId);setDelId(null);}}>Supprimer</Btn><Btn onClick={()=>setDelId(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
+// ─── Recherche tolérante des étudiants (espace admin) ─────────────────────────
+// • Moins de 4 lettres : filtre strict — seules les adresses qui contiennent
+//   exactement ces lettres, à la suite, restent affichées (« s », puis « sa »…).
+// • À partir de 4 lettres : les fautes de frappe sont tolérées (1 erreur, 2 à
+//   partir de 7 lettres : lettre en trop, en moins, remplacée ou inversée).
+// • Accents, majuscules, points, tirets et chiffres collés sont ignorés, et
+//   plusieurs mots se cherchent dans n'importe quel ordre (« enyedi lucas »).
+const normSearch = t => (t||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+// Plus petite distance d'édition entre `pat` et N'IMPORTE QUEL morceau de `txt`
+// (Sellers, avec inversion de deux lettres voisines comptée comme une erreur).
+function fuzzySubDistance(pat,txt){
+  const m=pat.length,n=txt.length;
+  if(!m)return 0;
+  let pp=null,prev=new Array(n+1).fill(0),cur;
+  for(let i=1;i<=m;i++){
+    cur=new Array(n+1); cur[0]=i;
+    for(let j=1;j<=n;j++){
+      const cost=pat[i-1]===txt[j-1]?0:1;
+      let v=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+cost);
+      if(pp&&i>1&&j>1&&pat[i-1]===txt[j-2]&&pat[i-2]===txt[j-1])v=Math.min(v,pp[j-2]+1);
+      cur[j]=v;
+    }
+    pp=prev; prev=cur;
+  }
+  return Math.min(...prev);
+}
+// Renvoie null si l'étudiant ne correspond pas, sinon un score (plus petit = meilleur).
+function studentMatch(a,query){
+  const q=normSearch(query).trim();
+  if(!q)return 0;
+  const email=normSearch(a.username);
+  const local=email.split("@")[0];
+  const flat=local.replace(/[^a-z]/g,"");                 // « lucas.enyedi92 » → « lucasenyedi »
+  const words=local.split(/[^a-z]+/).filter(Boolean);     // [« lucas », « enyedi »]
+  const phone=(a.phone||"").replace(/\D/g,"");
+  let score=0;
+  for(const tok of q.split(/\s+/)){
+    const tokL=tok.replace(/[^a-z0-9@._+-]/g,"");
+    if(!tokL)continue;
+    const idx=email.indexOf(tokL);
+    if(idx>=0){
+      // Début d'adresse ou début de mot : meilleur classement.
+      score+=idx===0?0:(words.some(w=>w.startsWith(tokL))?1:2);
+      continue;
+    }
+    const digits=tokL.replace(/\D/g,"");
+    if(digits.length>=3&&phone.includes(digits)){ score+=2; continue; }
+    const letters=tokL.replace(/[^a-z]/g,"");
+    if(letters.length&&flat.includes(letters)){ score+=2; continue; }
+    if(letters.length<4)return null;                      // filtre strict tant que c'est court
+    const maxErr=letters.length>=7?2:1;
+    const d=fuzzySubDistance(letters,flat);
+    if(d>maxErr)return null;
+    score+=5+d*3;
+  }
+  return score;
+}
+// Met en évidence, dans l'adresse, le morceau tapé (s'il y figure tel quel).
+function highlightMatch(text,query){
+  const q=normSearch(query).trim().split(/\s+/).filter(Boolean).sort((x,y)=>y.length-x.length)[0];
+  if(!q)return text;
+  const i=normSearch(text).indexOf(q);
+  if(i<0)return text;
+  return <>{text.slice(0,i)}<mark style={{background:"var(--c-accentBg)",color:"var(--c-accent)",borderRadius:3,padding:"0 1px"}}>{text.slice(i,i+q.length)}</mark>{text.slice(i+q.length)}</>;
+}
 function AdminUsers({accounts,onSave,onDelete}){
+  const [search,setSearch]=useState("");
+  const searchRef=useRef(null);
+  const shownAccounts=useMemo(()=>{
+    if(!search.trim())return accounts;
+    return accounts
+      .map(a=>({a,sc:studentMatch(a,search)}))
+      .filter(x=>x.sc!==null)
+      .sort((x,y)=>x.sc-y.sc||x.a.username.localeCompare(y.a.username))
+      .map(x=>x.a);
+  },[accounts,search]);
   const [editor,setEditor]=useState(null),[form,setForm]=useState({username:"",planId:"sem1"}),[err,setErr]=useState(""),[delUser,setDelUser]=useState(null);
   // Les mots de passe vivent chez Supabase Auth, hachés. L'espace admin ne les
   // lit pas, ne les écrit pas, ne les affiche pas : il ne peut qu'envoyer à
@@ -4157,10 +4250,21 @@ function AdminUsers({accounts,onSave,onDelete}){
   return <div style={{maxWidth:700,margin:"0 auto",padding:24}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><p style={{fontFamily:serif,fontSize:18,margin:0}}>Comptes étudiants</p><Btn small onClick={()=>setShowPhones(v=>!v)}>{showPhones?"Masquer les téléphones":"Afficher les téléphones"}</Btn></div>
     <p style={{fontSize:11.5,color:C.textMed,margin:"0 0 18px",lineHeight:1.6}}>Les comptes sont créés par les étudiants eux-mêmes depuis la page d'inscription. Ici, tu peux changer leur offre, leur envoyer un lien de réinitialisation de mot de passe, ou supprimer leur ligne.</p>
+    {accounts.length>0&&<div style={{position:"sticky",top:0,zIndex:5,background:C.bg,padding:"4px 0 12px"}}>
+      <div style={{position:"relative"}}>
+        <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:14,color:C.textLt,pointerEvents:"none"}}>🔍</span>
+        <input ref={searchRef} autoFocus value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==="Escape")setSearch("");}}
+          placeholder="Rechercher un étudiant : nom, prénom, adresse…" autoComplete="off" spellCheck={false}
+          style={{width:"100%",boxSizing:"border-box",fontFamily:font,fontSize:14,padding:"11px 36px 11px 36px",borderRadius:8,border:`1.5px solid ${search?C.accent:C.border}`,background:C.surface,color:C.text,outline:"none"}}/>
+        {search&&<button onClick={()=>{setSearch("");searchRef.current&&searchRef.current.focus();}} title="Effacer" style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",border:"none",background:"none",cursor:"pointer",fontSize:15,color:C.textLt}}>✕</button>}
+      </div>
+      <p style={{fontFamily:mono,fontSize:10.5,color:C.textLt,margin:"6px 2px 0"}}>{search.trim()?`${shownAccounts.length} résultat${shownAccounts.length>1?"s":""} sur ${accounts.length} étudiants`:`${accounts.length} étudiants`}</p>
+    </div>}
+    {accounts.length>0&&shownAccounts.length===0&&<p style={{fontSize:13,color:C.textLt,textAlign:"center",padding:"24px 0"}}>Aucun étudiant ne correspond à « {search} ».</p>}
     {accounts.length===0?(<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"48px 24px",textAlign:"center"}}><p style={{fontSize:14,color:C.textLt,margin:"0 0 16px"}}>Aucun étudiant inscrit.</p></div>):(
-      <div style={{display:"flex",flexDirection:"column",gap:8}}>{accounts.map(a=>{const planId=a.plan_id||a.planId;const plan=PLANS.find(p=>p.id===planId);return<div key={a.username} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><p style={{fontFamily:mono,fontSize:13,margin:"0 0 4px",color:C.text}}>{a.username}</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Tag color={C.accent} bg={C.accentBg} small>{plan?.label||planId}</Tag><Tag color={C.textMed} bg={C.bg} small>{plan?.price||"—"}</Tag>{a.phone&&showPhones&&<Tag color={C.util} bg={C.utilBg} small>{a.phone}</Tag>}{a.created_at&&<Tag color={C.textLt} bg={C.bg} small>{new Date(a.created_at).toLocaleDateString("fr-FR")}</Tag>}</div></div><div style={{display:"flex",gap:8}}><Btn small onClick={()=>openEdit(a)}>Modifier</Btn><Btn small danger onClick={()=>setDelUser(a.username)}>Supprimer</Btn></div></div>;})}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>{shownAccounts.map(a=>{const planId=a.plan_id||a.planId;const plan=PLANS.find(p=>p.id===planId);return<div key={a.username} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><p style={{fontFamily:mono,fontSize:13,margin:"0 0 4px",color:C.text}}>{highlightMatch(a.username,search)}</p><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Tag color={C.accent} bg={C.accentBg} small>{plan?.label||planId}</Tag><Tag color={C.textMed} bg={C.bg} small>{plan?.price||"—"}</Tag>{a.phone&&showPhones&&<Tag color={C.util} bg={C.utilBg} small>{a.phone}</Tag>}{a.created_at&&<Tag color={C.textLt} bg={C.bg} small>{new Date(a.created_at).toLocaleDateString("fr-FR")}</Tag>}</div></div><div style={{display:"flex",gap:8}}><Btn small onClick={()=>openEdit(a)}>Modifier</Btn><Btn small danger onClick={()=>setDelUser(a.username)}>Supprimer</Btn></div></div>;})}</div>
     )}
-    {editor!==null&&<Modal onClose={()=>setEditor(null)} width={380}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 20px"}}>Modifier</p><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Email / Identifiant</Lbl><input style={iLine} value={form.username} disabled/></div><div><Lbl>Mot de passe</Lbl><p style={{fontSize:11.5,color:C.textMed,margin:"6px 0 8px",lineHeight:1.6}}>Les mots de passe sont chiffrés chez Supabase et ne sont lisibles par personne, administrateurs compris. Pour dépanner un étudiant, envoie-lui un lien de réinitialisation.</p>{resetSent===form.username?<p style={{fontSize:12,color:C.good,margin:0}}>✓ Lien envoyé à {resetSent}</p>:<Btn small onClick={()=>sendReset(form.username)} disabled={resetBusy}>{resetBusy?"Envoi…":"✉ Envoyer un lien de réinitialisation"}</Btn>}</div> onChange={e=>setForm(p=>({...p,password:e.target.value}))}/><div><Lbl>Abonnement</Lbl><div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>{mainPlans.map(o=><button key={o.id} onClick={()=>setForm(p=>({...p,planId:o.id}))} style={{fontFamily:font,fontSize:13,padding:"10px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${form.planId===o.id?C.accent:C.border}`,background:form.planId===o.id?C.accentBg:"transparent",color:form.planId===o.id?C.accent:C.textMed,textAlign:"left"}}>{form.planId===o.id&&"✓ "}{o.label} — {o.price}</button>)}</div></div></div>{err&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:"14px 0 0"}}>{err}</p>}<div style={{display:"flex",gap:10,marginTop:24}}><Btn fill onClick={handleSave}>Mettre à jour</Btn><Btn onClick={()=>setEditor(null)}>Annuler</Btn></div></Modal>}
+    {editor!==null&&<Modal onClose={()=>setEditor(null)} width={380}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 20px"}}>Modifier</p><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Email / Identifiant</Lbl><input style={iLine} value={form.username} disabled/></div><div><Lbl>Mot de passe</Lbl><p style={{fontSize:11.5,color:C.textMed,margin:"6px 0 8px",lineHeight:1.6}}>Les mots de passe sont chiffrés chez Supabase et ne sont lisibles par personne, administrateurs compris. Pour dépanner un étudiant, envoie-lui un lien de réinitialisation.</p>{resetSent===form.username?<p style={{fontSize:12,color:C.good,margin:0}}>✓ Lien envoyé à {resetSent}</p>:<Btn small onClick={()=>sendReset(form.username)} disabled={resetBusy}>{resetBusy?"Envoi…":"✉ Envoyer un lien de réinitialisation"}</Btn>}</div><div><Lbl>Abonnement</Lbl><div style={{display:"flex",flexDirection:"column",gap:6,marginTop:8}}>{mainPlans.map(o=><button key={o.id} onClick={()=>setForm(p=>({...p,planId:o.id}))} style={{fontFamily:font,fontSize:13,padding:"10px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${form.planId===o.id?C.accent:C.border}`,background:form.planId===o.id?C.accentBg:"transparent",color:form.planId===o.id?C.accent:C.textMed,textAlign:"left"}}>{form.planId===o.id&&"✓ "}{o.label} — {o.price}</button>)}</div></div></div>{err&&<p style={{fontSize:12,color:C.again,background:C.againBg,padding:"8px 12px",borderRadius:6,margin:"14px 0 0"}}>{err}</p>}<div style={{display:"flex",gap:10,marginTop:24}}><Btn fill onClick={handleSave}>Mettre à jour</Btn><Btn onClick={()=>setEditor(null)}>Annuler</Btn></div></Modal>}
     {delUser&&<Modal onClose={()=>setDelUser(null)} width={320}><p style={{fontFamily:serif,fontSize:20,margin:"0 0 8px"}}>Supprimer {delUser} ?</p><p style={{fontSize:13,color:C.textMed,margin:"0 0 24px"}}>L'étudiant ne pourra plus se connecter.</p><div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>{onDelete(delUser);setDelUser(null);}}>Supprimer</Btn><Btn onClick={()=>setDelUser(null)}>Annuler</Btn></div></Modal>}
   </div>;
 }
@@ -4318,10 +4422,11 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>openEditor(null)}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="reports" label="⚑ Signalements"/><TB id="announce" label="✉ Annonces"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements"/><TB id="announce" label="✉ Annonces"/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>openEditor(null)} onEdit={c=>openEditor(c)} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="lessons"&&<AdminLessons cards={cards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
+    {tab==="rank"&&<AdminRank/>}
     {tab==="reports"&&<AdminReports/>}
     {tab==="announce"&&<AdminAnnounce accounts={accounts}/>}
   <Footer/>
@@ -5419,7 +5524,7 @@ function RankTab({username,tick}){
 
       {sub==="board"&&<div>
         <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:14}}>
-          <p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Par défaut, tu participes au classement public de façon <strong>anonyme</strong>, à partir de {ANON_MIN_POINTS} points dans la journée. Tu peux aussi y apparaître sous ton pseudo, ou t'en retirer à tout moment (ta ligne est alors supprimée).</p>
+          <p style={{fontSize:13,color:C.textMed,margin:"0 0 12px",lineHeight:1.6}}>Par défaut, tu participes au classement public de façon <strong>anonyme</strong>, à partir de {ANON_MIN_POINTS} points dans la journée (anonyme pour les autres élèves ; l'équipe pédagogique, elle, voit qui tu es). Tu peux aussi y apparaître sous ton pseudo, ou t'en retirer à tout moment (ta ligne est alors supprimée).</p>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
             <Toggle on={prefs.share&&prefs.anon} col={C.accent} onClick={()=>applyPrefs({...prefs,share:true,anon:true})}>🕶️ Anonyme</Toggle>
             <Toggle on={prefs.share&&!prefs.anon} col="var(--c-gold)" onClick={()=>applyPrefs({...prefs,share:true,anon:false})}>👤 Sous mon pseudo</Toggle>
@@ -5721,6 +5826,71 @@ function ForumTab({currentUser,pseudo,onRead}){
   </div>;
 }
 // ─── Signalements (espace administrateur) ─────────────────────────────────────
+// ─── Admin · Classement avec les adresses ─────────────────────────────────────
+// Même classement que celui des élèves (ceux qui y figurent : sous leur pseudo,
+// ou anonymes à partir de ANON_MIN_POINTS), mais avec l'adresse e-mail de
+// chacun. Les élèves qui ont choisi « Ne pas apparaître » n'y sont pas.
+function AdminRank(){
+  const [day,setDay]=useState(dateKey());
+  const [rows,setRows]=useState(undefined); // undefined = chargement · null = fonction absente · false = erreur
+  const [q,setQ]=useState("");
+  const [onlyAnon,setOnlyAnon]=useState(false);
+  const [reload,setReload]=useState(0);
+  useEffect(()=>{
+    let alive=true;
+    setRows(undefined);
+    supa.adminLeaderboard(day).then(r=>{ if(alive)setRows(r); });
+    return()=>{alive=false;};
+  },[day,reload]);
+  const shown=useMemo(()=>{
+    if(!Array.isArray(rows))return [];
+    const needle=q.toLowerCase().trim();
+    return rows
+      .map((r,i)=>({...r,pos:i+1}))
+      .filter(r=>(!onlyAnon||r.anonymous)&&(!needle||`${r.username||""} ${r.pseudo||""}`.toLowerCase().includes(needle)));
+  },[rows,q,onlyAnon]);
+  const nAnon=Array.isArray(rows)?rows.filter(r=>r.anonymous).length:0;
+  const shift=n=>{const d=new Date(day+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);setDay(dateKey(d));};
+  const box={background:C.surface,border:`1px solid ${C.border}`,borderRadius:10};
+  const inp={fontFamily:font,fontSize:13,padding:"7px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.bg,color:C.text};
+  return <div style={{maxWidth:980,margin:"0 auto",padding:"24px 16px"}}>
+    <p style={{fontFamily:serif,fontSize:22,margin:"0 0 4px"}}>🏆 Classement du jour</p>
+    <p style={{fontSize:12,color:C.textLt,margin:"0 0 16px",lineHeight:1.6}}>Visible uniquement par les administrateurs. Les élèves anonymes sont identifiés par leur adresse ; ceux qui ont choisi « Ne pas apparaître » ne figurent pas ici.</p>
+    <div style={{...box,padding:"12px 14px",marginBottom:14,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+      <button onClick={()=>shift(-1)} style={{...inp,cursor:"pointer"}}>←</button>
+      <input type="date" value={day} max={dateKey()} onChange={e=>e.target.value&&setDay(e.target.value)} style={inp}/>
+      <button onClick={()=>shift(1)} disabled={day>=dateKey()} style={{...inp,cursor:day>=dateKey()?"default":"pointer",opacity:day>=dateKey()?0.4:1}}>→</button>
+      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Rechercher une adresse ou un pseudo…" style={{...inp,flex:"1 1 200px",minWidth:0}}/>
+      <label style={{fontSize:12,color:C.textMed,display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}><input type="checkbox" checked={onlyAnon} onChange={e=>setOnlyAnon(e.target.checked)}/>Anonymes seulement</label>
+      <button onClick={()=>setReload(n=>n+1)} style={{...inp,cursor:"pointer"}}>↻</button>
+    </div>
+    {rows===undefined&&<p style={{fontSize:13,color:C.textLt}}>⏳ Chargement…</p>}
+    {rows===null&&<div style={{...box,padding:16}}>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 6px"}}>⚠️ La fonction <code style={{fontFamily:mono,fontSize:11}}>admin_leaderboard</code> n'existe pas encore dans Supabase.</p>
+      <p style={{fontSize:11,color:C.textLt,margin:0}}>À créer une fois dans l'éditeur SQL Supabase (voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_admin_rang.sql</code>).</p>
+    </div>}
+    {rows===false&&<p style={{fontSize:13,color:C.again}}>Impossible de charger le classement. Vérifie que ton compte a bien le rôle administrateur, puis réessaie.</p>}
+    {Array.isArray(rows)&&<>
+      <p style={{fontFamily:mono,fontSize:11,color:C.textLt,margin:"0 0 8px"}}>{rows.length} élève{rows.length>1?"s":""} classé{rows.length>1?"s":""} · dont {nAnon} anonyme{nAnon>1?"s":""}</p>
+      {shown.length===0?<p style={{fontSize:13,color:C.textLt}}>Personne dans le classement pour cette sélection.</p>:
+      <div style={{...box,overflow:"hidden"}}>
+        {shown.map(r=>{
+          const rk=rankFor(r.points||0);
+          return <div key={r.username} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 14px",borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
+            <span style={{fontFamily:mono,fontSize:13,fontWeight:700,width:32,color:r.pos<=3?"var(--c-gold)":C.textMed}}>#{r.pos}</span>
+            <div style={{flex:"1 1 220px",minWidth:0}}>
+              <p style={{fontSize:13,fontWeight:600,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:C.text}}>{r.username}</p>
+              <p style={{fontSize:11,color:C.textLt,margin:"2px 0 0"}}>{r.anonymous?"🕶️ Anonyme dans le classement":"👤 Affiché sous son pseudo"}{r.pseudo?` · pseudo : ${r.pseudo}`:""}</p>
+            </div>
+            <span style={{fontSize:12,color:rk.col,fontWeight:600,whiteSpace:"nowrap"}}>{RANK_ICONS[rk.tier]||"🏆"} {rk.name}</span>
+            <span style={{fontFamily:mono,fontSize:13,fontWeight:700,whiteSpace:"nowrap",minWidth:70,textAlign:"right"}}>{r.points||0} pts</span>
+            <span style={{fontFamily:mono,fontSize:11,color:C.textLt,whiteSpace:"nowrap",minWidth:64,textAlign:"right"}}>{r.cards||0} cartes</span>
+          </div>;
+        })}
+      </div>}
+    </>}
+  </div>;
+}
 function AdminReports(){
   const [rows,setRows]=useState(undefined),[busy,setBusy]=useState(null);
   const load=useCallback(async()=>{ setRows(await supa.getForumReports()); },[]);
