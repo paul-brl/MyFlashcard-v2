@@ -502,18 +502,44 @@ const supa = {
     // de revalidation.
     idbSet("content",card.id,{front:card.front,back:card.back,ts:Date.now()});
   },
-  batchUpdateSort: async (updates) => {
-    // All PATCH requests fire in parallel — Supabase/PostgREST handles this fine,
-    // and the browser's HTTP/2 connection to it multiplexes them anyway.
-    await Promise.all(updates.map(async({id,sort_order})=>{
-      try{
-        const r=await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${encodeURIComponent(id)}`,{
-          method:"PATCH",headers:{...H,"Prefer":"return=minimal"},
-          body:JSON.stringify({sort_order})
-        });
-        if(!r.ok){const t=await r.text();console.warn(`sort_order PATCH failed ${id}:`,t);}
-      }catch(e){console.warn(`sort_order PATCH error ${id}:`,e);}
-    }));
+  // Enregistre un nouvel ordre. D'abord en UNE requête via la fonction SQL
+  // « admin_set_sort_order » (voir supabase_admin_reorder.sql) ; si elle n'existe
+  // pas encore, repli sur des PATCH carte par carte — 6 à la fois, avec relances,
+  // au lieu de plusieurs centaines lancés d'un coup (ce qui en faisait échouer une
+  // partie, en silence). Renvoie {ok, failed:[ids]}.
+  batchUpdateSort: async (updates, onProgress) => {
+    if(!updates||!updates.length)return {ok:true,failed:[]};
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/rpc/admin_set_sort_order`,{
+        method:"POST",headers:{...H,"Content-Type":"application/json"},
+        body:JSON.stringify({p_ids:updates.map(u=>u.id),p_orders:updates.map(u=>u.sort_order)}),
+      });
+      if(r.ok){ if(onProgress)onProgress(updates.length,updates.length); return {ok:true,failed:[]}; }
+      const t=await r.text().catch(()=>"");
+      if(!/PGRST202/.test(t)&&r.status!==404)console.warn("admin_set_sort_order:",r.status,t.slice(0,200));
+    }catch(e){ console.warn("admin_set_sort_order:",e); }
+    const failed=[];let done=0,next=0;
+    const one=async({id,sort_order})=>{
+      for(let a=1;a<=3;a++){
+        try{
+          const r=await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${encodeURIComponent(id)}`,{
+            method:"PATCH",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify({sort_order})
+          });
+          if(r.ok)return true;
+        }catch{}
+        await new Promise(res=>setTimeout(res,400*a));
+      }
+      return false;
+    };
+    const worker=async()=>{
+      while(next<updates.length){
+        const u=updates[next++];
+        if(!(await one(u)))failed.push(u.id);
+        done++; if(onProgress)onProgress(done,updates.length);
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(6,updates.length)},worker));
+    return {ok:failed.length===0,failed};
   },
   deleteCard: async (id) => { try { await fetch(`${SUPA_URL}/rest/v1/cards?id=eq.${id}`,{method:"DELETE",headers:H}); } catch {} },
   // ─── Enregistrement groupé des cartes ──────────────────────────────────────
@@ -2071,6 +2097,37 @@ const sortCardsGlobally = cards => [...cards].sort((a,b)=>{
   if(bOrd!==null)return 1;
   return getCardTimestamp(a.id)-getCardTimestamp(b.id);
 });
+// Cartes officielles d'un chapitre, dans l'ordre vu par les élèves.
+const chapterCardsOf=(cards,groupId,num,chapterId)=>sortCardsGlobally((cards||[]).filter(c=>c.groupId===groupId&&c.num===num&&c.chapterId===chapterId));
+// Renumérote un chapitre 1…N dans l'ordre donné et ne renvoie QUE les cartes
+// dont le numéro change (inutile de réécrire les autres).
+const renumberChanged=order=>order.map((c,i)=>c.sort_order===i+1?null:{...c,sort_order:i+1}).filter(Boolean);
+// Mémorise, pour la création de cartes texte en série, la position suivante
+// dans le chapitre (créer à la position 100, puis la suivante arrive en 101).
+let NEXT_TEXT_POS=null; // {key:"groupe|cours|chapitre", pos}
+// Champ « position » de la liste admin. Défini HORS de AdminCards : défini à
+// l'intérieur, il était recréé à chaque rafraîchissement de la liste (chargement
+// des contenus, etc.), ce qui effaçait le numéro en cours de saisie.
+function PosInput({card,currentPos,max,onMove}){
+  const[val,setVal]=useState(String(currentPos));
+  useEffect(()=>setVal(String(currentPos)),[currentPos]);
+  const apply=()=>{
+    const n=parseInt(val,10);
+    if(n>=1&&n<=max&&n!==currentPos)onMove(card,n);
+    else setVal(String(currentPos));
+  };
+  return<input
+    type="number" min={1} max={max} value={val} inputMode="numeric"
+    onChange={e=>setVal(e.target.value)}
+    onFocus={e=>e.target.select()}
+    onBlur={apply}
+    onMouseDown={e=>e.stopPropagation()}
+    onDragStart={e=>{e.preventDefault();e.stopPropagation();}}
+    onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();e.currentTarget.blur();}if(e.key==="Escape"){setVal(String(currentPos));}}}
+    style={{width:"100%",textAlign:"center",fontFamily:mono,fontSize:11,fontWeight:700,color:C.accent,background:"transparent",border:"none",outline:"none",cursor:"text",padding:0,MozAppearance:"textfield"}}
+    title={`Position dans le chapitre (1–${max}). Taper un numéro puis Entrée pour déplacer.`}
+  />;
+}
 const validateEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 const validatePassword = p => { const hasLen=p.length>=8, hasSpecial=/[!@#$%^&*()\-_=+\[\]{};:'",.<>?/\\|`~]/.test(p); return {ok:hasLen&&hasSpecial,hasLen,hasSpecial}; };
 // ─── Numéro de téléphone ─────────────────────────────────────────────────────
@@ -3511,12 +3568,28 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onS
   // toujours les ajouter en fin de liste puis les remonter une à une). Les
   // cartes existantes à partir de cette position sont décalées de N crans.
   const [occPosition,setOccPosition]=useState("");
-  const chapterCardsForPosition=useMemo(()=>{
-    return (officialCards||[])
-      .filter(c=>c.groupId===form.groupId&&c.num===form.num&&c.chapterId===form.chapterId)
-      .sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
-  },[officialCards,form.groupId,form.num,form.chapterId]);
+  const chapterCardsForPosition=useMemo(()=>chapterCardsOf(officialCards,form.groupId,form.num,form.chapterId),[officialCards,form.groupId,form.num,form.chapterId]);
   const canPositionOcclusion=!personalMode&&!!onSortCards;
+  // Position d'une nouvelle carte TEXTE (administrateur). Pré-remplie avec la
+  // position suivante quand on enchaîne plusieurs cartes dans le même chapitre.
+  const posKey=`${form.groupId}|${form.num}|${form.chapterId}`;
+  const [textPosition,setTextPosition]=useState(()=>isNew&&NEXT_TEXT_POS&&NEXT_TEXT_POS.key===`${defaultGroup}|${defaultNum}|${defaultChapter}`?String(NEXT_TEXT_POS.pos):"");
+  const canPositionText=isNew&&!personalMode&&!!onSortCards;
+  // Décale le chapitre pour libérer `count` places à partir de `pos` (1 = en
+  // tête) et renvoie la position de départ réellement retenue. Tout le
+  // chapitre est renuméroté 1…N : les anciens numéros « à trous » (cartes
+  // supprimées) ne faussent plus la position demandée.
+  const makeRoomInChapter=async(pos,count)=>{
+    const existing=chapterCardsForPosition;
+    const start=Math.max(1,Math.min(pos,existing.length+1));
+    const target=existing.map((c,i)=>i+1<start?i+1:i+1+count);
+    const changed=existing.map((c,i)=>c.sort_order===target[i]?null:{...c,sort_order:target[i]}).filter(Boolean);
+    if(changed.length){
+      const res=await onSortCards(changed);
+      if(res&&res.ok===false)throw new Error(`${res.failed.length} carte(s) n'ont pas pu être décalées`);
+    }
+    return start;
+  };
   const [image,setImage]=useState(null),[imgW,setImgW]=useState(0),[imgH,setImgH]=useState(0);
   const [imgDrag,setImgDrag]=useState(false);
   const [zones,setZones]=useState([]),[drawing,setDrawing]=useState(false),[startPos,setStartPos]=useState(null),[currentRect,setCurrentRect]=useState(null);
@@ -3656,13 +3729,8 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onS
       let startPos=null;
       const n=zones.length;
       if(canPositionOcclusion&&occPosition&&parseInt(occPosition)>=1){
-        const existing=chapterCardsForPosition;
-        const maxStart=existing.length+1;
-        startPos=Math.min(parseInt(occPosition),maxStart);
-        const toShift=existing.filter(c=>(c.sort_order||0)>=startPos);
-        if(toShift.length>0){
-          await onSortCards(toShift.map(c=>({...c,sort_order:(c.sort_order||0)+n})));
-        }
+        try{ startPos=await makeRoomInChapter(parseInt(occPosition),n); }
+        catch(e){ alert(`⚠️ Le décalage des cartes existantes a échoué (${e.message}).\n\nAucune carte n'a été créée — recharge la page puis recommence.`); setOccSaving(false); return; }
       }
       const cards=zones.map((zone,i)=>({
         id:`occ-${stamp}-${i}`,
@@ -3715,12 +3783,23 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onS
     if(personalMode&&!personalCourseName.trim()){setPersonalErr(true);return false;}
     return!Object.keys(e).length;
   };
-  const handleSaveText=()=>{
-    if(!validate())return;
+  const [textSaving,setTextSaving]=useState(false);
+  const handleSaveText=async()=>{
+    if(!validate()||textSaving)return;
     saveLastClass(form.groupId,form.num,form.chapterId,form.packetId);
     const pcName=personalMode?personalCourseName.trim():null;
-    onSave({...form,num:pcName?null:form.num,chapterId:pcName?1:form.chapterId,personalCourseName:pcName,front:serializeContent(formFront,frontImg),back:serializeContent(formBack,backImg),id:card?.id||`card-${Date.now()}`,sort_order:card?.sort_order,card_type:card?.card_type||'text'});
+    let sortOrder=card?.sort_order;
+    const wantPos=canPositionText&&parseInt(textPosition,10)>=1?parseInt(textPosition,10):null;
+    if(wantPos){
+      setTextSaving(true);
+      try{ sortOrder=await makeRoomInChapter(wantPos,1); }
+      catch(e){ setTextSaving(false); alert(`⚠️ Le décalage des cartes existantes a échoué (${e.message}).\n\nLa carte n'a pas été créée — recharge la page puis recommence.`); return; }
+      NEXT_TEXT_POS={key:posKey,pos:sortOrder+1};
+    } else if(isNew) NEXT_TEXT_POS=null;
+    const res=onSave({...form,num:pcName?null:form.num,chapterId:pcName?1:form.chapterId,personalCourseName:pcName,front:serializeContent(formFront,frontImg),back:serializeContent(formBack,backImg),id:card?.id||`card-${Date.now()}`,sort_order:sortOrder,card_type:card?.card_type||'text'});
+    setTextSaving(false);
     setSaved(true);
+    return res;
   };
   const renderModeToggle=()=>!isStudentMode?null:(
     <div style={{borderTop:`1px solid ${C.border}`,paddingTop:18}}>
@@ -3754,6 +3833,17 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onS
         <div className="mfc-editor-rail" style={{display:"flex",flexDirection:"column",gap:12}}>
           <div className="mfc-editor-packet">{renderPacketPanel()}</div>
           <div className="mfc-editor-side">{renderClassPanel(false)}</div>
+          {canPositionText&&<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:16}}>
+            <Lbl>Position dans le chapitre (optionnel)</Lbl>
+            <input type="number" min={1} max={chapterCardsForPosition.length+1} style={iLine}
+              placeholder={`Laisser vide = à la fin (${chapterCardsForPosition.length+1})`}
+              value={textPosition} onChange={e=>setTextPosition(e.target.value)}/>
+            <p style={{fontSize:11,color:C.textLt,margin:"6px 0 0",lineHeight:1.5}}>
+              {parseInt(textPosition,10)>=1
+                ?`La carte prendra la position ${Math.min(parseInt(textPosition,10),chapterCardsForPosition.length+1)} — les suivantes sont décalées d'un cran. La carte suivante sera proposée juste après.`
+                :`Chapitre : ${chapterCardsForPosition.length} carte${chapterCardsForPosition.length>1?"s":""}. Indique un numéro pour insérer la carte à cet endroit au lieu de l'ajouter à la fin.`}
+            </p>
+          </div>}
         </div>
         <div className="mfc-editor-main" style={{display:"flex",flexDirection:"column",gap:16}}>
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px"}}>
@@ -3779,7 +3869,7 @@ function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onS
             {formFront&&<p style={{fontFamily:serif,fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.5}}>{formFront.slice(0,100)}{formFront.length>100?"…":""}</p>}
             {frontImg&&<img src={frontImg} style={{maxWidth:"100%",maxHeight:80,borderRadius:6,marginTop:8,display:"block"}}/>}
           </div>
-          <div style={{display:"flex",gap:10}}><Btn fill full onClick={handleSaveText}>{saved?"✓":isNew?"Créer la carte":"Mettre à jour"}</Btn><Btn full onClick={onCancel}>Annuler</Btn></div>
+          <div style={{display:"flex",gap:10}}><Btn fill full onClick={handleSaveText} disabled={textSaving}>{textSaving?"Décalage des cartes…":saved?"✓":isNew?"Créer la carte":"Mettre à jour"}</Btn><Btn full onClick={onCancel}>Annuler</Btn></div>
         </div>
       </div>)}
       {cardType==="occlusion"&&(<div className="mfc-occlusion-grid" style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20,alignItems:"start"}}>
@@ -3969,55 +4059,45 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
   };
   const stats=useMemo(()=>({total:filtered.length,prio:filtered.filter(c=>c.packetId==="prioritaire").length,imp:filtered.filter(c=>c.packetId==="important").length,utile:filtered.filter(c=>c.packetId==="utile").length}),[filtered]);
   const canReorder=fc!=="all";
+  // L'ordre se calcule TOUJOURS sur le chapitre entier, même quand un filtre de
+  // paquet ou une recherche n'en affiche qu'une partie : renuméroter seulement
+  // les cartes visibles créait des doublons de numéros avec les cartes cachées.
+  const chapterOrder=useMemo(()=>canReorder?chapterCardsOf(cards,fg,fn,fc):[],[cards,fg,fn,fc,canReorder]);
+  const posById=useMemo(()=>{const m={};chapterOrder.forEach((c,i)=>{m[c.id]=i+1;});return m;},[chapterOrder]);
+  const [dragArmed,setDragArmed]=useState(null); // glisser seulement depuis la poignée ⠿
+  const [orderState,setOrderState]=useState(null); // {saving,done,total} | {error} | null
+  const moveCardTo=async(card,pos)=>{
+    const without=chapterOrder.filter(c=>c.id!==card.id);
+    const p=Math.max(1,Math.min(pos,without.length+1));
+    const changed=renumberChanged([...without.slice(0,p-1),card,...without.slice(p-1)]);
+    if(!changed.length)return;
+    setOrderState({saving:true,done:0,total:changed.length});
+    const res=await onSortCards(changed,(d,t)=>setOrderState({saving:true,done:d,total:t}));
+    if(res&&res.ok===false){
+      setOrderState({error:`⚠️ ${res.failed.length} carte${res.failed.length>1?"s":""} sur ${changed.length} n'ont pas pu être enregistrées. Recharge la page puis recommence.`});
+      setTimeout(()=>setOrderState(null),9000);
+    } else {
+      setOrderState({ok:true});
+      setTimeout(()=>setOrderState(null),1400);
+    }
+  };
   const handleDragStart=(e,idx)=>{if(!canReorder)return;setDragIdx(idx);e.dataTransfer.effectAllowed="move";};
-  const handleDragOver=(e,idx)=>{if(!canReorder)return;e.preventDefault();e.dataTransfer.dropEffect="move";setDragOverIdx(idx);};
+  const handleDragOver=(e,idx)=>{if(!canReorder||dragIdx===null)return;e.preventDefault();e.dataTransfer.dropEffect="move";setDragOverIdx(idx);};
   const handleDragLeave=()=>setDragOverIdx(null);
-  const flashOrderSaved=()=>{setOrderFlash(true);setTimeout(()=>setOrderFlash(false),1400);};
   const handleDrop=(e,dropIdx)=>{
-    e.preventDefault();setDragOverIdx(null);
+    e.preventDefault();setDragOverIdx(null);setDragArmed(null);
     if(!canReorder||dragIdx===null||dragIdx===dropIdx){setDragIdx(null);return;}
-    const newOrder=[...filtered];
-    const[moved]=newOrder.splice(dragIdx,1);
-    newOrder.splice(dropIdx,0,moved);
-    const updated=newOrder.map((c,i)=>({...c,sort_order:i+1}));
+    const moved=filtered[dragIdx],target=filtered[dropIdx];
     setDragIdx(null);
-    onSortCards(updated);
-    flashOrderSaved();
+    if(moved&&target)moveCardTo(moved,posById[target.id]);
   };
-  const handleDragEnd=()=>{setDragIdx(null);setDragOverIdx(null);};
-  const handlePositionInput=(card,newPos)=>{
-    const n=parseInt(newPos);
-    if(!n||n<1)return;
-    const chapterCards=filtered;
-    const clamped=Math.min(n,chapterCards.length);
-    const without=chapterCards.filter(c=>c.id!==card.id);
-    const newOrder=[...without.slice(0,clamped-1),card,...without.slice(clamped-1)];
-    const updated=newOrder.map((c,i)=>({...c,sort_order:i+1}));
-    onSortCards(updated);
-    flashOrderSaved();
-  };
-  function PosInput({card,currentPos,max,onMove}){
-    const[val,setVal]=useState(String(currentPos));
-    useEffect(()=>setVal(String(currentPos)),[currentPos]);
-    const apply=()=>{
-      const n=parseInt(val);
-      if(n>=1&&n<=max)onMove(card,n);
-      else setVal(String(currentPos));
-    };
-    return<input
-      type="number" min={1} max={max} value={val}
-      onChange={e=>setVal(e.target.value)}
-      onBlur={apply}
-      onKeyDown={e=>{if(e.key==="Enter")apply();if(e.key==="Escape")setVal(String(currentPos));}}
-      style={{width:"100%",textAlign:"center",fontFamily:mono,fontSize:11,fontWeight:700,color:C.accent,background:"transparent",border:"none",outline:"none",cursor:"text",padding:0,MozAppearance:"textfield"}}
-      title={`Position dans le chapitre (1–${max}). Taper un numéro + Entrée pour déplacer.`}
-    />;
-  }
+  const handleDragEnd=()=>{setDragIdx(null);setDragOverIdx(null);setDragArmed(null);};
+  const handlePositionInput=(card,newPos)=>moveCardTo(card,newPos);
   const Pill=({active,onClick,children,color,bg})=>(<button onClick={onClick} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"5px 12px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${active?(color||C.accent):C.border}`,background:active?(bg||C.accentBg):"transparent",color:active?(color||C.accent):C.textMed,whiteSpace:"nowrap",transition:"all 0.12s"}}>{children}</button>);
   const q=search.toLowerCase().trim();
   const highlight=text=>{if(!q||!text)return text;const idx=text.toLowerCase().indexOf(q);if(idx===-1)return text;return<>{text.slice(0,idx)}<mark style={{background:"var(--c-warnBg2)",borderRadius:2,padding:"0 1px"}}>{text.slice(idx,idx+q.length)}</mark>{text.slice(idx+q.length)}</>;};
   return <div style={{maxWidth:920,margin:"0 auto",padding:24}}>
-    {orderFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:C.good,color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>✓ Ordre sauvegardé</div>}
+    {orderState&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,maxWidth:360,background:orderState.error?C.again:orderState.saving?C.accent:C.good,color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>{orderState.error||(orderState.saving?`Enregistrement de l'ordre… ${orderState.done}/${orderState.total}`:"✓ Ordre sauvegardé")}</div>}
     <div style={{position:"relative",marginBottom:12}}><span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",color:C.textLt,fontSize:18,pointerEvents:"none"}}>⌕</span><input ref={searchRef} style={{...iBox,paddingLeft:44,paddingRight:44,borderRadius:10,fontSize:14,border:`1.5px solid ${search?C.accent:C.border}`,transition:"border-color 0.2s"}} placeholder="Rechercher dans le recto, verso, matière, chapitre…" value={search} onChange={e=>setSearch(e.target.value)} autoFocus/>{search&&<button onClick={()=>{setSearch("");searchRef.current?.focus();}} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:C.textLt,fontSize:20,lineHeight:1,display:"flex",alignItems:"center"}}>×</button>}</div>
     <div style={{background:C.surface,border:`1px solid ${showFilters?C.accent:C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden",transition:"border-color 0.2s"}}>
       <div style={{padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:showFilters?`1px solid ${C.border}`:"none",cursor:"pointer",background:C.bg,userSelect:"none"}} onClick={()=>setShowFilters(s=>!s)}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:13,fontWeight:500,color:C.textMed}}>🔍 Filtres</span>{hasFilters&&<span style={{fontFamily:mono,fontSize:8,letterSpacing:1,padding:"2px 8px",borderRadius:10,background:C.accent,color:"var(--c-onSolid)",fontWeight:700}}>ACTIFS</span>}</div><div style={{display:"flex",alignItems:"center",gap:12}}>{hasFilters&&<button onClick={e=>{e.stopPropagation();clearAll();}} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.again,textDecoration:"underline"}}>✕ Tout effacer</button>}<span style={{color:C.textLt,fontSize:11,fontFamily:mono}}>{showFilters?"▲":"▼"}</span></div></div>
@@ -4041,7 +4121,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
     </div>
     {filtered.length>1&&(
       canReorder
-        ?<p style={{fontSize:11,color:C.textLt,margin:"0 0 8px",display:"flex",alignItems:"center",gap:6}}><span>⠿</span> Glisser pour réordonner · ou modifier le numéro directement · positions locales au chapitre (1 à {filtered.length})</p>
+        ?<p style={{fontSize:11,color:C.textLt,margin:"0 0 8px",display:"flex",alignItems:"center",gap:6}}><span>⠿</span> Glisser la poignée pour réordonner · ou taper le numéro puis Entrée · positions dans le chapitre (1 à {chapterOrder.length}){filtered.length<chapterOrder.length?` · ${chapterOrder.length-filtered.length} carte(s) masquée(s) par les filtres gardent leur place`:""}</p>
         :<p style={{fontSize:11,color:C.textLt,margin:"0 0 8px",display:"flex",alignItems:"center",gap:6}}>💡 Sélectionner un <strong>chapitre</strong> dans les filtres pour réordonner les cartes</p>
     )}
     {filtered.length===0?(<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"48px 24px",textAlign:"center"}}><p style={{fontSize:36,margin:"0 0 12px"}}>{search?"🔍":"📭"}</p><p style={{fontSize:14,color:C.textLt,margin:"0 0 16px"}}>{cards.length===0?"Aucune carte créée.":search?`Aucun résultat pour « ${search} »`:"Aucune carte pour ces filtres."}</p>{cards.length===0&&<Btn onClick={onNew}>Créer la première carte →</Btn>}{hasFilters&&cards.length>0&&<button onClick={clearAll} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.accent,textDecoration:"underline",display:"block",margin:"8px auto 0"}}>Réinitialiser les filtres</button>}</div>):(
@@ -4057,7 +4137,7 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
           const isOver=dragOverIdx===idx;
           return(
             <div key={card.id}
-              draggable={canReorder}
+              draggable={canReorder&&dragArmed===card.id}
               onDragStart={e=>handleDragStart(e,idx)}
               onDragOver={e=>handleDragOver(e,idx)}
               onDragLeave={handleDragLeave}
@@ -4066,15 +4146,15 @@ function AdminCards({cards,onNew,onEdit,onDelete,onSortCards}){
               style={{background:C.surface,border:`1.5px solid ${isOver?"var(--c-warn)":isDragging?C.accent:C.border}`,borderRadius:8,overflow:"hidden",display:"flex",opacity:isDragging?0.4:1,transition:"all 0.15s",boxShadow:isOver?"0 4px 16px rgba(245,158,11,0.25)":"none",transform:isOver?"translateY(-2px)":"none",cursor:canReorder?"grab":"default"}}
               onMouseEnter={e=>{if(!isDragging)e.currentTarget.style.boxShadow="0 2px 10px rgba(0,0,0,0.07)";}}
               onMouseLeave={e=>{e.currentTarget.style.boxShadow="none";}}>
-              {canReorder&&<div style={{width:28,background:isOver?"var(--c-warnBg)":isDragging?C.accentBg:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"grab",borderRight:`1px solid ${C.border}`}}>
+              {canReorder&&<div onMouseDown={()=>setDragArmed(card.id)} onMouseUp={()=>setDragArmed(null)} onTouchStart={()=>setDragArmed(card.id)} style={{width:28,background:isOver?"var(--c-warnBg)":isDragging?C.accentBg:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"grab",borderRight:`1px solid ${C.border}`}}>
                 <span style={{fontSize:14,color:C.textLt,userSelect:"none",lineHeight:1}}>⠿</span>
               </div>}
               {canReorder?(
                 <div style={{width:44,background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,borderRight:`1px solid ${C.border}`,padding:"4px 2px"}}>
                   <PosInput
                     card={card}
-                    currentPos={card.sort_order||idx+1}
-                    max={filtered.length}
+                    currentPos={posById[card.id]||idx+1}
+                    max={chapterOrder.length}
                     onMove={handlePositionInput}
                   />
                 </div>
@@ -9334,7 +9414,9 @@ function App(){
       const map={};updatedCards.forEach(c=>{map[c.id]=c;});
       return sortCardsGlobally(prev.map(c=>map[c.id]||c));
     });
-    await supa.batchUpdateSort(updatedCards.map(c=>({id:c.id,sort_order:c.sort_order})));
+    const res=await supa.batchUpdateSort(updatedCards.map(c=>({id:c.id,sort_order:c.sort_order})));
+    if(!res.ok)console.error("Ordre non enregistré pour",res.failed.length,"carte(s)");
+    return res;
   },[]);
   const handleDeleteUserCard=useCallback(async id=>{
     await supa.deleteUserCard(id);
