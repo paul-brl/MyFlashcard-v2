@@ -1338,6 +1338,62 @@ const supa = {
       return Array.isArray(d)?d:null;
     } catch(e){ return null; }
   },
+  // ─── Signalements d'erreurs sur les cartes (table « card_reports ») ─────────
+  // SQL à exécuter une fois dans Supabase : voir supabase_card_reports.sql
+  // Les photos jointes sont compressées dans le navigateur puis stockées dans la
+  // ligne elle-même (colonne jsonb « images ») : pas de bucket ni de règles de
+  // stockage supplémentaires à configurer. Un étudiant ne voit que ses propres
+  // signalements ; seul l'administrateur les voit tous et peut les traiter.
+  // Renvoie {ok:true} ou {ok:false,error}.
+  createCardReport: async (rep) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/card_reports`,{
+        method:"POST", headers:{...H,"Prefer":"return=minimal"},
+        body:JSON.stringify([rep]),
+      });
+      if(r.ok) return {ok:true};
+      let t=""; try{ t=await r.text(); }catch{}
+      if(r.status===404||/does not exist|42P01|PGRST205/i.test(t)) return {ok:false,error:"missing"};
+      if(r.status===413) return {ok:false,error:"too_big"};
+      if(/Trop de signalements/i.test(t)) return {ok:false,error:"rate"};
+      console.error("card_reports:",r.status,t.slice(0,300));
+      return {ok:false,error:`HTTP ${r.status}`};
+    } catch(e){ return {ok:false,error:"network"}; }
+  },
+  // Admin : liste légère (sans les photos, qui peuvent peser lourd).
+  getCardReports: async () => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/card_reports?select=id,created_at,user_id,username,display_name,card_id,group_id,num,chapter_id,packet_id,card_excerpt,is_adapted,category,description,image_count,status,admin_note,handled_at&order=created_at.desc&limit=500`,{headers:H});
+      if(!r.ok) return null;
+      const d=await r.json();
+      return Array.isArray(d)?d:null;
+    } catch { return null; }
+  },
+  // Admin : photos d'un signalement, chargées seulement quand on l'ouvre.
+  getCardReportImages: async (id) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/card_reports?id=eq.${encodeURIComponent(id)}&select=images`,{headers:H});
+      if(!r.ok) return [];
+      const d=await r.json();
+      const imgs=Array.isArray(d)&&d[0]?d[0].images:[];
+      return Array.isArray(imgs)?imgs:[];
+    } catch { return []; }
+  },
+  updateCardReport: async (id, fields) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/card_reports?id=eq.${encodeURIComponent(id)}`,{
+        method:"PATCH", headers:{...H,"Prefer":"return=minimal"},
+        body:JSON.stringify(fields),
+      });
+      return r.ok;
+    } catch { return false; }
+  },
+  deleteCardReport: async (id) => {
+    try {
+      const r=await fetch(`${SUPA_URL}/rest/v1/card_reports?id=eq.${encodeURIComponent(id)}`,{method:"DELETE",headers:{...H,"Prefer":"return=minimal"}});
+      return r.ok;
+    } catch { return false; }
+  },
     createForumReport: async (rep) => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/forum_reports`, {
@@ -4850,6 +4906,174 @@ function AdminLessons({cards}){
     {preview&&<PdfViewer lesson={preview.lesson} subtitle={preview.subtitle} onClose={()=>setPreview(null)}/>}
   </div>;
 }
+// ─── Admin · Erreurs signalées sur les cartes ─────────────────────────────────
+// Les signalements envoyés depuis la révision (bouton « 🚩 Signaler une erreur »).
+// Chaque ligne se déplie pour lire la description, voir les photos et la carte
+// telle qu'elle est actuellement en base ; « Corriger la carte » ouvre l'éditeur
+// habituel, et une fois la carte enregistrée, le signalement peut être classé.
+const CARD_REPORT_STATUS={
+  open:    {label:"À traiter", col:"var(--c-again)", bg:"var(--c-againBg)"},
+  fixed:   {label:"Corrigé",   col:"var(--c-good)",  bg:"var(--c-goodBg)"},
+  rejected:{label:"Écarté",    col:"var(--c-textMed)",bg:"var(--c-bg)"},
+};
+function AdminCardReports({cards,onEditCard,justEdited,onClearJustEdited,onCountChange}){
+  const [rows,setRows]=useState(undefined);
+  const [filter,setFilter]=useState("open");
+  const [openId,setOpenId]=useState(null);
+  const [imgs,setImgs]=useState({});      // id → [dataURL]
+  const [content,setContent]=useState({}); // card_id → {front,back}
+  const [lightbox,setLightbox]=useState(null);
+  const [busy,setBusy]=useState(null);
+  const [notes,setNotes]=useState({});
+  const [confirmDel,setConfirmDel]=useState(null);
+  const load=useCallback(async()=>{
+    const d=await supa.getCardReports();
+    setRows(d);
+    if(Array.isArray(d)&&onCountChange)onCountChange(d.filter(r=>r.status==="open").length);
+  },[onCountChange]);
+  useEffect(()=>{load();},[load]);
+  const cardById=useMemo(()=>{const m={};(cards||[]).forEach(c=>{m[c.id]=c;});return m;},[cards]);
+  const perCard=useMemo(()=>{const m={};(rows||[]).forEach(r=>{if(r.status==="open")m[r.card_id]=(m[r.card_id]||0)+1;});return m;},[rows]);
+  const toggle=async r=>{
+    if(openId===r.id){setOpenId(null);return;}
+    setOpenId(r.id);
+    if(r.image_count>0&&!imgs[r.id]){
+      const list=await supa.getCardReportImages(r.id);
+      setImgs(p=>({...p,[r.id]:list}));
+    }
+    if(!content[r.card_id]&&cardById[r.card_id]){
+      const c=(await supa.fetchCardsContentRaw([r.card_id]))[r.card_id];
+      if(c)setContent(p=>({...p,[r.card_id]:c}));
+    }
+  };
+  const setStatus=async(r,status)=>{
+    setBusy(r.id);
+    const fields={status,handled_at:status==="open"?null:new Date().toISOString()};
+    if(notes[r.id]!==undefined)fields.admin_note=notes[r.id]||null;
+    const ok=await supa.updateCardReport(r.id,fields);
+    setBusy(null);
+    if(ok){
+      // Tous les signalements ouverts sur la même carte suivent, si l'on corrige.
+      if(status==="fixed"){
+        const same=(rows||[]).filter(x=>x.card_id===r.card_id&&x.status==="open"&&x.id!==r.id);
+        await Promise.all(same.map(x=>supa.updateCardReport(x.id,{status:"fixed",handled_at:fields.handled_at})));
+      }
+      if(justEdited===r.id&&onClearJustEdited)onClearJustEdited();
+      await load();
+    } else alert("La mise à jour a échoué (droits administrateur sur card_reports ?).");
+  };
+  const remove=async r=>{
+    setConfirmDel(null);setBusy(r.id);
+    const ok=await supa.deleteCardReport(r.id);
+    setBusy(null);
+    if(ok)await load(); else alert("Suppression impossible.");
+  };
+  const editCard=async r=>{
+    const card=cardById[r.card_id];
+    if(!card){alert("Cette carte n'existe plus (supprimée entre-temps).");return;}
+    let c=null;
+    try{ c=(await supa.fetchCardsContentRaw([card.id]))[card.id]; }catch{}
+    if(!c)c=content[card.id]||(await supa.getCardsContent([card.id]))[card.id]||{};
+    onEditCard({...card,...c},r.id);
+  };
+  const counts=useMemo(()=>{const m={open:0,fixed:0,rejected:0,all:0};(rows||[]).forEach(r=>{m[r.status]=(m[r.status]||0)+1;m.all++;});return m;},[rows]);
+  const shown=(rows||[]).filter(r=>filter==="all"||r.status===filter);
+  const fmt=iso=>{try{return new Date(iso).toLocaleString("fr-FR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});}catch{return"";}};
+  return <div style={{maxWidth:760,margin:"0 auto",padding:24}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:4}}>
+      <p style={{fontFamily:serif,fontSize:18,margin:0}}>Erreurs signalées sur les cartes</p>
+      <Btn small onClick={load}>↻ Actualiser</Btn>
+    </div>
+    <p style={{fontSize:12,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Envoyées par les étudiants depuis la révision. Ouvre un signalement pour lire le détail et voir les photos, puis corrige la carte directement.</p>
+    <div className="mfc-tabs" style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+      {[["open","À traiter"],["fixed","Corrigés"],["rejected","Écartés"],["all","Tous"]].map(([id,l])=><button key={id} onClick={()=>setFilter(id)} style={{fontFamily:font,fontSize:12,fontWeight:filter===id?600:400,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${filter===id?C.accent:C.border}`,background:filter===id?C.accentBg:"transparent",color:filter===id?C.accent:C.textMed}}>{l} <span style={{opacity:0.7,fontSize:10}}>({counts[id]||0})</span></button>)}
+    </div>
+    {rows===undefined?<p style={{fontSize:13,color:C.textLt,textAlign:"center",padding:"24px 0"}}>Chargement…</p>
+     :rows===null?<div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"20px",background:C.surface}}>
+        <p style={{fontSize:13,color:C.textMed,margin:"0 0 6px"}}>⚠️ La table <code style={{fontFamily:mono,fontSize:11}}>card_reports</code> n'est pas accessible.</p>
+        <p style={{fontSize:11,color:C.textLt,margin:0}}>À créer une fois dans l'éditeur SQL Supabase — voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_card_reports.sql</code>.</p>
+      </div>
+     :shown.length===0?<p style={{fontSize:13,color:C.textLt,textAlign:"center",padding:"24px 0"}}>{filter==="open"?"Aucune erreur à traiter. 🎉":"Rien ici."}</p>
+     :shown.map(r=>{
+        const st=CARD_REPORT_STATUS[r.status]||CARD_REPORT_STATUS.open;
+        const grp=GROUPS.find(g=>g.id===r.group_id);
+        const chName=r.num?getChapters(r.group_id,r.num)[(r.chapter_id||1)-1]:"";
+        const open=openId===r.id;
+        const card=cardById[r.card_id];
+        const cc=content[r.card_id];
+        const others=(perCard[r.card_id]||0)-(r.status==="open"?1:0);
+        const highlight=justEdited===r.id;
+        return <div key={r.id} style={{background:C.surface,border:`1.5px solid ${highlight?C.good:open?C.accent:C.border}`,borderRadius:10,marginBottom:10,overflow:"hidden"}}>
+          {highlight&&r.status==="open"&&<div style={{background:C.goodBg,padding:"9px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",borderBottom:`1px solid ${C.border}`}}>
+            <p style={{fontSize:12.5,color:C.good,margin:0,fontWeight:600}}>✓ Carte mise à jour — classer ce signalement comme corrigé ?</p>
+            <div style={{display:"flex",gap:6}}><Btn small fill onClick={()=>setStatus(r,"fixed")} disabled={busy===r.id}>Marquer corrigé</Btn><Btn small onClick={onClearJustEdited}>Plus tard</Btn></div>
+          </div>}
+          <div onClick={()=>toggle(r)} style={{padding:"12px 14px",cursor:"pointer",display:"flex",gap:12,alignItems:"flex-start"}}>
+            <div style={{width:3,alignSelf:"stretch",borderRadius:2,background:pC(r.packet_id),flexShrink:0}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6,alignItems:"center"}}>
+                <Tag color={st.col} bg={st.bg} small>{st.label}</Tag>
+                <Tag color={C.accent} bg={C.accentBg} small>{reportCategoryLabel(r.category)}</Tag>
+                {grp&&<Tag color={C.textMed} bg={C.bg} small>{grp.label}</Tag>}
+                {r.num&&<Tag color={C.textMed} bg={C.bg} small>Cours {r.num}</Tag>}
+                {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{r.chapter_id} {chName}</Tag>}
+                {r.image_count>0&&<Tag color={C.textMed} bg={C.bg} small>📷 {r.image_count}</Tag>}
+                {others>0&&<Tag color={C.again} bg={C.againBg} small>+{others} autre{others>1?"s":""} sur cette carte</Tag>}
+                {!card&&<Tag color={C.textLt} bg={C.bg} small>carte supprimée</Tag>}
+              </div>
+              <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:"0 0 4px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:open?"normal":"nowrap"}}>{r.card_excerpt||"—"}</p>
+              <p style={{fontSize:12,color:C.textMed,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:open?"pre-wrap":"nowrap",lineHeight:1.55}}>{r.description}</p>
+              <p style={{fontSize:10.5,color:C.textLt,margin:"6px 0 0"}}>{r.display_name||"Étudiant"}{r.username?` · ${r.username}`:""} · {fmt(r.created_at)}{r.is_adapted?" · l'étudiant avait adapté cette carte":""}</p>
+            </div>
+            <span style={{fontSize:11,color:C.textLt,flexShrink:0}}>{open?"▲":"▼"}</span>
+          </div>
+          {open&&<div style={{borderTop:`1px solid ${C.border}`,padding:"14px",display:"flex",flexDirection:"column",gap:14,animation:"fadeIn 0.18s ease"}}>
+            {r.image_count>0&&<div>
+              <Lbl>Photos jointes</Lbl>
+              {!imgs[r.id]?<p style={{fontSize:12,color:C.textLt,margin:0}}>Chargement des photos…</p>:imgs[r.id].length===0?<p style={{fontSize:12,color:C.textLt,margin:0}}>Photos indisponibles.</p>:
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {imgs[r.id].map((src,i)=><img key={i} src={src} alt={`Photo ${i+1}`} onClick={()=>setLightbox(src)} style={{width:120,height:120,objectFit:"cover",borderRadius:6,border:`1px solid ${C.border}`,cursor:"zoom-in"}}/>)}
+              </div>}
+            </div>}
+            {card&&<div>
+              <Lbl>Carte actuelle en base</Lbl>
+              {!cc?<p style={{fontSize:12,color:C.textLt,margin:0}}>Chargement…</p>:isOcclusion({front:cc.front,card_type:card.card_type})?
+                <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:10}}>
+                  {getOcclusionTitle(cc.front)&&<p style={{fontFamily:serif,fontSize:13,fontWeight:600,margin:"0 0 8px",textAlign:"center"}}>{getOcclusionTitle(cc.front)}</p>}
+                  <OcclusionCanvas cardFront={cc.front} showBack={true} showOthers={false}/>
+                </div>:
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:8}}>
+                  {[["Recto",parseContent(cc.front)],["Verso",parseContent(cc.back)]].map(([l,x])=><div key={l} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px"}}>
+                    <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 6px"}}>{l}</p>
+                    {x.text&&<MathText text={x.text} style={{fontSize:13,lineHeight:1.6,margin:0,whiteSpace:"pre-wrap",color:C.text}}/>}
+                    {x.img&&<img src={x.img} onClick={()=>setLightbox(x.img)} style={{maxWidth:"100%",maxHeight:140,borderRadius:6,marginTop:6,display:"block",cursor:"zoom-in"}}/>}
+                  </div>)}
+                </div>}
+            </div>}
+            <div>
+              <Lbl>Note interne (optionnelle)</Lbl>
+              <input style={iLine} placeholder="Ce qui a été fait, ou pourquoi c'est écarté…" value={notes[r.id]!==undefined?notes[r.id]:(r.admin_note||"")} onChange={e=>setNotes(p=>({...p,[r.id]:e.target.value}))}/>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {card&&<Btn small fill onClick={()=>editCard(r)}>✏️ Corriger la carte</Btn>}
+              {r.status!=="fixed"&&<Btn small onClick={()=>setStatus(r,"fixed")} disabled={busy===r.id}>✓ Marquer corrigé</Btn>}
+              {r.status!=="rejected"&&<Btn small onClick={()=>setStatus(r,"rejected")} disabled={busy===r.id}>Écarter</Btn>}
+              {r.status!=="open"&&<Btn small onClick={()=>setStatus(r,"open")} disabled={busy===r.id}>↩ Rouvrir</Btn>}
+              <Btn small danger onClick={()=>setConfirmDel(r)} disabled={busy===r.id}>🗑 Supprimer</Btn>
+            </div>
+          </div>}
+        </div>;
+      })}
+    {lightbox&&<div onClick={()=>setLightbox(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.82)",zIndex:1300,display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"zoom-out"}}>
+      <img src={lightbox} alt="" style={{maxWidth:"100%",maxHeight:"100%",borderRadius:8,boxShadow:"0 10px 40px rgba(0,0,0,0.5)"}}/>
+    </div>}
+    {confirmDel&&<Modal onClose={()=>setConfirmDel(null)} width={320}>
+      <p style={{fontFamily:serif,fontSize:19,margin:"0 0 8px"}}>Supprimer ce signalement ?</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 22px"}}>Il disparaît définitivement, avec ses photos.</p>
+      <div style={{display:"flex",gap:10}}><Btn fill danger onClick={()=>remove(confirmDel)}>Supprimer</Btn><Btn onClick={()=>setConfirmDel(null)}>Annuler</Btn></div>
+    </Modal>}
+  </div>;
+}
 function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUser,onSortCards,onBack,theme,onToggleTheme}){
   const [tab,setTab]=useState("cards"),[subView,setSubView]=useState("list"),[editCard,setEditCard]=useState(null);
   const [cardKey,setCardKey]=useState(0);
@@ -4861,7 +5085,12 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
   // restaurer une fois revenu sur la liste — l'admin reste là où il était,
   // qu'il ait créé une carte entre deux positions ou modifié une carte existante.
   const scrollYRef=useRef(0);
-  const openEditor=useCallback((c)=>{scrollYRef.current=window.scrollY;setEditCard(c||null);setSubView("editor");},[]);
+  // Correction lancée depuis un signalement d'erreur : on retient lequel, pour
+  // proposer de le classer « corrigé » dès que la carte est enregistrée.
+  const [fixingReportId,setFixingReportId]=useState(null),[justEditedReport,setJustEditedReport]=useState(null);
+  const [openReports,setOpenReports]=useState(0);
+  useEffect(()=>{ supa.getCardReports().then(d=>{ if(Array.isArray(d))setOpenReports(d.filter(r=>r.status==="open").length); }); },[]);
+  const openEditor=useCallback((c,reportId=null)=>{scrollYRef.current=window.scrollY;setEditCard(c||null);setFixingReportId(reportId);setSubView("editor");},[]);
   useEffect(()=>{
     if(subView==="list"){
       const y=scrollYRef.current;
@@ -4879,20 +5108,23 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       setTimeout(()=>setSaveFlash(false),2000);
       setCardKey(k=>k+1);
     } else {
+      if(fixingReportId)setJustEditedReport(fixingReportId);
+      setFixingReportId(null);
       setSubView("list");
     }
   };
-  const TB=({id,label})=><button onClick={()=>setTab(id)} style={{fontFamily:font,fontSize:12,fontWeight:500,padding:"8px 18px",cursor:"pointer",border:"none",borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,background:"transparent",color:tab===id?C.accent:C.textMed}}>{label}</button>;
+  const TB=({id,label,badge})=><button onClick={()=>setTab(id)} style={{fontFamily:font,fontSize:12,fontWeight:500,padding:"8px 18px",cursor:"pointer",border:"none",borderBottom:`2px solid ${tab===id?C.accent:"transparent"}`,background:"transparent",color:tab===id?C.accent:C.textMed,whiteSpace:"nowrap",flexShrink:0,display:"flex",alignItems:"center",gap:6}}>{label}{badge>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:C.again,color:"var(--c-onSolid)"}}>{badge}</span>}</button>;
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",color:C.text}}>
-    {tab==="cards"&&subView==="editor"&&(
+    {subView==="editor"&&(
       <div style={{position:"fixed",inset:0,zIndex:500,background:C.bg,overflowY:"auto"}}>
         {saveFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:600,background:C.good,color:"var(--c-onSolid)",borderRadius:8,padding:"12px 20px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",display:"flex",alignItems:"center",gap:8,animation:"fadeIn 0.2s ease"}}>✓ Carte enregistrée — formulaire prêt pour la suivante</div>}
-        <CardEditor key={cardKey} card={editCard} onSave={handleSave} onCancel={()=>setSubView("list")} officialCards={cards} onSortCards={onSortCards}/>
+        <CardEditor key={cardKey} card={editCard} onSave={handleSave} onCancel={()=>{setFixingReportId(null);setSubView("list");}} officialCards={cards} onSortCards={onSortCards}/>
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>openEditor(null)}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0}}><TB id="cards" label="📚 Flashcards"/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements"/><TB id="announce" label="✉ Annonces"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0,overflowX:"auto"}}><TB id="cards" label="📚 Flashcards"/><TB id="cardreports" label="🚩 Erreurs" badge={openReports}/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements forum"/><TB id="announce" label="✉ Annonces"/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>openEditor(null)} onEdit={c=>openEditor(c)} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
+    {tab==="cardreports"&&<AdminCardReports cards={cards} onEditCard={(c,rid)=>openEditor(c,rid)} justEdited={justEditedReport} onClearJustEdited={()=>setJustEditedReport(null)} onCountChange={setOpenReports}/>}
     {tab==="lessons"&&<AdminLessons cards={cards}/>}
     {tab==="users"&&<AdminUsers accounts={accounts} onSave={onSaveUser} onDelete={onDeleteUser}/>}
     {tab==="rank"&&<AdminRank/>}
@@ -7851,6 +8083,135 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
     <Footer/>
   </div>;
 }
+// ─── Signaler une erreur sur une carte ────────────────────────────────────────
+// Ouvert depuis la session de révision, à droite de « Changer l'importance ».
+// L'étudiant décrit l'erreur et peut joindre jusqu'à REPORT_MAX_IMAGES photos
+// (bouton, glisser-déposer, ou coller une capture avec Ctrl+V). Les photos sont
+// compressées dans le navigateur avant l'envoi, pour rester légères.
+const REPORT_MAX_IMAGES=4;
+const REPORT_DESC_MIN=10, REPORT_DESC_MAX=4000;
+const REPORT_CATEGORIES=[
+  {id:"contenu",   label:"Erreur de contenu"},
+  {id:"faute",     label:"Faute de frappe"},
+  {id:"image",     label:"Image ou zone incorrecte"},
+  {id:"ambigu",    label:"Formulation ambiguë"},
+  {id:"classement",label:"Mauvais chapitre ou paquet"},
+  {id:"autre",     label:"Autre"},
+];
+const reportCategoryLabel=id=>(REPORT_CATEGORIES.find(c=>c.id===id)||{}).label||id||"—";
+// Extrait lisible d'une carte, pour que l'administrateur la reconnaisse d'un coup d'œil.
+// On part toujours de la version OFFICIELLE, même si l'étudiant a adapté la carte.
+const cardExcerpt=card=>{
+  const front=card.originalFront!==undefined?card.originalFront:card.front;
+  if(isOcclusion({front,card_type:card.card_type})){
+    const t=getOcclusionTitle(front);
+    return `🖼 Image occlusion${t?` — ${t}`:""}`;
+  }
+  const fc=parseContent(front);
+  return (fc.text||"").slice(0,400)||(fc.img?"(image seule)":"");
+};
+function CardReportModal({card,onSubmit,onClose}){
+  const [category,setCategory]=useState("contenu");
+  const [desc,setDesc]=useState("");
+  const [images,setImages]=useState([]);
+  const [drag,setDrag]=useState(false);
+  const [busy,setBusy]=useState(false),[imgBusy,setImgBusy]=useState(false);
+  const [err,setErr]=useState("");
+  const fileRef=useRef(null);
+  const imagesRef=useRef(images); imagesRef.current=images;
+  const grp=GROUPS.find(g=>g.id===card.groupId);
+  const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
+  const addFiles=async fileList=>{
+    const files=[...(fileList||[])].filter(f=>f&&f.type&&f.type.startsWith("image/"));
+    if(!files.length)return;
+    const room=REPORT_MAX_IMAGES-imagesRef.current.length;
+    if(room<=0){setErr(`${REPORT_MAX_IMAGES} photos maximum.`);return;}
+    if(files.length>room)setErr(`${REPORT_MAX_IMAGES} photos maximum : seules les ${room} premières ont été ajoutées.`);
+    else setErr("");
+    setImgBusy(true);
+    try{
+      const out=[];
+      for(const f of files.slice(0,room)){
+        const raw=await new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=rej;r.readAsDataURL(f);});
+        out.push(await compressImage(raw,1280,0.7));
+      }
+      setImages(prev=>[...prev,...out].slice(0,REPORT_MAX_IMAGES));
+    }catch{ setErr("Impossible de lire cette image. Essaie avec un autre fichier."); }
+    finally{ setImgBusy(false); }
+  };
+  const addFilesRef=useRef(addFiles); addFilesRef.current=addFiles;
+  // Coller une capture d'écran directement dans la fenêtre.
+  useEffect(()=>{
+    const onPaste=e=>{
+      const items=[...((e.clipboardData&&e.clipboardData.items)||[])].filter(i=>i.type&&i.type.startsWith("image/"));
+      if(!items.length)return;
+      e.preventDefault();
+      addFilesRef.current(items.map(i=>i.getAsFile()).filter(Boolean));
+    };
+    window.addEventListener("paste",onPaste);
+    return()=>window.removeEventListener("paste",onPaste);
+  },[]);
+  const len=desc.trim().length;
+  const canSend=len>=REPORT_DESC_MIN&&!busy&&!imgBusy;
+  const send=async()=>{
+    if(!canSend)return;
+    setBusy(true);setErr("");
+    const res=await onSubmit({category,description:desc.trim().slice(0,REPORT_DESC_MAX),images});
+    setBusy(false);
+    if(!res||res.ok===false){
+      const e=res&&res.error;
+      setErr(e==="missing"
+        ?`Le service de signalement n'est pas encore activé. Écris-nous à ${CONTACT_EMAIL}.`
+        :e==="rate"
+        ?"Tu as déjà envoyé beaucoup de signalements aujourd'hui. Merci ! Réessaie demain."
+        :e==="too_big"
+        ?"Les photos sont trop lourdes. Retire-en une et réessaie."
+        :"L'envoi a échoué. Vérifie ta connexion et réessaie.");
+    }
+  };
+  return <Modal onClose={()=>!busy&&onClose()} width={540}>
+    <p style={{fontFamily:serif,fontSize:21,margin:"0 0 6px"}}>🚩 Signaler une erreur</p>
+    <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 16px",lineHeight:1.65}}>Ton signalement est envoyé directement à l'équipe MyFlashCard, qui vérifiera la carte et la corrigera pour tout le monde.</p>
+    <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",marginBottom:16}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
+        <Tag color={pC(card.packetId)} bg={pB(card.packetId)} small>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
+        {grp&&<Tag color={C.textMed} bg={C.surface} small>{grp.label}</Tag>}
+        <Tag color={C.textMed} bg={C.surface} small>Cours {card.num}</Tag>
+        {chName&&<Tag color={C.textMed} bg={C.surface} small>Ch.{card.chapterId} {chName}</Tag>}
+      </div>
+      <p style={{fontFamily:serif,fontSize:13,color:C.text,margin:0,lineHeight:1.5,maxHeight:60,overflow:"hidden"}}>{cardExcerpt(card)}</p>
+    </div>
+    <Lbl>Type d'erreur</Lbl>
+    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+      {REPORT_CATEGORIES.map(c=>{const on=category===c.id;return<button key={c.id} onClick={()=>setCategory(c.id)} style={{fontFamily:font,fontSize:12,fontWeight:on?600:400,padding:"6px 11px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${on?C.accent:C.border}`,background:on?C.accentBg:"transparent",color:on?C.accent:C.textMed}}>{on&&"✓ "}{c.label}</button>;})}
+    </div>
+    <Lbl>Description détaillée</Lbl>
+    <textarea value={desc} onChange={e=>{setDesc(e.target.value.slice(0,REPORT_DESC_MAX));setErr("");}} rows={5} autoFocus
+      placeholder="Ce qui est faux, et si possible la bonne réponse avec sa source (diapo, page du cours, annale…)"
+      style={{...iBox,fontSize:14,lineHeight:1.6}}/>
+    <p style={{fontFamily:mono,fontSize:10,color:len>0&&len<REPORT_DESC_MIN?C.again:C.textLt,margin:"4px 0 16px"}}>{len<REPORT_DESC_MIN?`${REPORT_DESC_MIN} caractères minimum`:`${desc.length}/${REPORT_DESC_MAX}`}</p>
+    <Lbl>Photos (optionnel · {images.length}/{REPORT_MAX_IMAGES})</Lbl>
+    {images.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+      {images.map((src,i)=><div key={i} style={{position:"relative"}}>
+        <img src={src} alt={`Photo ${i+1}`} style={{width:86,height:86,objectFit:"cover",borderRadius:6,border:`1px solid ${C.border}`,display:"block"}}/>
+        <button onClick={()=>setImages(prev=>prev.filter((_,j)=>j!==i))} aria-label="Retirer la photo" style={{position:"absolute",top:-7,right:-7,width:22,height:22,borderRadius:"50%",background:C.again,color:"var(--c-onSolid)",border:"none",cursor:"pointer",fontSize:14,lineHeight:1,fontWeight:700}}>×</button>
+      </div>)}
+    </div>}
+    {images.length<REPORT_MAX_IMAGES&&<div
+      onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)}
+      onDrop={e=>{e.preventDefault();setDrag(false);addFiles(e.dataTransfer.files);}}
+      onClick={()=>fileRef.current&&fileRef.current.click()}
+      style={{border:`2px dashed ${drag?C.accent:C.border}`,borderRadius:8,padding:"14px",textAlign:"center",background:drag?C.accentBg:"transparent",cursor:"pointer",marginBottom:4}}>
+      <p style={{fontSize:13,color:C.textMed,margin:0}}>{imgBusy?"Préparation de la photo…":<>📷 <span style={{color:C.accent,textDecoration:"underline"}}>Ajouter des photos</span>, les glisser ici, ou coller une capture (Ctrl+V)</>}</p>
+      <input ref={fileRef} type="file" accept="image/*" multiple style={{display:"none"}} onChange={e=>{addFiles(e.target.files);e.target.value="";}}/>
+    </div>}
+    {err&&<p style={{fontSize:12,color:C.again,margin:"12px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6,lineHeight:1.5}}>{err}</p>}
+    <div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap"}}>
+      <Btn fill onClick={send} disabled={!canSend}>{busy?"Envoi…":"Envoyer le signalement"}</Btn>
+      <Btn onClick={onClose} disabled={busy}>Annuler</Btn>
+    </div>
+  </Modal>;
+}
 // ─── Adaptation personnelle d'une carte ───────────────────────────────────────
 // Ouverte depuis la session de révision. L'étudiant retouche la formulation de
 // la question, complète la réponse, ajoute ou remplace une image — et ces
@@ -7955,7 +8316,7 @@ function CardAdaptModal({card,onSave,onReset,onClose}){
   </Modal>;
 }
 // ─── Study ────────────────────────────────────────────────────────────────────
-function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,username,theme,onToggleTheme,onUndo,onQueueChange,allCards,onUnbury,promo,planId,fullGroups}){
+function StudyView({label,queue,cram=false,mode="anki",jplans,onReportCard,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,username,theme,onToggleTheme,onUndo,onQueueChange,allCards,onUnbury,promo,planId,fullGroups}){
   const [promoOpen,setPromoOpen]=useState(false),[promoPillHidden,setPromoPillHidden]=useState(false);
   // Un compte qui possède tout le Semestre 1 a tout acheté : aucune incitation
   // à l'achat pendant la révision, et un message de félicitations en fin de série.
@@ -7974,6 +8335,9 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
   const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0),[confirmDelCard,setConfirmDelCard]=useState(null),[delFlash,setDelFlash]=useState(false),[confirmBury,setConfirmBury]=useState(false),[showBuried,setShowBuried]=useState(false);
   // Adaptation personnelle de la carte affichée.
   const [adaptCard,setAdaptCard]=useState(null),[adaptFlash,setAdaptFlash]=useState(null);
+  // Signalement d'erreur sur une carte officielle (envoyé à l'équipe).
+  const [reportCard,setReportCard]=useState(null),[reportFlash,setReportFlash]=useState(null);
+  const [reportedIds,setReportedIds]=useState(()=>new Set());
   // ─── Préchargement glissant ────────────────────────────────────────────────
   // Pendant que l'étudiant lit la carte affichée, les SUIVANTES sont préparées
   // en silence : leur contenu est récupéré si besoin, et surtout leurs images
@@ -8304,6 +8668,16 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
     {recallFlash&&<div key={recallFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:C.hardBg,border:`1.5px solid ${C.hard}`,color:C.hard,borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",animation:"fadeIn 0.2s ease",textAlign:"center",maxWidth:"92vw"}}>↻ Fin du paquet — {recallFlash.n} carte{recallFlash.n>1?"s":""} en attente {recallFlash.n>1?"remises":"remise"} en jeu</div>}
     {buryFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:"var(--c-toast)",color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🙈 Carte enfouie — plus dans tes révisions</div>}
     {delFlash&&<div style={{position:"fixed",bottom:24,right:24,zIndex:200,background:C.again,color:"var(--c-onSolid)",borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.2)",animation:"fadeIn 0.2s ease"}}>🗑 Ta carte a été supprimée</div>}
+    {reportCard&&<CardReportModal card={reportCard} onClose={()=>setReportCard(null)} onSubmit={async payload=>{
+      const res=await onReportCard(reportCard,payload);
+      if(res&&res.ok){
+        setReportedIds(prev=>{const n=new Set(prev);n.add(reportCard.id);return n;});
+        setReportCard(null);
+        const fid=Date.now();setReportFlash(fid);setTimeout(()=>setReportFlash(f=>f===fid?null:f),3200);
+      }
+      return res;
+    }}/>}
+    {reportFlash&&<div key={reportFlash} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:C.goodBg,border:`1.5px solid ${C.good}`,color:C.good,borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",animation:"fadeIn 0.2s ease",textAlign:"center",maxWidth:"92vw"}}>🚩 Merci ! Ton signalement a été transmis à l'équipe.</div>}
     {adaptCard&&<CardAdaptModal card={localQ.find(c=>c.id===adaptCard.id)||adaptCard} onSave={handleSaveAdapt} onReset={handleResetAdapt} onClose={()=>setAdaptCard(null)}/>}
     {adaptFlash&&<div key={adaptFlash.id} style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:200,background:adaptFlash.kind==="saved"?"var(--c-violetBg)":C.bg,border:`1.5px solid ${adaptFlash.kind==="saved"?"var(--c-violet)":C.border}`,color:adaptFlash.kind==="saved"?"var(--c-violet)":C.textMed,borderRadius:8,padding:"10px 18px",fontFamily:font,fontSize:13,fontWeight:600,boxShadow:"0 4px 16px rgba(0,0,0,0.15)",animation:"fadeIn 0.2s ease",textAlign:"center",maxWidth:"92vw"}}>{adaptFlash.kind==="saved"?"✏️ Ta version est enregistrée — elle s'affichera à chaque révision":"↺ Version d'origine rétablie"}</div>}
     {confirmDelCard&&<Modal onClose={()=>setConfirmDelCard(null)} width={360}>
@@ -8445,7 +8819,10 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onRate,onJAction,o
           </div>;
         })()}
         {!isAdmin&&onChangePacket&&<div style={{marginTop:14}}>
-          <button onClick={()=>setShowPktChange(s=>!s)} style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${showPktChange?C.accent:C.border}`,background:showPktChange?C.accentBg:"transparent",color:showPktChange?C.accent:C.textLt,display:"flex",alignItems:"center",gap:5}}>📦 Changer l'importance (pour moi uniquement) {showPktChange?"▲":"▼"}</button>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <button onClick={()=>setShowPktChange(s=>!s)} style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${showPktChange?C.accent:C.border}`,background:showPktChange?C.accentBg:"transparent",color:showPktChange?C.accent:C.textLt,display:"flex",alignItems:"center",gap:5}}>📦 Changer l'importance (pour moi uniquement) {showPktChange?"▲":"▼"}</button>
+            {!card.isUserCard&&onReportCard&&<button onClick={()=>setReportCard(card)} title="Signaler une erreur sur cette carte à l'équipe MyFlashCard" style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${reportedIds.has(card.id)?C.good:C.border}`,background:reportedIds.has(card.id)?C.goodBg:"transparent",color:reportedIds.has(card.id)?C.good:C.textLt,display:"flex",alignItems:"center",gap:5}}>{reportedIds.has(card.id)?"✓ Erreur signalée":"🚩 Signaler une erreur"}</button>}
+          </div>
           {showPktChange&&<div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
             {PACKETS.map(pk=>{
               const currentPkt=progress?.[card.id]?.packetOverride||card.packetId;
@@ -10126,6 +10503,22 @@ function App(){
     }
     return gain?{...merged,__gain:gain}:merged;
   },[prog,saveProg,jplans,currentUser,syncDailyPoints]);
+  // ─── Signalement d'une erreur sur une carte officielle ──────────────────────
+  // Ligne envoyée dans la table « card_reports » : l'administrateur la retrouve
+  // dans l'onglet « 🚩 Erreurs » de son espace, avec les photos jointes.
+  const handleReportCard=useCallback(async(card,{category,description,images})=>{
+    if(!currentUser||!card||card.isUserCard)return {ok:false,error:"invalid"};
+    const row={
+      card_id:String(card.id), group_id:card.groupId||null, num:card.num??null,
+      chapter_id:card.chapterId??null, packet_id:card.packetId||null,
+      card_excerpt:cardExcerpt(card).slice(0,400), is_adapted:!!card.isEdited,
+      username:currentUser.username,
+      display_name:pseudo||getPseudo(currentUser.username),
+      category, description, images:images||[],
+    };
+    const uid=sbUserId(); if(uid)row.user_id=uid;
+    return await supa.createCardReport(row);
+  },[currentUser,pseudo]);
   // ─── Retour à la carte précédente ───────────────────────────────────────────
   // Annule complètement la dernière notation : la progression FSRS revient à son
   // état exact d'avant (y compris « jamais vue »), les points du jour gagnés sur
@@ -10200,7 +10593,7 @@ function App(){
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
   if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onStudy={startStudy} onStudyCram={startCramStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)} theme={theme} onToggleTheme={toggleTheme} resumeInfo={resumeInfo} onResume={resumeStudySession} onDismissResume={dismissResume} studyMode={studyMode} onChangeMode={changeStudyMode} jplans={jplans} onSaveJPlan={handleSaveJPlan} onStudyJ={startJStudy} onStudyPerso={startPersoStudy} promo={promo}/>;
-  if(view==="study"&&studyCtx) return <StudyView label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} username={currentUser?.username} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue} allCards={allCards} onUnbury={handleUnbury} promo={promo} planId={currentUser?.plan?.planId} fullGroups={currentUser?.plan?.fullGroups}/>;
+  if(view==="study"&&studyCtx) return <StudyView onReportCard={handleReportCard} label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} username={currentUser?.username} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue} allCards={allCards} onUnbury={handleUnbury} promo={promo} planId={currentUser?.plan?.planId} fullGroups={currentUser?.plan?.fullGroups}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo} theme={theme} onToggleTheme={toggleTheme}/>;
   return null;
