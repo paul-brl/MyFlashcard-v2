@@ -8724,15 +8724,18 @@ function StudyView({label,queue,cram=false,mode="anki",jplans,onReportCard,onRat
             const fc=parseContent(card.front);
             const bc=parseContent(card.back);
             const minH=fc.img||bc.img?300:260;
+            // Les deux faces sont empilées dans la MÊME case d'une grille, et non plus
+            // en position absolue : la carte prend donc la hauteur de la face la plus
+            // longue. Un texte long agrandit le cadre au lieu d'en déborder.
             return(
-              <div style={{width:"100%",minHeight:minH,position:"relative",transformStyle:"preserve-3d",transform:showBack?"rotateY(180deg)":"rotateY(0)",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)",cursor:showBack?"pointer":"pointer"}} onClick={()=>showBack?setShowBack(false):setShowBack(true)}>
-                <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",minHeight:minH}}>
+              <div style={{width:"100%",minHeight:minH,position:"relative",display:"grid",gridTemplateColumns:"minmax(0,1fr)",transformStyle:"preserve-3d",WebkitTransformStyle:"preserve-3d",transform:showBack?"rotateY(180deg)":"rotateY(0)",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)",cursor:"pointer"}} onClick={()=>showBack?setShowBack(false):setShowBack(true)}>
+                <div style={{gridArea:"1 / 1",position:"relative",backfaceVisibility:"hidden",WebkitBackfaceVisibility:"hidden",transform:"rotateY(0deg)",background:C.surface,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",minHeight:minH,minWidth:0,overflowWrap:"anywhere",wordBreak:"break-word"}}>
                   <Lbl>Question · cliquer pour révéler</Lbl>
                   {fc.text&&<MathText text={fc.text} style={{fontFamily:serif,fontSize:20,lineHeight:1.6,margin:"8px 0 0",whiteSpace:"pre-wrap",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}/>}
                   {fc.img&&<img src={fc.img} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,marginTop:fc.text?12:0,display:"block",objectFit:"contain"}}/>}
-                  <p style={{fontSize:12,color:C.textLt,position:"absolute",bottom:14,right:18}}>Cliquer pour révéler →</p>
+                  <p style={{fontSize:12,color:C.textLt,margin:"16px 0 0",alignSelf:"flex-end"}}>Cliquer pour révéler →</p>
                 </div>
-                <div style={{position:"absolute",inset:0,backfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${col}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",transform:"rotateY(180deg)",minHeight:minH}}>
+                <div style={{gridArea:"1 / 1",position:"relative",backfaceVisibility:"hidden",WebkitBackfaceVisibility:"hidden",background:C.surface,borderRadius:12,border:`1.5px solid ${col}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",transform:"rotateY(180deg)",minHeight:minH,minWidth:0,overflowWrap:"anywhere",wordBreak:"break-word"}}>
                   <Lbl>Réponse · cliquer pour revoir la question</Lbl>
                   {bc.text&&<MathText text={bc.text} style={{fontSize:15,lineHeight:1.8,margin:"8px 0 0",color:C.textMed,whiteSpace:"pre-wrap",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}/>}
                   {bc.img&&<img src={bc.img} style={{maxWidth:"100%",maxHeight:220,borderRadius:8,marginTop:bc.text?12:0,display:"block",objectFit:"contain"}}/>}
