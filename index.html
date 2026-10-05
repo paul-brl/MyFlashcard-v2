@@ -373,6 +373,23 @@ const applySession = s => {
 // l'application affiche des listes vides. L'étudiant croit alors avoir perdu
 // ses données. On intercepte donc ces 401 une bonne fois, au niveau du réseau.
 let SESSION_EXPIRED_FIRED = false;
+// Un 401 n'est pas forcément une vraie déconnexion. Sur iPhone et iPad, quand
+// l'onglet reste en arrière-plan plus d'une heure, le minuteur qui renouvelle le
+// jeton est suspendu : au retour, les premières requêtes partent avec un jeton
+// périmé. Avant, ces requêtes échouaient en silence — et parmi elles, la
+// sauvegarde des révisions. On tente donc d'abord de renouveler le jeton, puis on
+// rejoue la requête une fois. La fenêtre « session expirée » ne s'affiche que si
+// le renouvellement lui-même échoue.
+let SESSION_REFRESH_PROMISE = null;
+const refreshSessionOnce = () => {
+  if (!SESSION_REFRESH_PROMISE) {
+    SESSION_REFRESH_PROMISE = sb.auth.refreshSession()
+      .then(({data,error}) => { if (error || !data?.session) return false; applySession(data.session); return true; })
+      .catch(() => false)
+      .finally(() => { setTimeout(() => { SESSION_REFRESH_PROMISE = null; }, 2000); });
+  }
+  return SESSION_REFRESH_PROMISE;
+};
 (function(){
   const orig = window.fetch.bind(window);
   window.fetch = async (...args) => {
@@ -381,6 +398,16 @@ let SESSION_EXPIRED_FIRED = false;
       const url = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url) || "";
       const signedIn = H.Authorization !== `Bearer ${SUPA_KEY}`;
       if (r.status === 401 && signedIn && url.startsWith(SUPA_URL) && !url.includes("/auth/v1/")) {
+        const init = args[1] || {};
+        const sentAuth = new Headers(init.headers || {}).get("Authorization");
+        // Les appels qui utilisent volontairement la clé anon (stockage des PDF)
+        // ne sont pas rejoués avec le jeton de l'utilisateur.
+        if (sentAuth && sentAuth !== `Bearer ${SUPA_KEY}` && await refreshSessionOnce()) {
+          const h = new Headers(init.headers || {});
+          h.set("Authorization", H.Authorization);
+          const r2 = await orig(args[0], { ...init, headers: h });
+          if (r2.status !== 401) return r2;
+        }
         if (!SESSION_EXPIRED_FIRED) {
           SESSION_EXPIRED_FIRED = true;
           window.dispatchEvent(new CustomEvent("mfc-session-expired"));
@@ -397,14 +424,22 @@ const sbIsAdmin = () => SB_SESSION?.user?.app_metadata?.role === "admin";
 // Le jeton expire au bout d'une heure : supabase-js le renouvelle tout seul,
 // et nous réécrivons H à chaque renouvellement. Sans cela, une longue session
 // de révision commencerait à échouer silencieusement au bout d'une heure.
-sb.auth.onAuthStateChange((_evt, session) => applySession(session));
+sb.auth.onAuthStateChange((evt, session) => {
+  applySession(session);
+  // Jeton tout neuf : c'est le bon moment pour envoyer les révisions en attente.
+  if (session && (evt === "TOKEN_REFRESHED" || evt === "SIGNED_IN")) {
+    try { window.dispatchEvent(new CustomEvent("mfc-token-ready")); } catch {}
+  }
+});
 const supa = {
   // Load metadata only — NO front/back. Fast even for 100k cards.
   // First page tells us the total count (Prefer: count=exact), then every
   // remaining page is fetched in parallel instead of one-by-one.
   getCardsMeta: async () => {
     const BATCH=1000; // metadata rows are tiny (~100 bytes each)
-    const base=`${SUPA_URL}/rest/v1/cards?select=id,group_id,num,chapter_id,packet_id,sort_order,card_type`;
+    // order=id : sans ordre explicite, Postgres ne garantit pas que deux pages
+    // consécutives se suivent — des cartes pouvaient manquer ou être doublées.
+    const base=`${SUPA_URL}/rest/v1/cards?select=id,group_id,num,chapter_id,packet_id,sort_order,card_type&order=id.asc`;
     try {
       const first=await fetch(`${base}&limit=${BATCH}&offset=0`,{headers:{...H,"Prefer":"count=exact"}});
       const firstData=await first.json();
@@ -415,9 +450,10 @@ const supa = {
       let allRows=firstData;
       if(total>firstData.length){
         const offsets=[];
-        for(let off=BATCH;off<total;off+=BATCH)offsets.push(off);
+        const step=firstData.length||BATCH;
+        for(let off=step;off<total;off+=step)offsets.push(off);
         const pages=await Promise.all(offsets.map(off=>
-          fetch(`${base}&limit=${BATCH}&offset=${off}`,{headers:H}).then(r=>r.json()).catch(()=>[])
+          fetch(`${base}&limit=${step}&offset=${off}`,{headers:H}).then(r=>r.json()).catch(()=>[])
         ));
         pages.forEach(rows=>{if(Array.isArray(rows))allRows=allRows.concat(rows);});
       }
@@ -1031,31 +1067,52 @@ const supa = {
     try { await fetch(`${SUPA_URL}/rest/v1/card_overrides?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {}
   },
   deleteAllProgress: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {} },
+  // Lecture complète de la progression d'un compte.
+  // Renvoie { rows: { cardId: {data, updatedAt} }, complete } — ou null si même
+  // la première page est inaccessible.
+  //  · order=card_id : sans ordre explicite, deux pages lues en parallèle ne se
+  //    suivent pas forcément ; des cartes pouvaient disparaître de la lecture.
+  //  · le pas entre deux pages est la taille RÉELLE de la première page : si
+  //    Supabase plafonne à moins de 1000 lignes, l'ancien code sautait des cartes.
+  //  · une page en échec est retentée, et « complete » dit si tout est arrivé.
   getProgress: async (username) => {
-    // Same pattern as getCardsMeta: first page gives the total count, then every
-    // remaining page is fetched in parallel.
     const BATCH=1000;
-    const base=`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&select=card_id,data`;
+    const base=`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&select=card_id,data,updated_at&order=card_id.asc`;
+    const rows={};
+    const take=list=>list.forEach(row=>{
+      try{
+        const data=typeof row.data==="string"?JSON.parse(row.data):row.data;
+        if(data&&typeof data==="object")rows[row.card_id]={data,updatedAt:row.updated_at||null};
+      }catch{}
+    });
     try {
       const first=await fetch(`${base}&limit=${BATCH}&offset=0`,{headers:{...H,"Prefer":"count=exact"}});
       if(!first.ok)throw new Error(`HTTP ${first.status}`);
       const firstRows=await first.json();
       if(!Array.isArray(firstRows))throw new Error("Unexpected response");
+      take(firstRows);
       let total=firstRows.length;
       const range=first.headers.get("content-range");
       if(range&&range.includes("/")){const t=parseInt(range.split("/")[1],10);if(!isNaN(t))total=t;}
-      let all=firstRows;
+      let complete=true;
+      const step=firstRows.length||BATCH;
       if(total>firstRows.length){
         const offsets=[];
-        for(let off=BATCH;off<total;off+=BATCH)offsets.push(off);
-        const pages=await Promise.all(offsets.map(off=>
-          fetch(`${base}&limit=${BATCH}&offset=${off}`,{headers:H}).then(r=>r.json()).catch(()=>[])
-        ));
-        pages.forEach(rows=>{if(Array.isArray(rows))all=all.concat(rows);});
+        for(let off=step;off<total;off+=step)offsets.push(off);
+        const getPage=async off=>{
+          for(let a=1;a<=3;a++){
+            try{
+              const r=await fetch(`${base}&limit=${step}&offset=${off}`,{headers:H});
+              if(r.ok){ const d=await r.json(); if(Array.isArray(d))return d; }
+            }catch{}
+            await new Promise(res=>setTimeout(res,500*a));
+          }
+          return null;
+        };
+        const pages=await Promise.all(offsets.map(getPage));
+        pages.forEach(p=>{ if(Array.isArray(p))take(p); else complete=false; });
       }
-      const prog={};
-      all.forEach(row=>{ try{ prog[row.card_id]=typeof row.data==="string"?JSON.parse(row.data):row.data; }catch{} });
-      return prog;
+      return {rows,complete};
     } catch(e){ console.error("getProgress failed:",e); return null; }
   },
   // ─── Classement public journalier (table optionnelle « daily_points ») ─────
@@ -1200,21 +1257,32 @@ const supa = {
     } catch(e){}
   },
   deleteAllJPlans: async (username) => { try { await fetch(`${SUPA_URL}/rest/v1/j_plans?username=eq.${encodeURIComponent(username)}`,{method:"DELETE",headers:H}); } catch {} },
-  upsertProgress: async (username, cardId, data) => {
+  // ─── Écriture de la progression ─────────────────────────────────────────────
+  // L'ancienne version lançait la requête et ignorait la réponse : un refus du
+  // serveur (jeton périmé, coupure réseau, iPhone en arrière-plan…) passait
+  // inaperçu et la révision n'arrivait jamais en base. Ces deux fonctions
+  // renvoient désormais true UNIQUEMENT si Supabase a confirmé l'écriture ; la
+  // file d'attente (voir « Synchronisation de la progression ») retente sinon.
+  upsertProgressRows: async (rows) => {
+    if(!rows||!rows.length)return true;
     try {
-      await fetch(`${SUPA_URL}/rest/v1/progress?on_conflict=username,card_id`, {
+      const r=await fetch(`${SUPA_URL}/rest/v1/progress?on_conflict=username,card_id`, {
         method:"POST",
-        headers:{...H,"Prefer":"resolution=merge-duplicates"},
-        body:JSON.stringify([{username,card_id:cardId,data,updated_at:new Date().toISOString()}])
+        headers:{...H,"Prefer":"resolution=merge-duplicates,return=minimal"},
+        body:JSON.stringify(rows)
       });
-    } catch(e){ console.error("upsertProgress failed:",e); }
+      if(!r.ok){ let t=""; try{t=await r.text();}catch{} console.error("progress upsert refusé:",r.status,t.slice(0,300)); }
+      return r.ok;
+    } catch(e){ console.warn("progress upsert — réseau:",e); return false; }
   },
   deleteProgressBatch: async (username, cardIds) => {
-    if(!cardIds||!cardIds.length)return;
+    if(!cardIds||!cardIds.length)return true;
     try {
-      const idList=cardIds.map(id=>encodeURIComponent(id)).join(",");
-      await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&card_id=in.(${idList})`,{method:"DELETE",headers:H});
-    } catch(e){ console.error("deleteProgressBatch failed:",e); }
+      const idList=cardIds.map(id=>encodeURIComponent(`"${id}"`)).join(",");
+      const r=await fetch(`${SUPA_URL}/rest/v1/progress?username=eq.${encodeURIComponent(username)}&card_id=in.(${idList})`,{method:"DELETE",headers:{...H,"Prefer":"return=minimal"}});
+      if(!r.ok){ let t=""; try{t=await r.text();}catch{} console.error("progress delete refusé:",r.status,t.slice(0,300)); }
+      return r.ok;
+    } catch(e){ console.warn("progress delete — réseau:",e); return false; }
   },
   // ─── Profils / pseudonymes (table optionnelle « profiles ») ────────────────
   // Commun aux étudiants ET aux administrateurs (les admins n'ont pas de ligne
@@ -1325,6 +1393,268 @@ const storage = {
   set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
   del: k => { try { localStorage.removeItem(k); } catch {} },
 };
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── SYNCHRONISATION DE LA PROGRESSION ───────────────────────────────────────
+// Le bug corrigé ici (signalé par des étudiantes : « je fais mes cartes, je
+// reviens, tout est remis à zéro et j'en ai en retard ») tenait en trois défauts
+// qui s'additionnaient :
+//
+//  1. Chaque notation partait vers Supabase SANS vérifier la réponse. Jeton
+//     périmé (iPhone resté en arrière-plan), réseau coupé dans le métro… la
+//     révision restait seulement dans le navigateur, sans que personne le sache.
+//  2. À la reconnexion, la version du SERVEUR écrasait systématiquement celle de
+//     l'appareil (`{...local, ...remote}`). La révision non envoyée était donc
+//     remplacée par l'ancien état — d'où les cartes « jamais faites » et les
+//     cartes passées « en retard » (leur ancienne échéance était dépassée). Et
+//     ce mélange était réécrit dans le navigateur : la bonne version disparaissait.
+//  3. La copie locale gardait 50 entrées d'historique par carte : un étudiant
+//     assidu dépassait la limite de 5 Mo du navigateur, et l'écriture locale
+//     échouait elle aussi, en silence.
+//
+// Le nouveau fonctionnement :
+//  · chaque modification est horodatée (_ts) et notée dans une FILE D'ATTENTE
+//    conservée dans le navigateur ; elle n'en sort que lorsque Supabase a
+//    confirmé l'écriture. Sans réseau, on révise normalement : la file se vide
+//    toute seule au retour de la connexion ;
+//  · à la reconnexion, carte par carte, c'est la version LA PLUS RÉCENTE qui
+//    gagne, et une carte encore en attente garde toujours la version locale ;
+//  · la file est envoyée après chaque carte, au retour du réseau, au retour sur
+//    l'onglet, quand on quitte la page, et avant la déconnexion.
+const PROG_KEY=u=>`mx6-prog-${u}`;
+const PROG_PENDING_KEY=u=>`mx6-progpending-${u}`;
+const PROG_MEM={};        // u → progression la plus récente (source de vérité en mémoire)
+const PROG_PENDING={};    // u → Set des cartes pas encore confirmées par le serveur
+const PROG_FLUSHING={};   // u → envoi en cours
+const PROG_AGAIN={};      // u → un nouvel envoi a été demandé pendant le précédent
+const PROG_TIMER={};      // u → envoi programmé
+const PROG_FAILS={};      // u → échecs consécutifs (pour espacer les tentatives)
+const PROG_SYNC={};       // u → {state, pending}
+let PROG_ACTIVE_USER=null;
+const progSyncSubs=new Set();
+const PROG_CHUNK=100;
+const isOffline=()=>{ try{ return navigator.onLine===false; }catch{ return false; } };
+
+// Date de dernière modification d'une entrée. Les entrées écrites avant ce
+// correctif n'ont pas de _ts : on retombe sur les dates qu'elles contiennent.
+function progEntryTs(e){
+  if(!e)return 0;
+  if(e._ts){ const t=Date.parse(e._ts); if(!isNaN(t))return t; }
+  let m=0;
+  const add=v=>{ const t=v?Date.parse(v):NaN; if(!isNaN(t)&&t>m)m=t; };
+  add(e.lastReview);
+  if(e.j){ add(e.j.startedAt); const h=e.j.history; if(Array.isArray(h)&&h.length)add(h[h.length-1].date); }
+  if(e.p)add(e.p.lastDate);
+  return m;
+}
+// Copie locale allégée : l'historique détaillé n'est utile que sur le serveur.
+const leanProgEntry=(e,keep)=>{
+  if(!e||!Array.isArray(e.reviewHistory)||e.reviewHistory.length<=keep)return e;
+  return {...e,reviewHistory:keep>0?e.reviewHistory.slice(-keep):[]};
+};
+const readLocalProg=u=>storage.get(PROG_KEY(u))||{};
+function writeLocalProg(u,prog){
+  for(const keep of [8,0]){
+    try{
+      const lean={};
+      for(const id in prog)lean[id]=leanProgEntry(prog[id],keep);
+      localStorage.setItem(PROG_KEY(u),JSON.stringify(lean));
+      return true;
+    }catch{}
+  }
+  console.warn("Progression : stockage du navigateur plein — la copie locale n'a pas pu être mise à jour.");
+  return false;
+}
+function progPending(u){
+  if(!PROG_PENDING[u]){
+    let arr=[];
+    try{ arr=JSON.parse(localStorage.getItem(PROG_PENDING_KEY(u))||"[]"); }catch{}
+    PROG_PENDING[u]=new Set(Array.isArray(arr)?arr.map(String):[]);
+  }
+  return PROG_PENDING[u];
+}
+function setProgSync(u,state){
+  PROG_SYNC[u]={state:state||(PROG_SYNC[u]&&PROG_SYNC[u].state)||"ok",pending:progPending(u).size};
+  progSyncSubs.forEach(fn=>{ try{ fn(); }catch{} });
+}
+function persistPending(u){
+  const s=progPending(u);
+  try{ if(s.size)localStorage.setItem(PROG_PENDING_KEY(u),JSON.stringify([...s])); else localStorage.removeItem(PROG_PENDING_KEY(u)); }catch{}
+  setProgSync(u,s.size?undefined:"ok");
+}
+function markProgPending(u,ids){
+  const s=progPending(u);
+  ids.forEach(id=>s.add(String(id)));
+  persistPending(u);
+}
+// Ne retire de la file que les cartes qui n'ont pas bougé pendant l'envoi : une
+// carte renotée entre-temps reste en attente pour partir avec sa nouvelle note.
+function clearPendingIfUnchanged(u,ids,snap){
+  const s=progPending(u), mem=PROG_MEM[u]||{};
+  ids.forEach(id=>{ const e=mem[id]; const cur=e?(e._ts||""):null; if(cur===snap[id])s.delete(id); });
+}
+// user_id est envoyé explicitement : la règle d'accès de la table (« progress_own »)
+// n'autorise que les lignes où user_id = auth.uid(). Sans lui, la ligne dépendait
+// d'une valeur par défaut côté base.
+const progRow=(u,id,e)=>{
+  const row={username:u,card_id:id,data:leanProgEntry(e,10),updated_at:e._ts||new Date().toISOString()};
+  const uid=sbUserId(); if(uid)row.user_id=uid;
+  return row;
+};
+
+// Enregistre des modifications : {cardId: nouvelle entrée | null pour effacer}.
+function commitProgChanges(u,changes){
+  const now=new Date().toISOString();
+  const next={...(PROG_MEM[u]||{})};
+  const ids=Object.keys(changes);
+  ids.forEach(id=>{ const e=changes[id]; if(e==null)delete next[id]; else next[id]={...e,_ts:now}; });
+  PROG_MEM[u]=next;
+  markProgPending(u,ids);   // d'abord la file (minuscule) : c'est elle qui compte
+  writeLocalProg(u,next);
+  scheduleProgFlush(u,400);
+  return next;
+}
+function scheduleProgFlush(u,delay){
+  if(!u)return;
+  if(PROG_TIMER[u])clearTimeout(PROG_TIMER[u]);
+  PROG_TIMER[u]=setTimeout(()=>{ delete PROG_TIMER[u]; flushProgress(u); },delay);
+}
+// Envoie toute la file d'attente. Renvoie true si elle est vide à la fin.
+function flushProgress(u){
+  if(!u||PROG_ACTIVE_USER!==u)return Promise.resolve(false);
+  if(PROG_FLUSHING[u]){ PROG_AGAIN[u]=true; return PROG_FLUSHING[u]; }
+  const run=(async()=>{
+    let ok=true;
+    do{
+      PROG_AGAIN[u]=false;
+      const pend=progPending(u);
+      if(!pend.size)break;
+      if(isOffline()){ ok=false; break; }
+      setProgSync(u,"syncing");
+      const mem=PROG_MEM[u]||{}, snap={}, ups=[], dels=[];
+      [...pend].forEach(id=>{ const e=mem[id]; snap[id]=e?(e._ts||""):null; (e?ups:dels).push(id); });
+      for(let i=0;i<ups.length&&ok;i+=PROG_CHUNK){
+        const chunk=ups.slice(i,i+PROG_CHUNK);
+        if(await supa.upsertProgressRows(chunk.map(id=>progRow(u,id,mem[id]))))clearPendingIfUnchanged(u,chunk,snap);
+        else ok=false;
+      }
+      for(let i=0;i<dels.length&&ok;i+=PROG_CHUNK){
+        const chunk=dels.slice(i,i+PROG_CHUNK);
+        if(await supa.deleteProgressBatch(u,chunk))clearPendingIfUnchanged(u,chunk,snap);
+        else ok=false;
+      }
+      persistPending(u);
+    }while(ok&&PROG_AGAIN[u]);
+    const left=progPending(u).size;
+    if(ok){ PROG_FAILS[u]=0; setProgSync(u,left?"pending":"ok"); }
+    else if(isOffline()){ setProgSync(u,"offline"); }   // l'événement « online » relancera
+    else {
+      PROG_FAILS[u]=(PROG_FAILS[u]||0)+1;
+      setProgSync(u,"error");
+      scheduleProgFlush(u,Math.min(60000,2000*Math.pow(2,PROG_FAILS[u]-1)));
+    }
+    return ok&&!left;
+  })();
+  PROG_FLUSHING[u]=run;
+  run.finally(()=>{
+    if(PROG_FLUSHING[u]===run)delete PROG_FLUSHING[u];
+    if(PROG_AGAIN[u]){ PROG_AGAIN[u]=false; scheduleProgFlush(u,200); }
+  });
+  return run;
+}
+// Dernier envoi quand la page passe en arrière-plan ou se ferme : « keepalive »
+// laisse partir la requête même si l'onglet est tué juste après (limite 64 Ko).
+function beaconProgress(u){
+  if(!u||PROG_ACTIVE_USER!==u||isOffline())return;
+  const pend=[...progPending(u)], mem=PROG_MEM[u]||{};
+  const rows=[], snap={}, ids=[];
+  let size=2;
+  for(const id of pend){
+    const e=mem[id]; if(!e)continue;
+    const row=progRow(u,id,leanProgEntry(e,8));
+    const len=JSON.stringify(row).length+1;
+    if(size+len>60000)break;
+    rows.push(row); ids.push(id); snap[id]=e._ts||""; size+=len;
+  }
+  if(!rows.length)return;
+  try{
+    fetch(`${SUPA_URL}/rest/v1/progress?on_conflict=username,card_id`,{
+      method:"POST",keepalive:true,
+      headers:{...H,"Prefer":"resolution=merge-duplicates,return=minimal"},
+      body:JSON.stringify(rows),
+    }).then(r=>{ if(r.ok){ clearPendingIfUnchanged(u,ids,snap); persistPending(u); } }).catch(()=>{});
+  }catch{}
+}
+// Fusion carte par carte entre l'appareil et le serveur. La plus récente gagne ;
+// une carte encore en attente garde toujours sa version locale. Renvoie aussi les
+// cartes que le serveur ne connaît pas encore (ou dans une version plus ancienne),
+// pour qu'elles lui soient envoyées.
+function mergeProgress(local,remote,pend,complete){
+  const merged={...local}, push=[];
+  for(const id in remote){
+    if(pend.has(id))continue;
+    const r=remote[id], l=local[id];
+    if(!l){ merged[id]=r.data; continue; }
+    const lt=progEntryTs(l);
+    const rt=r.data&&r.data._ts?progEntryTs(r.data):Math.max(progEntryTs(r.data),Date.parse(r.updatedAt)||0);
+    if(lt>rt+1000)push.push(id);
+    else merged[id]=r.data;
+  }
+  // Une carte présente ici mais absente du serveur est une révision qui n'est
+  // jamais arrivée : on la renvoie. Seulement si la lecture du serveur est
+  // complète — sinon on ne peut pas conclure qu'elle y manque.
+  if(complete){ for(const id in local){ if(!(id in remote)&&!pend.has(id))push.push(id); } }
+  return {merged,push};
+}
+// Ouverture de session : la copie locale s'affiche tout de suite.
+function startProgressSession(u){
+  PROG_ACTIVE_USER=u;
+  if(!PROG_MEM[u])PROG_MEM[u]=readLocalProg(u);
+  setProgSync(u,progPending(u).size?(isOffline()?"offline":"pending"):"ok");
+  return PROG_MEM[u];
+}
+// Envoie d'abord ce qui attend, PUIS relit le serveur et fusionne.
+async function syncProgressWithCloud(u){
+  await flushProgress(u);
+  const res=await supa.getProgress(u);
+  if(!res||PROG_ACTIVE_USER!==u)return null;
+  const {merged,push}=mergeProgress(PROG_MEM[u]||{},res.rows,progPending(u),res.complete);
+  PROG_MEM[u]=merged;
+  writeLocalProg(u,merged);
+  if(push.length){
+    console.info(`Progression : ${push.length} carte(s) plus récentes sur cet appareil que sur le serveur — renvoi.`);
+    markProgPending(u,push);
+    scheduleProgFlush(u,300);
+  }
+  return merged;
+}
+// Déconnexion : on tente d'envoyer la file, sans bloquer plus de quelques secondes.
+// Ce qui ne part pas reste dans le navigateur et partira à la prochaine connexion.
+async function endProgressSession(u,timeoutMs=4000){
+  if(u&&PROG_ACTIVE_USER===u){
+    try{ await Promise.race([flushProgress(u),new Promise(r=>setTimeout(r,timeoutMs))]); }catch{}
+  }
+  if(u&&PROG_TIMER[u]){ clearTimeout(PROG_TIMER[u]); delete PROG_TIMER[u]; }
+  PROG_ACTIVE_USER=null;
+}
+function useProgSync(u){
+  const [, force]=useState(0);
+  useEffect(()=>{ const fn=()=>force(n=>n+1); progSyncSubs.add(fn); return()=>progSyncSubs.delete(fn); },[]);
+  return u?(PROG_SYNC[u]||{state:"ok",pending:progPending(u).size}):{state:"ok",pending:0};
+}
+// Déclencheurs d'envoi, posés une seule fois pour toute l'application.
+(function(){
+  const active=()=>PROG_ACTIVE_USER;
+  window.addEventListener("online",()=>{ const u=active(); if(u)flushProgress(u); });
+  window.addEventListener("offline",()=>{ const u=active(); if(u&&progPending(u).size)setProgSync(u,"offline"); });
+  window.addEventListener("mfc-token-ready",()=>{ const u=active(); if(u&&progPending(u).size)scheduleProgFlush(u,300); });
+  window.addEventListener("pagehide",()=>{ const u=active(); if(u)beaconProgress(u); });
+  document.addEventListener("visibilitychange",()=>{
+    const u=active(); if(!u)return;
+    if(document.visibilityState==="hidden")beaconProgress(u);
+    else if(progPending(u).size)flushProgress(u);
+  });
+  setInterval(()=>{ const u=active(); if(u&&progPending(u).size&&!PROG_TIMER[u]&&!PROG_FLUSHING[u])flushProgress(u); },30000);
+})();
 // ─── Cache persistant sur disque (IndexedDB) ──────────────────────────────────
 // localStorage plafonne à ~5 Mo et bloque le fil d'exécution : impossible d'y
 // garder des images. IndexedDB accepte plusieurs centaines de Mo et travaille en
@@ -1427,7 +1757,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-09-15-retractation";
+const APP_VERSION="2026-10-05-sync-progression";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -1589,7 +1919,6 @@ const setForumSeen = (u, iso) => { try { if (iso) localStorage.setItem(forumSeen
 // messages à l'identifiant Auth, jamais au nom d'utilisateur.
 const latestOtherPost = (rows, uid) => (rows||[])
   .filter(p => p && p.user_id !== uid && p.created_at)
-  .filter(p => p && p.username !== username && p.created_at)
   .reduce((max, p) => (p.created_at > max ? p.created_at : max), "");
 // ─── Cours PDF : identifiants et petit magasin partagé ────────────────────────
 // Un cours est identifié par le triplet matière / cours / chapitre, exactement
@@ -2393,7 +2722,10 @@ function computeNext(prev,rating,s=DEFAULT_SETTINGS){
   const mf=m=>new Date(Date.now()+m*60000).toISOString();
   const df=d=>new Date(Date.now()+d*86400000).toISOString();
   const now=new Date().toISOString();
-  const log=entry=>{const h=[...reviewHistory,{date:now,rating,...entry}];return h.length>50?h.slice(h.length-50):h;};
+  // 10 dernières notations seulement : cet historique n'est lu nulle part dans le
+  // site, et à 50 entrées par carte il faisait grossir la base Supabase (plafond
+  // de 500 Mo sur l'offre gratuite) et le stockage du navigateur.
+  const log=entry=>{const h=[...reviewHistory,{date:now,rating,...entry}];return h.length>10?h.slice(h.length-10):h;};
   // Carte neuve ou encore en apprentissage : paliers en minutes inchangés.
   // La mémoire FSRS (stabilité/difficulté) démarre à la graduation.
   if(state==="new"||state==="learning"){
@@ -7224,7 +7556,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
     setForumLatest(latest);
     const seen=getForumSeen(currentUser.username);
     if(!seen){ setForumSeen(currentUser.username,latest||new Date().toISOString()); setForumUnread(0); return; }
-    setForumUnread(meta.filter(p=>p.username!==currentUser.username&&p.created_at&&p.created_at>seen).length);
+    const uid=sbUserId();
+    setForumUnread(meta.filter(p=>p.user_id!==uid&&p.created_at&&p.created_at>seen).length);
   },[currentUser.username]);
   useEffect(()=>{
     refreshForumUnread();
@@ -8622,6 +8955,25 @@ function ResetPasswordView({onDone}){
 // Les comptes créés avant la mise en place des preuves n'ont accepté aucune
 // version des CGU. On la demande une fois, à la connexion. Pas de croix ni de
 // clic à côté pour fermer : soit on accepte, soit on se déconnecte.
+// Bandeau discret qui n'apparaît que lorsque des révisions attendent d'être
+// envoyées et que l'envoi n'est pas possible (hors ligne, ou serveur injoignable).
+// Il rassure l'étudiant — rien n'est perdu — au lieu de le laisser découvrir
+// plus tard des cartes « remises à zéro ».
+function ProgSyncBadge({username}){
+  const st=useProgSync(username);
+  if(!username||!st.pending||(st.state!=="offline"&&st.state!=="error"))return null;
+  const n=st.pending, pl=n>1?"s":"";
+  const off=st.state==="offline";
+  return <div role="status" style={{position:"fixed",left:"50%",bottom:18,transform:"translateX(-50%)",zIndex:450,maxWidth:"min(460px,calc(100vw - 24px))",display:"flex",alignItems:"center",gap:10,background:C.surface,border:`1.5px solid ${off?C.hard:C.imp}`,borderRadius:10,padding:"9px 12px",boxShadow:"0 6px 20px rgba(0,0,0,0.14)",fontFamily:font}}>
+    <span style={{fontSize:16,flexShrink:0}}>{off?"📴":"⏳"}</span>
+    <p style={{fontSize:12,color:C.textMed,margin:0,lineHeight:1.5}}>
+      {off
+        ?<><strong style={{color:C.text}}>Hors connexion.</strong> {n} révision{pl} gardée{pl} sur cet appareil — envoyée{pl} automatiquement au retour du réseau.</>
+        :<><strong style={{color:C.text}}>{n} révision{pl} pas encore synchronisée{pl}.</strong> Elle{pl} {n>1?"sont":"est"} en sécurité sur cet appareil, nouvel essai automatique.</>}
+    </p>
+    {!off&&<button onClick={()=>{ PROG_FAILS[username]=0; flushProgress(username); }} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"5px 10px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.imp}`,background:"transparent",color:C.imp,flexShrink:0,whiteSpace:"nowrap"}}>Réessayer</button>}
+  </div>;
+}
 function SessionExpiredModal({onReconnect}){
   return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,zIndex:10000}}>
     <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"26px 24px",maxWidth:400,width:"100%",textAlign:"center"}}>
@@ -8960,7 +9312,7 @@ function App(){
             : [...new Set([...(isPaidPlan(planId)?(PLANS.find(p=>p.id===planId)?.groups||[]):[]),...extra])];
           const restoredFullGroups=computeFullGroups(planId,restoredPaid,[]);
           const restored={...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}};
-          setProg(storage.get(`mx6-prog-${saved.username}`)||{});
+          setProg(startProgressSession(saved.username));
           refreshProgressFromCloud(saved.username);
           setPseudo(getPseudo(saved.username));
           refreshPseudoFromCloud(saved.username);
@@ -9075,7 +9427,7 @@ function App(){
     const groups=isAdmin?ALL:computeGroups(subPlanId,Array.isArray(acc?.groups)?acc.groups:[],getExtraGroups(lc));
     const fullGroups=isAdmin?ALL:computeFullGroups(subPlanId,derivePaidGroups(acc,lc),[]);
     const u={username:lc,role:isAdmin?"admin":"student",plan:{planId:subPlanId,groups,fullGroups}};
-    setProg(storage.get(`mx6-prog-${lc}`)||{});
+    setProg(startProgressSession(lc));
     refreshProgressFromCloud(lc);
     setPseudo(getPseudo(lc));
     refreshPseudoFromCloud(lc);
@@ -9093,26 +9445,28 @@ function App(){
         if(isAdmin)supa.getAccounts().then(a=>{ if(Array.isArray(a)&&a.length)setAccounts(a); });
     return true;
   };
-  const logout=async()=>{try{await sb.auth.signOut();}catch{}applySession(null);cardsRetryRef.current=0;storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
+  const logout=async()=>{await endProgressSession(currentUser?.username);try{await sb.auth.signOut();}catch{}applySession(null);cardsRetryRef.current=0;storage.del("mx6-session");setCurrentUser(null);setProg({});setOverrides({});setPseudo("");setResumeInfo(null);setStudyCtx(null);setJplans({});setStudyMode("anki");setView("login");};
+  // Voir « SYNCHRONISATION DE LA PROGRESSION » : on envoie d'abord ce qui
+  // attend, puis on fusionne carte par carte (la plus récente gagne). L'ancienne
+  // version faisait gagner le serveur partout, ce qui effaçait les révisions
+  // jamais arrivées en base.
   const refreshProgressFromCloud=useCallback(async username=>{
-    const remote=await supa.getProgress(username);
-    if(remote===null)return;
-    const local=storage.get(`mx6-prog-${username}`)||{};
-    if(Object.keys(remote).length===0&&Object.keys(local).length>0){
-      Object.keys(local).forEach(cardId=>{supa.upsertProgress(username,cardId,local[cardId]);});
-      return;
-    }
-    const merged={...local,...remote};
-    storage.set(`mx6-prog-${username}`,merged);
-    setProg(merged);
+    const merged=await syncProgressWithCloud(username);
+    if(merged&&PROG_ACTIVE_USER===username)setProg(merged);
   },[]);
-  const saveProg=useCallback((p,changedId)=>{
-    setProg(p);
-    if(currentUser){
-      storage.set(`mx6-prog-${currentUser.username}`,p);
-      if(changedId){supa.upsertProgress(currentUser.username,changedId,p[changedId]);}
-    }
+  // État le plus récent, même entre deux rendus (PROG_MEM est mis à jour à
+  // chaque notation, avant que React n'ait redessiné).
+  const progNow=()=>{ const u=currentUser?.username; return (u&&PROG_MEM[u])||prog; };
+  // Toute modification de progression passe par ici : horodatage, copie locale,
+  // file d'attente, envoi. changes = {cardId: entrée | null pour effacer}.
+  const commitProg=useCallback(changes=>{
+    const u=currentUser?.username;
+    if(!u)return;
+    setProg(commitProgChanges(u,changes));
   },[currentUser]);
+  const saveProg=useCallback((p,changedId)=>{
+    if(changedId)commitProg({[changedId]:p[changedId]});
+  },[commitProg]);
   const saveSet=useCallback(s=>{setSettings(s);storage.set("mx6-settings",s);},[]);
   const handleSaveCard=useCallback(cardOrCards=>{
     const isBatch=Array.isArray(cardOrCards);
@@ -9223,30 +9577,14 @@ function App(){
     // l'étudiant a éventuellement défini sur ses cartes — seule la progression de
     // révision (état FSRS) est réinitialisée. Si la case "réinitialiser aussi
     // l'ordre d'importance" est cochée, tout est effacé, y compris ce réglage.
-    const fullyDeleteIds=[]; // cartes entièrement supprimées de prog
-    const partialUpdates=[]; // {id,packetOverride} — on garde uniquement ce champ
-    setProg(prev=>{
-      const next={...prev};
-      idSet.forEach(id=>{
-        const entry=prev[id];
-        if(alsoResetPacketOrder||!entry?.packetOverride){
-          delete next[id];
-          fullyDeleteIds.push(id);
-        } else {
-          next[id]={packetOverride:entry.packetOverride};
-          partialUpdates.push({id,packetOverride:entry.packetOverride});
-        }
-      });
-      storage.set(`mx6-prog-${currentUser.username}`,next);
-      return next;
+    const cur=progNow();
+    const changes={};
+    idSet.forEach(id=>{
+      const entry=cur[id];
+      changes[id]=(alsoResetPacketOrder||!entry?.packetOverride)?null:{packetOverride:entry.packetOverride};
     });
-    try{
-      if(fullyDeleteIds.length)await supa.deleteProgressBatch(currentUser.username,fullyDeleteIds);
-      if(partialUpdates.length){
-        await Promise.all(partialUpdates.map(({id,packetOverride})=>supa.upsertProgress(currentUser.username,id,{packetOverride})));
-      }
-    }catch(e){ console.error("resetProgress persist failed:",e); }
-  },[currentUser]);
+    commitProg(changes);
+  },[currentUser,commitProg,prog]);
   // ─── Suppression de compte (étudiant) ───────────────────────────────────────
   // Efface le compte côté Supabase (accounts, user_cards, progress, daily_points,
   // profil/pseudo ; point_awards part avec le compte, par cascade) ainsi que toutes les données locales de cet utilisateur, puis
@@ -9260,12 +9598,14 @@ function App(){
     // devant des données encore en base.
     const ok=await supa.deleteMyAccount();
     if(!ok)return false;
+    await endProgressSession(username,0);
+    delete PROG_MEM[username]; delete PROG_PENDING[username];
     [
       `mx6-prog-${username}`,`mx6-stats-${username}`,`mx6-points-${username}`,
       `mx6-extra-${username}`,`mx6-integrated-${username}`,`mx6-ucache-${username}`,
       `mx6-rankprefs-${username}`,`mx6-pseudo-${username}`,
       `mx6-jplan-${username}`,`mx6-mode-${username}`,`mx6-modestats-${username}`,
-      OVR_KEY(username),
+      OVR_KEY(username),PROG_PENDING_KEY(username),
     ].forEach(k=>storage.del(k));
     // Le cache disque (images et contenu des cartes) est vidé lui aussi : rien
     // de ce compte ne doit subsister sur l'appareil après sa suppression.
@@ -9280,7 +9620,7 @@ function App(){
     await supa.upsertAccount(newAcc);
     setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);
     const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};
-    setProg({});
+    setProg(startProgressSession(newAcc.username));
     // Pseudonyme choisi à l'inscription : enregistré en local puis poussé vers
     // la table "profiles" (best-effort — si elle n'existe pas, le local suffit).
     const chosen=(newAcc.pseudo||"").trim().slice(0,PSEUDO_MAX)||defaultPseudo(newAcc.username);
@@ -9697,21 +10037,13 @@ function App(){
   // tableau de bord alors qu'elle vient d'être reproposée.
   const handleJUnsnooze=useCallback(cards=>{
     if(!cards||!cards.length)return;
-    setProg(prev=>{
-      const next={...prev};
-      let touche=false;
-      cards.forEach(c=>{
-        const e=next[c.id];
-        if(e&&e.j&&e.j.snoozeUntil){
-          const v={...e,j:{...e.j,snoozeUntil:null}};
-          next[c.id]=v; touche=true;
-          if(currentUser)supa.upsertProgress(currentUser.username,c.id,v);
-        }
-      });
-      if(touche&&currentUser)storage.set(`mx6-prog-${currentUser.username}`,next);
-      return touche?next:prev;
+    const cur=progNow(), changes={};
+    cards.forEach(c=>{
+      const e=cur[c.id];
+      if(e&&e.j&&e.j.snoozeUntil)changes[c.id]={...e,j:{...e.j,snoozeUntil:null}};
     });
-  },[currentUser]);
+    if(Object.keys(changes).length)commitProg(changes);
+  },[currentUser,commitProg,prog]);
   // ─── Lancer une session en méthode des J ────────────────────────────────────
   // La sélection est déjà filtrée par le tableau de bord (matière, cours,
   // chapitre, paquet) ; ici on ne garde que les cartes dont un J tombe, en
@@ -9733,7 +10065,7 @@ function App(){
     setView("study");
   },[prog,enrichCards]);
   const handleRate=useCallback(async(card,rating,elapsedMs=0)=>{
-    const existing=prog[card.id]||{};
+    const existing=progNow()[card.id]||{};
     // ─── Révision personnalisée ───────────────────────────────────────────────
     // Elle ne reprogramme RIEN : ni l'échéance FSRS, ni le planning de J. La note
     // n'est écrite que dans l'espace .p, qui sert au calcul du taux de maîtrise.
@@ -9774,7 +10106,7 @@ function App(){
   // Les autres gestes n'écrivent qu'un report et une trace dans l'historique :
   // l'échéance du mode Anki n'est jamais touchée.
   const handleJAction=useCallback(async(card,action,mins=0,elapsedMs=0)=>{
-    const existing=prog[card.id]||{};
+    const existing=progNow()[card.id]||{};
     const plan=jPlanFor(jplans,card.groupId,card.num,card.chapterId,effPkt(card,prog));
     const info=jDueInfo(existing,plan);
     const late=info.late||0;
@@ -9803,22 +10135,9 @@ function App(){
   const handleUndoRate=useCallback((snapshot)=>{
     if(!snapshot||!snapshot.cardId)return null;
     const {cardId,prevProg,gain,elapsedMs,wasCorrect,wasNew}=snapshot;
-    setProg(prev=>{
-      const next={...prev};
-      // prevProg vaut undefined si la carte n'avait jamais été vue : on la
-      // retire alors complètement pour qu'elle redevienne « Nouveau ».
-      if(prevProg===undefined||prevProg===null)delete next[cardId];
-      else next[cardId]=prevProg;
-      if(currentUser)storage.set(`mx6-prog-${currentUser.username}`,next);
-      return next;
-    });
-    if(currentUser){
-      if(prevProg===undefined||prevProg===null){
-        supa.deleteProgressBatch(currentUser.username,[cardId]).catch(()=>{});
-      } else {
-        supa.upsertProgress(currentUser.username,cardId,prevProg);
-      }
-    }
+    // prevProg vaut undefined si la carte n'avait jamais été vue : on la
+    // retire alors complètement pour qu'elle redevienne « Nouveau ».
+    commitProg({[cardId]:(prevProg===undefined||prevProg===null)?null:prevProg});
     let revoked=null;
     if(currentUser&&currentUser.role!=="admin"){
       revokeStat(currentUser.username,wasCorrect,elapsedMs,wasNew);
@@ -9829,7 +10148,7 @@ function App(){
       }
     }
     return revoked;
-  },[currentUser,syncDailyPoints]);
+  },[currentUser,syncDailyPoints,commitProg]);
   // ─── Enfouir une carte ────────────────────────────────────────────────────
   // Enfouir remet le niveau d'apprentissage Anki à zéro (state/step/reps/
   // lapses/intervalle/échéance/historique effacés) : quand l'étudiant la
@@ -9839,7 +10158,7 @@ function App(){
   // autres méthodes (plan de J, révision perso) et l'importance choisie
   // (packetOverride) ne sont pas concernées et sont préservées.
   const handleBury=useCallback((card)=>{
-    const existing=prog[card.id]||{};
+    const existing=progNow()[card.id]||{};
     const preserved={};
     if(existing.packetOverride)preserved.packetOverride=existing.packetOverride;
     if(existing.j)preserved.j=existing.j;
@@ -9853,7 +10172,7 @@ function App(){
     saveProg({...prog,[cardId]:rest},cardId);
   },[prog,saveProg]);
   const handleChangePacket=useCallback((card,newPktId)=>{
-    const existing=prog[card.id]||{};
+    const existing=progNow()[card.id]||{};
     if(newPktId===card.packetId){
       const {packetOverride:_,...rest}=existing;
       saveProg({...prog,[card.id]:rest},card.id);
@@ -9890,6 +10209,7 @@ function App(){
   return <>
     {renderView()}
     {needCgu&&<CguGateModal onAccepted={()=>setNeedCgu(false)} onLogout={logout}/>}
+    {currentUser&&<ProgSyncBadge username={currentUser.username}/>}
     {sessionExpired&&<SessionExpiredModal onReconnect={async()=>{ try{await sb.auth.signOut();}catch{} storage.del("mx6-session"); window.location.reload(); }}/>}
     {updateReady&&!updateDismissed&&<UpdateBanner
       pending={pendingSaves}
