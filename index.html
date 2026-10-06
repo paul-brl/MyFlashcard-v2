@@ -1362,10 +1362,9 @@ const supa = {
   // plus récent (le plus récent s'affiche en bas, comme dans une messagerie).
   getDmThread: async (studentId) => {
     try{
-      const url=cols=>`${SUPA_URL}/rest/v1/private_messages?select=${cols}&student_id=eq.${encodeURIComponent(studentId)}&order=created_at.desc&limit=500`;
-      let r=await fetch(url("id,student_id,sender_role,sender_name,body,created_at,broadcast_id"),{headers:H});
-      // Colonne broadcast_id absente (script SQL du 06/10 pas encore relancé) : on s'en passe.
-      if(r.status===400)r=await fetch(url("id,student_id,sender_role,sender_name,body,created_at"),{headers:H});
+      // broadcast_id n'est volontairement PAS lu : dans une conversation, un message
+      // envoyé à tous s'affiche exactement comme un message personnel.
+      const r=await fetch(`${SUPA_URL}/rest/v1/private_messages?select=id,student_id,sender_role,sender_name,body,created_at&student_id=eq.${encodeURIComponent(studentId)}&order=created_at.desc&limit=500`,{headers:H});
       if(!r.ok){ let t=""; try{t=await r.text();}catch{} return supa._dmMissing(r.status,t)?"missing":null; }
       const d=await r.json();
       return Array.isArray(d)?d.reverse():null;
@@ -3232,11 +3231,26 @@ function jInit(plan){
   return {startedAt,doneJ:[],nextJ:list[0],nextDate:jDateFor(startedAt,list[0]),snoozeUntil:null,finished:false,history:[]};
 }
 const jSorted=plan=>((plan&&plan.length)?[...plan]:[...J_DEFAULT]).slice().sort((a,b)=>a-b);
+// Quand le plan d'un paquet change, une carte en cours peut attendre un J qui n'en
+// fait plus partie (ex. J14 retiré alors qu'elle venait de valider son J7). On la
+// recale à la volée sur le premier J du nouveau plan qui suit son dernier J validé :
+// elle saute le J retiré. Rien n'est réécrit dans la base, c'est recalculé à chaque
+// lecture à partir du plan en vigueur — donc remettre l'ancien plan rétablit l'ancien J.
+// Les J déjà validés et l'historique ne sont jamais touchés.
+function jReconcile(st,plan){
+  if(!st||st.finished||st.nextJ==null)return st;
+  const list=jSorted(plan);
+  if(list.includes(st.nextJ))return st;
+  const lastDone=(st.doneJ&&st.doneJ.length)?Math.max(...st.doneJ):-1;
+  const nextJ=list.find(j=>j>lastDone);
+  if(nextJ===undefined)return {...st,nextJ:null,nextDate:null,finished:true};
+  return {...st,nextJ,nextDate:jDateFor(st.startedAt,nextJ)};
+}
 // Une carte encore inconnue de la méthode des J est due dès l'ouverture du mode :
 // c'est son J0. Ensuite elle l'est le jour du prochain J coché — et elle le reste
 // tant qu'elle n'a pas été validée, en s'affichant « en retard ».
 function jDueInfo(p,plan){
-  const st=jState(p);
+  const st=jReconcile(jState(p),plan);
   const today=new Date();
   if(!st) return {due:true,isNew:true,j:jSorted(plan)[0],late:0,finished:false};
   if(st.finished) return {due:false,isNew:false,j:null,late:0,finished:true};
@@ -3257,7 +3271,8 @@ const jIsDue=(p,plan)=>jDueInfo(p,plan).due&&!jSnoozed(p);
 function jAdvance(p,plan,late=0){
   const list=jSorted(plan);
   const now=new Date().toISOString();
-  const st=jState(p)||jInit(plan);
+  const st=jReconcile(jState(p)||jInit(plan),plan);
+  if(st.finished)return st;
   const cur=st.nextJ!=null?st.nextJ:list[0];
   const doneJ=[...new Set([...(st.doneJ||[]),cur])].sort((a,b)=>a-b);
   const nextJ=list.find(j=>j>cur);
@@ -3287,7 +3302,7 @@ const J_SNOOZE=[
 const PERSO_SNOOZE={1:1,2:5,3:10,4:null};
 const PERSO_SNOOZE_LABEL={1:"revient dans 1 min",2:"revient dans 5 min",3:"revient dans 10 min",4:"pas avant la prochaine session"};
 function jDelay(p,plan,mins,late=0){
-  const st=jState(p)||jInit(plan);
+  const st=jReconcile(jState(p)||jInit(plan),plan);
   const now=new Date().toISOString();
   const history=[...(st.history||[]),{date:now,j:st.nextJ,known:false,late}].slice(-60);
   // Un report ne peut jamais déborder sur le lendemain : au pire il expire à
@@ -3342,7 +3357,7 @@ function jAgenda(cardList,prog,plans,days=14){
   cardList.forEach(c=>{
     const p=prog[c.id];
     if(p?.buried)return;
-    const st=jState(p);
+    const st=jReconcile(jState(p),jPlanFor(plans,c.groupId,c.num,c.chapterId,effPkt(c,prog)));
     if(!st||st.finished||!st.nextDate)return;
     const k=dateKey(new Date(st.nextDate));
     if(idx[k]!==undefined)out[idx[k]].n++;
@@ -6880,7 +6895,6 @@ function DmThread({studentId,studentUsername,studentName,viewer,onSent,emptyText
           <div style={{display:"flex",justifyContent:mine?"flex-end":"flex-start",marginTop:sameAuthor?2:8}}>
             <div style={{maxWidth:"min(82%,560px)",background:mine?C.accent:C.surface,color:mine?"var(--c-onSolid)":C.text,border:mine?`1px solid ${C.accent}`:`1px solid ${C.border}`,borderRadius:mine?(sameAuthor?"14px 4px 4px 14px":"14px 14px 4px 14px"):(sameAuthor?"4px 14px 14px 4px":"14px 14px 14px 4px"),padding:"7px 11px 5px",opacity:m._pending?0.65:1,boxShadow:"0 1px 1px rgba(0,0,0,0.04)"}}>
               {showName&&<p style={{fontSize:11,fontWeight:700,margin:"0 0 2px",color:mine?"inherit":C.again,opacity:mine?0.85:1}}>{m.sender_name||"Équipe"} · Équipe MyFlashCard</p>}
-              {m.broadcast_id&&viewer.role==="admin"&&<p style={{fontFamily:mono,fontSize:9,letterSpacing:1,textTransform:"uppercase",margin:"0 0 3px",opacity:0.8}}>📣 Envoyé à tous les étudiants</p>}
               <p style={{fontSize:14,lineHeight:1.5,margin:0,whiteSpace:"pre-wrap",overflowWrap:"anywhere",wordBreak:"break-word"}}>{m.body}</p>
               <p style={{fontSize:10,margin:"2px 0 0",textAlign:"right",opacity:0.7}}>{m._pending?"envoi…":dmTime(m.created_at)}</p>
             </div>
