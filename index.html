@@ -1316,6 +1316,53 @@ const supa = {
   // Version allégée du forum : uniquement de quoi compter les messages non lus
   // (identifiant, auteur, date). Aucun corps de message n'est téléchargé, ce qui
   // rend cette vérification négligeable même appelée toutes les minutes.
+  // ─── Messagerie privée étudiant ↔ équipe (table « private_messages ») ──────
+  // SQL à exécuter une fois dans Supabase : voir supabase_private_messages.sql
+  // Chaque étudiant a UNE conversation, identifiée par son identifiant Auth
+  // (student_id). Les règles d'accès de la table font le tri côté serveur :
+  // un étudiant ne reçoit que sa propre conversation, un administrateur les
+  // reçoit toutes. Les fonctions renvoient « "missing" » si la table n'existe
+  // pas encore, null en cas de coupure réseau.
+  _dmMissing: (status,t) => status===404||/does not exist|42P01|PGRST205/i.test(t||""),
+  // Version légère (sans le texte des messages) : sert aux pastilles de non-lus
+  // et à la liste des conversations de l'administrateur.
+  getDmMeta: async (studentId) => {
+    try{
+      let url=`${SUPA_URL}/rest/v1/private_messages?select=id,student_id,student_username,student_name,sender_role,created_at&order=created_at.desc&limit=5000`;
+      if(studentId)url+=`&student_id=eq.${encodeURIComponent(studentId)}`;
+      const r=await fetch(url,{headers:H});
+      if(!r.ok){ let t=""; try{t=await r.text();}catch{} return supa._dmMissing(r.status,t)?"missing":null; }
+      const d=await r.json();
+      return Array.isArray(d)?d:null;
+    }catch{ return null; }
+  },
+  // Une conversation complète : les 500 derniers messages, du plus ancien au
+  // plus récent (le plus récent s'affiche en bas, comme dans une messagerie).
+  getDmThread: async (studentId) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/private_messages?select=id,student_id,sender_role,sender_name,body,created_at&student_id=eq.${encodeURIComponent(studentId)}&order=created_at.desc&limit=500`,{headers:H});
+      if(!r.ok){ let t=""; try{t=await r.text();}catch{} return supa._dmMissing(r.status,t)?"missing":null; }
+      const d=await r.json();
+      return Array.isArray(d)?d.reverse():null;
+    }catch{ return null; }
+  },
+  sendDm: async (row) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/private_messages`,{
+        method:"POST", headers:{...H,"Prefer":"return=representation"},
+        body:JSON.stringify([row]),
+      });
+      const t=await r.text();
+      if(!r.ok){
+        if(supa._dmMissing(r.status,t))return {ok:false,error:"missing"};
+        if(/Trop de messages/i.test(t))return {ok:false,error:"rate"};
+        console.error("private_messages:",r.status,t.slice(0,300));
+        return {ok:false,error:`HTTP ${r.status}`};
+      }
+      let d=null; try{ d=JSON.parse(t); }catch{}
+      return {ok:true,row:Array.isArray(d)&&d[0]?d[0]:null};
+    }catch{ return {ok:false,error:"network"}; }
+  },
   getForumMeta: async () => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts_public?select=id,user_id,created_at&order=created_at.desc&limit=500`,{headers:H});
@@ -5089,6 +5136,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
   // proposer de le classer « corrigé » dès que la carte est enregistrée.
   const [fixingReportId,setFixingReportId]=useState(null),[justEditedReport,setJustEditedReport]=useState(null);
   const [openReports,setOpenReports]=useState(0);
+  const dm=useDmUnread("admin",sbEmail());
   useEffect(()=>{ supa.getCardReports().then(d=>{ if(Array.isArray(d))setOpenReports(d.filter(r=>r.status==="open").length); }); },[]);
   const openEditor=useCallback((c,reportId=null)=>{scrollYRef.current=window.scrollY;setEditCard(c||null);setFixingReportId(reportId);setSubView("editor");},[]);
   useEffect(()=>{
@@ -5122,7 +5170,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cards.length} cartes · ${accounts.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>openEditor(null)}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0,overflowX:"auto"}}><TB id="cards" label="📚 Flashcards"/><TB id="cardreports" label="🚩 Erreurs" badge={openReports}/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements forum"/><TB id="announce" label="✉ Annonces"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0,overflowX:"auto"}}><TB id="cards" label="📚 Flashcards"/><TB id="cardreports" label="🚩 Erreurs" badge={openReports}/><TB id="messages" label="✉️ Messages" badge={dm.total}/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements forum"/><TB id="announce" label="✉ Annonces"/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cards} onNew={()=>openEditor(null)} onEdit={c=>openEditor(c)} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="cardreports"&&<AdminCardReports cards={cards} onEditCard={(c,rid)=>openEditor(c,rid)} justEdited={justEditedReport} onClearJustEdited={()=>setJustEditedReport(null)} onCountChange={setOpenReports}/>}
     {tab==="lessons"&&<AdminLessons cards={cards}/>}
@@ -5130,6 +5178,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
     {tab==="rank"&&<AdminRank/>}
     {tab==="reports"&&<AdminReports/>}
     {tab==="announce"&&<AdminAnnounce accounts={accounts}/>}
+    {tab==="messages"&&<AdminMessages accounts={accounts} dm={dm}/>}
   <Footer/>
   </div>;
 }
@@ -6355,6 +6404,7 @@ function RankTab({username,tick}){
 function ForumTab({currentUser,pseudo,onRead}){
   const isAdmin=currentUser.role==="admin";
   const [posts,setPosts]=useState(undefined); // undefined = chargement · null = table indisponible
+  const postsRef=useRef(undefined); postsRef.current=posts;
   const [body,setBody]=useState("");
   const [replyTo,setReplyTo]=useState(null);
   const [replyBody,setReplyBody]=useState("");
@@ -6383,13 +6433,34 @@ function ForumTab({currentUser,pseudo,onRead}){
     const ok=await supa.setForumPostHidden(p.id,!p.hidden);
     if(ok)setPosts(list=>Array.isArray(list)?list.map(x=>x.id===p.id?{...x,hidden:!p.hidden}:x):list);
   };
+  // Défilement façon messagerie : la liste s'ouvre sur les messages les plus
+  // récents (en bas), et suit les nouveaux messages tant qu'on est en bas.
+  const forumListRef=useRef(null),forumStick=useRef(true),forumCount=useRef(0);
+  const [forumBelow,setForumBelow]=useState(0);
+  const forumNearBottom=()=>{ const el=forumListRef.current; return !el||el.scrollHeight-el.scrollTop-el.clientHeight<140; };
+  React.useLayoutEffect(()=>{
+    const el=forumListRef.current;
+    if(!el||!Array.isArray(posts))return;
+    const added=posts.length-forumCount.current;
+    forumCount.current=posts.length;
+    if(forumStick.current){ el.scrollTop=el.scrollHeight; setForumBelow(0); }
+    else if(added>0&&forumCount.current!==added)setForumBelow(b=>b+added);
+    forumStick.current=false;
+  },[posts]);
   const load=useCallback(async()=>{
     const rows=await supa.getForumPosts(isAdmin);
+    if(rows===null&&Array.isArray(postsRef.current))return; // coupure passagère : on garde l'affichage
+    if(forumNearBottom())forumStick.current=true;
     setPosts(rows);
     // Consulter le forum marque tout comme lu — uniquement dans ce navigateur.
     if(onRead&&Array.isArray(rows))onRead(latestOtherPost(rows,sbUserId()));
   },[onRead,currentUser.username]);
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{
+    load();
+    // Les nouveaux messages arrivent tout seuls tant que l'onglet est ouvert.
+    const t=setInterval(()=>{ if(document.visibilityState!=="hidden")load(); },30000);
+    return()=>clearInterval(t);
+  },[load]);
   const nameColor=role=>role==="admin"?C.again:C.easy;
   const submit=async(text,parentId)=>{
     const trimmed=(text||"").trim();
@@ -6403,6 +6474,7 @@ function ForumTab({currentUser,pseudo,onRead}){
         body:trimmed,
         parent_id:parentId||null,
       });
+      forumStick.current=true;
       if(created)setPosts(p=>Array.isArray(p)?[...p,created]:[created]);
       else await load();
       if(parentId){setReplyBody("");setReplyTo(null);} else {setBody("");}
@@ -6473,21 +6545,18 @@ function ForumTab({currentUser,pseudo,onRead}){
     </div>}
     {!isReply&&(repliesOf[p.id]||[]).map(r=><React.Fragment key={r.id}>{renderPost(r,true)}</React.Fragment>)}
   </div>;
+  // ─── Affichage façon messagerie ───────────────────────────────────────────
+  // Les discussions sont rangées de la plus ancienne (en haut) à la plus récente
+  // (en bas), et la zone de saisie est en bas, comme sur WhatsApp. Une discussion
+  // qui reçoit une nouvelle réponse redescend en bas : le message le plus récent
+  // du forum est donc toujours en bas, juste au-dessus de la saisie.
+  const lastActivity=p=>(repliesOf[p.id]||[]).reduce((m,r)=>Math.max(m,dmTs(r.created_at)),dmTs(p.created_at));
+  const threads=[...topLevel].sort((a,b)=>lastActivity(a)-lastActivity(b));
   return <div style={{animation:"fadeIn 0.18s ease"}}>
     <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Forum</p>
-    <p style={{fontSize:13,color:C.textMed,margin:"0 0 20px"}}>Espace d'échange commun à tous les utilisateurs de MyFlashCard.</p>
-    <div style={{background:C.impBg,border:`1px solid var(--c-goldSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:20}}>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 14px"}}>Espace d'échange commun à tous les utilisateurs de MyFlashCard.</p>
+    <div style={{background:C.impBg,border:`1px solid var(--c-goldSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:14}}>
       <p style={{fontSize:12,color:C.imp,margin:0,lineHeight:1.6}}>Les messages ci-dessous sont publiés par des étudiants. Ce ne sont pas des réponses pédagogiques officielles de MyFlashCard et ils peuvent contenir des erreurs.</p>
-    </div>
-    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"16px 18px",marginBottom:20}}>
-      <p style={{fontSize:12,color:C.textLt,margin:"0 0 8px"}}>Tu postes sous le pseudo : <strong style={{color:nameColor(isAdmin?"admin":"student")}}>{pseudo||defaultPseudo(currentUser.username)}</strong> {isAdmin&&<span style={{color:C.textLt}}>(modifiable dans Réglages → Profil)</span>}</p>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        <textarea style={{...iBox,flex:"1 1 260px",minHeight:60}} placeholder="Pose ta question ou partage quelque chose avec la communauté…" value={body} onChange={e=>setBody(e.target.value)} rows={2}/>
-        <Btn fill onClick={()=>submit(body,null)} disabled={!body.trim()||posting} style={{alignSelf:"flex-end"}}>{posting?"Envoi…":"Publier"}</Btn>
-      </div>
-      {err&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{err}</p>}
-      {reportDone&&<p style={{fontSize:12,color:C.good,margin:"8px 0 0"}}>✓ Signalement transmis aux administrateurs. Merci.</p>}
-      <p style={{fontSize:11,color:C.textLt,margin:"10px 0 0",lineHeight:1.6}}>En publiant, tu acceptes de respecter les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>CGU MyFlashCard</a>. Ne publie pas de données personnelles sensibles ni de contenu illicite ou portant atteinte aux droits d'autrui.</p>
     </div>
     {posts===undefined?(
       <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Chargement du forum…</p>
@@ -6496,13 +6565,26 @@ function ForumTab({currentUser,pseudo,onRead}){
         <p style={{fontSize:13,color:C.textMed,margin:"0 0 10px",lineHeight:1.6}}>⚠️ Le forum n'est pas encore disponible : la table <code style={{fontFamily:mono,fontSize:11,background:"var(--c-chipBg)",padding:"1px 5px",borderRadius:4}}>forum_posts</code> n'existe pas encore dans Supabase.</p>
         <p style={{fontSize:11,color:C.textLt,margin:0,lineHeight:1.6}}>À créer une fois dans l'éditeur SQL Supabase — voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_forum_posts.sql</code>.</p>
       </div>
-    ):topLevel.length===0?(
-      <p style={{fontSize:13,color:C.textLt,padding:"24px 0",textAlign:"center"}}>Aucun message pour l'instant — sois le premier à écrire !</p>
     ):(
-      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"0 18px"}}>
-        {[...topLevel].reverse().map(p=><React.Fragment key={p.id}>{renderPost(p,false)}</React.Fragment>)}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",position:"relative"}}>
+        <div ref={forumListRef} onScroll={()=>{ if(forumBelow&&forumNearBottom())setForumBelow(0); }} style={{maxHeight:"min(62vh,680px)",overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch",padding:"0 18px"}}>
+          {threads.length===0
+            ?<p style={{fontSize:13,color:C.textLt,padding:"40px 0",textAlign:"center",margin:0}}>Aucun message pour l'instant — sois le premier à écrire !</p>
+            :threads.map(p=><React.Fragment key={p.id}>{renderPost(p,false)}</React.Fragment>)}
+        </div>
+        {forumBelow>0&&<button onClick={()=>{const el=forumListRef.current;if(el)el.scrollTo({top:el.scrollHeight,behavior:"smooth"});setForumBelow(0);}} style={{position:"absolute",right:16,bottom:12,fontFamily:font,fontSize:11.5,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:16,border:`1.5px solid ${C.accent}`,background:C.surface,color:C.accent,boxShadow:"0 3px 10px rgba(0,0,0,0.12)"}}>↓ Nouveaux messages</button>}
       </div>
     )}
+    {posts!==null&&<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 14px",marginTop:10}}>
+      <p style={{fontSize:12,color:C.textLt,margin:"0 0 8px"}}>Tu postes sous le pseudo : <strong style={{color:nameColor(isAdmin?"admin":"student")}}>{pseudo||defaultPseudo(currentUser.username)}</strong> {isAdmin&&<span style={{color:C.textLt}}>(modifiable dans Réglages → Profil)</span>}</p>
+      <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+        <textarea style={{...iBox,flex:1,minHeight:44}} placeholder="Pose ta question ou partage quelque chose avec la communauté…" value={body} onChange={e=>setBody(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();submit(body,null);}}} rows={2}/>
+        <Btn fill onClick={()=>submit(body,null)} disabled={!body.trim()||posting}>{posting?"Envoi…":"Publier"}</Btn>
+      </div>
+      {err&&<p style={{fontSize:12,color:C.again,margin:"8px 0 0"}}>{err}</p>}
+      {reportDone&&<p style={{fontSize:12,color:C.good,margin:"8px 0 0"}}>✓ Signalement transmis aux administrateurs. Merci.</p>}
+      <p style={{fontSize:11,color:C.textLt,margin:"10px 0 0",lineHeight:1.6}}>En publiant, tu acceptes de respecter les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>CGU MyFlashCard</a>. Ne publie pas de données personnelles sensibles ni de contenu illicite ou portant atteinte aux droits d'autrui.</p>
+    </div>}
         {reportFor&&<Modal onClose={()=>setReportFor(null)} width={420}>
       <p style={{fontFamily:serif,fontSize:20,margin:"0 0 6px"}}>Signaler ce message</p>
       <p style={{fontSize:12,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Le message et son auteur sont transmis aux administrateurs, qui décideront de la suite. Aucune sanction n'est automatique.</p>
@@ -6524,6 +6606,353 @@ function ForumTab({currentUser,pseudo,onRead}){
         <Btn full onClick={()=>setReportFor(null)}>Annuler</Btn>
       </div>
     </Modal>}
+  </div>;
+}
+// ══════════════════════════════════════════════════════════════════════════════
+// ─── MESSAGERIE PRIVÉE ÉTUDIANT ↔ ÉQUIPE ─────────────────────────────────────
+// Chaque étudiant a une conversation privée avec l'équipe. Tous les
+// administrateurs voient toutes les conversations et peuvent y répondre ; un
+// étudiant ne voit que la sienne (garanti par les règles d'accès Supabase, pas
+// seulement par l'affichage).
+//
+// Notifications : même principe que le forum. La date du dernier message lu est
+// gardée dans le navigateur, et la pastille compte les messages plus récents
+// écrits par l'autre côté. Côté administrateur, cette date est gardée
+// conversation par conversation.
+const DM_MAX=4000;
+const DM_POLL_THREAD=8000;   // conversation ouverte : nouveaux messages toutes les 8 s
+const DM_POLL_META=30000;    // pastilles : toutes les 30 s
+const dmTs=iso=>{ const t=Date.parse(iso||""); return isNaN(t)?0:t; };
+const dmSeenKey=u=>`mfc-dm-seen-${u}`;
+const dmAdminSeenKey=u=>`mfc-dm-adminseen-${u}`;
+const dmNotify=()=>{ try{ window.dispatchEvent(new CustomEvent("mfc-dm-read")); }catch{} };
+const getDmSeen=u=>{ try{ return localStorage.getItem(dmSeenKey(u))||""; }catch{ return ""; } };
+const setDmSeen=(u,iso)=>{
+  if(!u||!iso)return;
+  if(dmTs(iso)>dmTs(getDmSeen(u))){ try{ localStorage.setItem(dmSeenKey(u),iso); }catch{} dmNotify(); }
+};
+const getDmAdminSeen=u=>{ try{ const v=localStorage.getItem(dmAdminSeenKey(u)); return v?JSON.parse(v):null; }catch{ return null; } };
+const markDmAdminSeen=(u,studentId,iso)=>{
+  if(!u||!studentId||!iso)return;
+  const m=getDmAdminSeen(u)||{__base:new Date().toISOString()};
+  if(dmTs(iso)>dmTs(m[studentId])){ m[studentId]=iso; try{ localStorage.setItem(dmAdminSeenKey(u),JSON.stringify(m)); }catch{} dmNotify(); }
+};
+// Messages non lus. Étudiant : messages de l'équipe. Administrateur : messages
+// d'étudiants, détaillés conversation par conversation.
+function dmUnreadFor(rows,role,username){
+  if(role==="admin"){
+    const fromStudents=rows.filter(r=>r.sender_role==="student");
+    let map=getDmAdminSeen(username);
+    if(!map){
+      // Tout premier passage sur cet appareil : l'historique n'est pas compté
+      // comme « non lu », seulement ce qui arrive à partir de maintenant.
+      const latest=fromStudents.reduce((m,r)=>Math.max(m,dmTs(r.created_at)),0);
+      map={__base:new Date(latest||Date.now()).toISOString()};
+      try{ localStorage.setItem(dmAdminSeenKey(username),JSON.stringify(map)); }catch{}
+    }
+    const base=dmTs(map.__base), by={};
+    let total=0;
+    fromStudents.forEach(r=>{
+      if(dmTs(r.created_at)>Math.max(base,dmTs(map[r.student_id]))){ by[r.student_id]=(by[r.student_id]||0)+1; total++; }
+    });
+    return {total,by};
+  }
+  const seen=dmTs(getDmSeen(username));
+  return {total:rows.filter(r=>r.sender_role==="admin"&&dmTs(r.created_at)>seen).length,by:{}};
+}
+// Pastilles de notification : relues toutes les 30 s, au retour sur l'onglet,
+// et recalculées aussitôt qu'une conversation est lue.
+function useDmUnread(role,username){
+  const [st,setSt]=useState({total:0,by:{},rows:undefined});
+  const rowsRef=useRef(undefined);
+  const recompute=useCallback(()=>{
+    const rows=rowsRef.current;
+    if(!Array.isArray(rows)||!username)return;
+    setSt({...dmUnreadFor(rows,role,username),rows});
+  },[role,username]);
+  const refresh=useCallback(async()=>{
+    if(!username)return;
+    const uid=sbUserId(); if(!uid)return;
+    const res=await supa.getDmMeta(role==="admin"?null:uid);
+    if(res==="missing"){ rowsRef.current="missing"; setSt({total:0,by:{},rows:"missing"}); return; }
+    if(!Array.isArray(res))return; // coupure réseau : on garde l'état précédent
+    rowsRef.current=res; recompute();
+  },[role,username,recompute]);
+  useEffect(()=>{
+    refresh();
+    const t=setInterval(()=>{ if(document.visibilityState!=="hidden")refresh(); },DM_POLL_META);
+    const onVis=()=>{ if(document.visibilityState==="visible")refresh(); };
+    window.addEventListener("mfc-dm-read",recompute);
+    document.addEventListener("visibilitychange",onVis);
+    return()=>{ clearInterval(t); window.removeEventListener("mfc-dm-read",recompute); document.removeEventListener("visibilitychange",onVis); };
+  },[refresh,recompute]);
+  return {...st,refresh};
+}
+function UnreadDot({n,color}){
+  if(!n)return null;
+  return <span title={`${n} message${n>1?"s":""} non lu${n>1?"s":""}`} style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:color||C.again,color:"var(--c-onSolid)",lineHeight:1.6}}>{n>99?"99+":n}</span>;
+}
+const dmDayLabel=iso=>{
+  const d=new Date(iso), diff=Math.round((startOfDay(new Date())-startOfDay(d))/86400000);
+  if(diff===0)return "Aujourd'hui";
+  if(diff===1)return "Hier";
+  return d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",...(diff>300?{year:"numeric"}:{})});
+};
+const dmTime=iso=>{ try{ return new Date(iso).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}); }catch{ return ""; } };
+const dmShort=iso=>{
+  const d=new Date(iso), diff=Math.round((startOfDay(new Date())-startOfDay(d))/86400000);
+  if(diff===0)return dmTime(iso);
+  if(diff===1)return "Hier";
+  return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"});
+};
+const dmSort=list=>[...list].sort((a,b)=>dmTs(a.created_at)-dmTs(b.created_at));
+// ─── Une conversation ─────────────────────────────────────────────────────────
+// Le plus récent en bas, saisie en bas, défilement automatique vers le dernier
+// message — sauf si l'on est remonté lire l'historique : dans ce cas, un nouveau
+// message ne fait pas sauter l'écran, un bouton propose de redescendre.
+function DmThread({studentId,studentUsername,studentName,viewer,onSent,emptyText}){
+  const mineRole=viewer.role==="admin"?"admin":"student";
+  const [msgs,setMsgs]=useState(undefined); // undefined = chargement · "missing" = table absente
+  const [text,setText]=useState(""),[sending,setSending]=useState(false),[err,setErr]=useState("");
+  const [below,setBelow]=useState(0); // nouveaux messages arrivés pendant qu'on lisait plus haut
+  const listRef=useRef(null),taRef=useRef(null);
+  const stickRef=useRef(true),sendingRef=useRef(false),countRef=useRef(0);
+  const coarse=useMemo(()=>{ try{ return window.matchMedia("(pointer:coarse)").matches; }catch{ return false; } },[]);
+  const nearBottom=()=>{ const el=listRef.current; return !el||el.scrollHeight-el.scrollTop-el.clientHeight<140; };
+  const load=useCallback(async()=>{
+    if(sendingRef.current)return;
+    const rows=await supa.getDmThread(studentId);
+    if(rows==="missing"){ setMsgs("missing"); return; }
+    if(!Array.isArray(rows)){ setMsgs(prev=>prev===undefined?[]:prev); return; }
+    if(nearBottom())stickRef.current=true;
+    setMsgs(prev=>{
+      const pend=Array.isArray(prev)?prev.filter(m=>m._pending):[];
+      return [...rows,...pend];
+    });
+  },[studentId]);
+  useEffect(()=>{
+    setMsgs(undefined); stickRef.current=true; countRef.current=0; setBelow(0); setErr("");
+    load();
+    const t=setInterval(()=>{ if(document.visibilityState!=="hidden")load(); },DM_POLL_THREAD);
+    const onVis=()=>{ if(document.visibilityState==="visible")load(); };
+    document.addEventListener("visibilitychange",onVis);
+    return()=>{ clearInterval(t); document.removeEventListener("visibilitychange",onVis); };
+  },[load]);
+  // Défilement : en bas au chargement, à l'envoi, et à l'arrivée d'un message
+  // si l'on était déjà en bas.
+  React.useLayoutEffect(()=>{
+    const el=listRef.current;
+    if(!el||!Array.isArray(msgs))return;
+    const added=msgs.length-countRef.current;
+    countRef.current=msgs.length;
+    if(stickRef.current){ el.scrollTop=el.scrollHeight; setBelow(0); }
+    else if(added>0)setBelow(b=>b+added);
+    stickRef.current=false;
+  },[msgs]);
+  // Lire la conversation, c'est marquer comme lus les messages de l'autre côté.
+  useEffect(()=>{
+    if(!Array.isArray(msgs)||document.visibilityState==="hidden")return;
+    const others=msgs.filter(m=>m.sender_role!==mineRole&&!m._pending);
+    if(!others.length)return;
+    const latest=others[others.length-1].created_at;
+    if(viewer.role==="admin")markDmAdminSeen(viewer.username,studentId,latest);
+    else setDmSeen(viewer.username,latest);
+  },[msgs]);
+  // La zone de saisie grandit avec le texte (jusqu'à environ 6 lignes).
+  useEffect(()=>{
+    const ta=taRef.current; if(!ta)return;
+    ta.style.height="auto";
+    ta.style.height=Math.min(ta.scrollHeight,150)+"px";
+  },[text]);
+  const send=async()=>{
+    const body=text.trim();
+    if(!body||sending)return;
+    if(body.length>DM_MAX){ setErr(`Message trop long (${body.length}/${DM_MAX} caractères).`); return; }
+    setSending(true); sendingRef.current=true; setErr("");
+    const tmp={id:`tmp-${Date.now()}`,student_id:studentId,sender_role:mineRole,sender_name:viewer.name,body,created_at:new Date().toISOString(),_pending:true};
+    stickRef.current=true;
+    setMsgs(m=>[...(Array.isArray(m)?m:[]),tmp]);
+    setText("");
+    const res=await supa.sendDm({
+      student_id:studentId, student_username:studentUsername||null, student_name:studentName||null,
+      sender_id:sbUserId(), sender_role:mineRole, sender_name:viewer.name||null, body,
+    });
+    if(res.ok){
+      const row=res.row||{...tmp,_pending:false};
+      stickRef.current=true;
+      setMsgs(m=>dmSort((Array.isArray(m)?m:[]).filter(x=>x.id!==tmp.id&&x.id!==row.id).concat(row)));
+      if(onSent)onSent();
+    } else {
+      setMsgs(m=>(Array.isArray(m)?m:[]).filter(x=>x.id!==tmp.id));
+      setText(body);
+      setErr(res.error==="rate"?"Tu as envoyé beaucoup de messages d'un coup. Patiente quelques minutes avant de réessayer."
+        :res.error==="missing"?"La messagerie n'est pas encore activée."
+        :"Le message n'est pas parti. Vérifie ta connexion et réessaie.");
+    }
+    sendingRef.current=false; setSending(false);
+    setTimeout(()=>{ try{ taRef.current&&taRef.current.focus(); }catch{} },0);
+  };
+  const toBottom=()=>{ const el=listRef.current; if(el)el.scrollTo({top:el.scrollHeight,behavior:"smooth"}); setBelow(0); };
+  const onScroll=()=>{ if(below&&nearBottom())setBelow(0); };
+  if(msgs==="missing")return <div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"22px",background:C.surface}}>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 6px",lineHeight:1.6}}>⚠️ La messagerie n'est pas encore disponible.</p>
+    {viewer.role==="admin"&&<p style={{fontSize:11,color:C.textLt,margin:0,lineHeight:1.6}}>La table <code style={{fontFamily:mono,fontSize:10}}>private_messages</code> est à créer une fois dans l'éditeur SQL Supabase — voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_private_messages.sql</code>.</p>}
+  </div>;
+  const list=Array.isArray(msgs)?msgs:[];
+  return <div style={{display:"flex",flexDirection:"column",height:"min(68vh,640px)",minHeight:340,background:C.bg,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",position:"relative"}}>
+    <div ref={listRef} onScroll={onScroll} style={{flex:1,overflowY:"auto",overscrollBehavior:"contain",WebkitOverflowScrolling:"touch",padding:"10px 12px 14px"}}>
+      {msgs===undefined?(
+        <p style={{fontSize:12,color:C.textLt,textAlign:"center",margin:"40px 0"}}>Chargement de la conversation…</p>
+      ):list.length===0?(
+        <div style={{height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",padding:"0 20px"}}>
+          <p style={{fontSize:30,margin:"0 0 8px"}}>💬</p>
+          <p style={{fontSize:13,color:C.textMed,margin:0,lineHeight:1.65,maxWidth:360}}>{emptyText||"Aucun message pour l'instant."}</p>
+        </div>
+      ):list.map((m,i)=>{
+        const prev=list[i-1];
+        const mine=m.sender_role===mineRole;
+        const newDay=!prev||startOfDay(new Date(prev.created_at)).getTime()!==startOfDay(new Date(m.created_at)).getTime();
+        const sameAuthor=prev&&!newDay&&prev.sender_role===m.sender_role&&(prev.sender_name||"")===(m.sender_name||"")&&dmTs(m.created_at)-dmTs(prev.created_at)<5*60000;
+        // Le nom n'est affiché que sur les messages de l'équipe : l'étudiant sait
+        // qui lui répond, et les administrateurs savent lequel d'entre eux a écrit.
+        const showName=m.sender_role==="admin"&&!sameAuthor;
+        return <React.Fragment key={m.id}>
+          {newDay&&<div style={{display:"flex",justifyContent:"center",margin:i?"14px 0 6px":"2px 0 6px"}}>
+            <span style={{fontFamily:mono,fontSize:9.5,letterSpacing:1,textTransform:"uppercase",color:C.textLt,background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"3px 10px"}}>{dmDayLabel(m.created_at)}</span>
+          </div>}
+          <div style={{display:"flex",justifyContent:mine?"flex-end":"flex-start",marginTop:sameAuthor?2:8}}>
+            <div style={{maxWidth:"min(82%,560px)",background:mine?C.accent:C.surface,color:mine?"var(--c-onSolid)":C.text,border:mine?`1px solid ${C.accent}`:`1px solid ${C.border}`,borderRadius:mine?(sameAuthor?"14px 4px 4px 14px":"14px 14px 4px 14px"):(sameAuthor?"4px 14px 14px 4px":"14px 14px 14px 4px"),padding:"7px 11px 5px",opacity:m._pending?0.65:1,boxShadow:"0 1px 1px rgba(0,0,0,0.04)"}}>
+              {showName&&<p style={{fontSize:11,fontWeight:700,margin:"0 0 2px",color:mine?"inherit":C.again,opacity:mine?0.85:1}}>{m.sender_name||"Équipe"} · Équipe MyFlashCard</p>}
+              <p style={{fontSize:14,lineHeight:1.5,margin:0,whiteSpace:"pre-wrap",overflowWrap:"anywhere",wordBreak:"break-word"}}>{m.body}</p>
+              <p style={{fontSize:10,margin:"2px 0 0",textAlign:"right",opacity:0.7}}>{m._pending?"envoi…":dmTime(m.created_at)}</p>
+            </div>
+          </div>
+        </React.Fragment>;
+      })}
+    </div>
+    {below>0&&<button onClick={toBottom} style={{position:"absolute",right:14,bottom:72,fontFamily:font,fontSize:11.5,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:16,border:`1.5px solid ${C.accent}`,background:C.surface,color:C.accent,boxShadow:"0 3px 10px rgba(0,0,0,0.12)"}}>↓ {below} nouveau{below>1?"x":""} message{below>1?"s":""}</button>}
+    {err&&<p style={{fontSize:12,color:C.again,background:C.againBg,margin:0,padding:"7px 12px",borderTop:`1px solid ${C.border}`}}>{err}</p>}
+    <div style={{borderTop:`1px solid ${C.border}`,background:C.surface,padding:"8px 10px",display:"flex",gap:8,alignItems:"flex-end"}}>
+      <textarea ref={taRef} rows={1} value={text} maxLength={DM_MAX+200}
+        onChange={e=>{setText(e.target.value);setErr("");}}
+        onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey&&!coarse&&!(e.nativeEvent&&e.nativeEvent.isComposing)){ e.preventDefault(); send(); } }}
+        placeholder="Écris ton message…"
+        style={{flex:1,fontFamily:font,fontSize:14,lineHeight:1.45,color:C.text,background:C.bg,border:`1.5px solid ${C.border}`,borderRadius:18,padding:"8px 14px",resize:"none",outline:"none",maxHeight:150,overflowY:"auto"}}/>
+      <button onClick={send} disabled={!text.trim()||sending} aria-label="Envoyer" title={coarse?"Envoyer":"Envoyer (Entrée) — Maj+Entrée pour aller à la ligne"}
+        style={{width:38,height:38,flexShrink:0,borderRadius:"50%",border:"none",cursor:text.trim()&&!sending?"pointer":"default",background:text.trim()&&!sending?C.accent:C.border,color:"var(--c-onSolid)",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>➤</button>
+    </div>
+  </div>;
+}
+// ─── Onglet « Messages » de l'étudiant ───────────────────────────────────────
+function MessagesTab({currentUser,pseudo,onSent}){
+  const uid=sbUserId();
+  const name=pseudo||defaultPseudo(currentUser.username);
+  return <div style={{animation:"fadeIn 0.18s ease"}}>
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>Messages</p>
+    <p style={{fontSize:13,color:C.textMed,margin:"0 0 16px",lineHeight:1.6}}>Ta conversation privée avec l'équipe MyFlashCard. Seuls toi et les administrateurs pouvez la lire.</p>
+    {!uid
+      ?<p style={{fontSize:13,color:C.textLt}}>Reconnecte-toi pour accéder à tes messages.</p>
+      :<DmThread studentId={uid} studentUsername={currentUser.username} studentName={name}
+          viewer={{role:"student",username:currentUser.username,name}} onSent={onSent}
+          emptyText="Une question sur une carte, ton abonnement ou ta façon de réviser ? Écris-nous ici : l'équipe te répond dans cette conversation."/>}
+  </div>;
+}
+// ─── Espace admin · toutes les conversations ─────────────────────────────────
+function AdminMessages({accounts,dm}){
+  const me=sbEmail();
+  const myName=getPseudo(me);
+  const [sel,setSel]=useState(null); // {studentId, username, name}
+  const [q,setQ]=useState("");
+  const rows=dm.rows;
+  const convs=useMemo(()=>{
+    if(!Array.isArray(rows))return [];
+    const m={};
+    rows.forEach(r=>{ // du plus récent au plus ancien
+      let c=m[r.student_id];
+      if(!c)c=m[r.student_id]={studentId:r.student_id,username:r.student_username||"",name:"",last:r.created_at,lastRole:r.sender_role,count:0};
+      c.count++;
+      if(!c.name&&r.student_name)c.name=r.student_name;
+      if(!c.username&&r.student_username)c.username=r.student_username;
+    });
+    return Object.values(m).sort((a,b)=>dmTs(b.last)-dmTs(a.last));
+  },[rows]);
+  const convIds=useMemo(()=>new Set(convs.map(c=>c.studentId)),[convs]);
+  const needle=q.trim();
+  const shownConvs=needle
+    ?convs.filter(c=>studentMatch({username:c.username,phone:""},needle)!==null||normSearch(c.name).includes(normSearch(needle)))
+    :convs;
+  // Rechercher un étudiant qui n'a encore jamais écrit permet de lui envoyer
+  // le premier message.
+  const starters=needle
+    ?(accounts||[]).filter(a=>a.user_id&&!convIds.has(a.user_id))
+        .map(a=>({a,sc:studentMatch(a,needle)})).filter(x=>x.sc!==null)
+        .sort((x,y)=>x.sc-y.sc).slice(0,8).map(x=>x.a)
+    :[];
+  const waiting=convs.filter(c=>c.lastRole==="student").length;
+  const nameOf=c=>c.name||defaultPseudo(c.username)||"Étudiant";
+  const open=c=>setSel({studentId:c.studentId,username:c.username,name:nameOf(c)});
+  const Row=({c,isNew})=>{
+    const unread=isNew?0:(dm.by[c.studentId]||0);
+    const active=sel&&sel.studentId===c.studentId;
+    return <button onClick={()=>open(c)} style={{width:"100%",textAlign:"left",display:"flex",gap:10,alignItems:"center",padding:"10px 14px",border:"none",borderTop:`1px solid ${C.border}`,background:active?C.accentBg:"transparent",cursor:"pointer",fontFamily:font,color:C.text}}>
+      <div style={{flex:1,minWidth:0}}>
+        <p style={{fontSize:13,fontWeight:unread?700:600,margin:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:active?C.accent:C.text}}>{nameOf(c)}</p>
+        <p style={{fontSize:11,color:C.textLt,margin:"1px 0 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{needle?highlightMatch(c.username,needle):c.username}</p>
+        {!isNew&&<p style={{fontSize:10.5,margin:"3px 0 0",color:c.lastRole==="student"?C.imp:C.textLt}}>{c.lastRole==="student"?"⏳ En attente de réponse":"✓ Répondu"} · {dmShort(c.last)}</p>}
+      </div>
+      {isNew?<span style={{fontSize:10.5,color:C.accent,whiteSpace:"nowrap"}}>Écrire →</span>:<UnreadDot n={unread}/>}
+    </button>;
+  };
+  if(rows==="missing")return <div style={{maxWidth:700,margin:"0 auto",padding:24}}>
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 10px"}}>Messages privés</p>
+    <div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"20px",background:C.surface}}>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 6px"}}>⚠️ La table <code style={{fontFamily:mono,fontSize:11}}>private_messages</code> n'existe pas encore.</p>
+      <p style={{fontSize:11,color:C.textLt,margin:0}}>À créer une fois dans l'éditeur SQL Supabase — voir le fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_private_messages.sql</code>.</p>
+    </div>
+  </div>;
+  return <div style={{maxWidth:1000,margin:"0 auto",padding:"20px 16px"}}>
+    <style>{`.mfc-dm-grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;align-items:start}
+.mfc-dm-back{display:none}
+@media (max-width:760px){.mfc-dm-grid{grid-template-columns:minmax(0,1fr)}.mfc-dm-grid[data-open="1"] .mfc-dm-list{display:none}.mfc-dm-grid[data-open="0"] .mfc-dm-pane{display:none}.mfc-dm-back{display:inline-flex}}`}</style>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:4}}>
+      <p style={{fontFamily:serif,fontSize:18,margin:0}}>Messages privés</p>
+      <p style={{fontFamily:mono,fontSize:10.5,color:C.textLt,margin:0}}>{convs.length} conversation{convs.length>1?"s":""}{waiting?` · ${waiting} en attente`:""}</p>
+    </div>
+    <p style={{fontSize:12,color:C.textMed,margin:"0 0 14px",lineHeight:1.6}}>Chaque étudiant a sa conversation avec l'équipe. Tous les administrateurs voient toutes les conversations ; tes réponses apparaissent sous ton pseudo <strong>{myName}</strong>.</p>
+    <div className="mfc-dm-grid" data-open={sel?"1":"0"}>
+      <div className="mfc-dm-list" style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:10}}>
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Chercher un étudiant…" autoComplete="off" spellCheck={false}
+            style={{width:"100%",boxSizing:"border-box",fontFamily:font,fontSize:13,padding:"8px 12px",borderRadius:8,border:`1.5px solid ${q?C.accent:C.border}`,background:C.bg,color:C.text,outline:"none"}}/>
+        </div>
+        <div style={{maxHeight:"min(62vh,600px)",overflowY:"auto"}}>
+          {rows===undefined&&<p style={{fontSize:12,color:C.textLt,textAlign:"center",padding:"16px 0",margin:0}}>Chargement…</p>}
+          {Array.isArray(rows)&&shownConvs.length===0&&!starters.length&&<p style={{fontSize:12,color:C.textLt,textAlign:"center",padding:"16px 12px",margin:0,lineHeight:1.6}}>{needle?`Aucun étudiant ne correspond à « ${needle} ».`:"Aucune conversation pour l'instant. Cherche un étudiant pour lui écrire."}</p>}
+          {shownConvs.map(c=><Row key={c.studentId} c={c}/>)}
+          {starters.length>0&&<>
+            <p style={{fontFamily:mono,fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:C.textLt,margin:0,padding:"10px 14px 4px",borderTop:`1px solid ${C.border}`}}>Démarrer une conversation</p>
+            {starters.map(a=><Row key={a.user_id} isNew c={{studentId:a.user_id,username:a.username,name:"",last:null,lastRole:null}}/>)}
+          </>}
+        </div>
+      </div>
+      <div className="mfc-dm-pane" style={{minWidth:0}}>
+        {sel?<>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+            <button className="mfc-dm-back" onClick={()=>setSel(null)} style={{fontFamily:font,fontSize:12,padding:"6px 10px",cursor:"pointer",borderRadius:6,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,alignItems:"center",gap:4}}>← Conversations</button>
+            <div style={{minWidth:0}}>
+              <p style={{fontFamily:serif,fontSize:16,margin:0}}>{sel.name}</p>
+              <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis"}}>{sel.username}</p>
+            </div>
+          </div>
+          <DmThread key={sel.studentId} studentId={sel.studentId} studentUsername={sel.username} studentName={sel.name}
+            viewer={{role:"admin",username:me,name:myName}} onSent={dm.refresh}
+            emptyText={`Aucun message avec ${sel.name} pour l'instant. Ton message apparaîtra dans son onglet « Messages », avec une notification.`}/>
+        </>:<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"60px 24px",textAlign:"center",background:C.surface}}>
+          <p style={{fontSize:30,margin:"0 0 8px"}}>💬</p>
+          <p style={{fontSize:13,color:C.textMed,margin:0}}>Choisis une conversation à gauche.</p>
+        </div>}
+      </div>
+    </div>
   </div>;
 }
 // ─── Signalements (espace administrateur) ─────────────────────────────────────
@@ -7780,6 +8209,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
   // étudiant qui découvre le forum ne voit donc pas surgir des dizaines de
   // « non lus » historiques, seulement ce qui arrive à partir de maintenant.
   const [forumUnread,setForumUnread]=useState(0);
+  // Messagerie privée : pastille des messages non lus (étudiant comme admin).
+  const dm=useDmUnread(currentUser.role,currentUser.username);
   const [forumLatest,setForumLatest]=useState("");
   const refreshForumUnread=useCallback(async()=>{
     const meta=await supa.getForumMeta();
@@ -7955,7 +8386,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
     <PaymentBanner status={paymentStatus} onClose={onClosePaymentBanner}/>
     <div style={{position:"sticky",top:0,zIndex:20}}>
     {!isAdmin&&promoShowFor(promo,currentUser.plan?.planId,fullGroups)&&<PromoPricesBanner planId={currentUser.plan?.planId} fullGroups={fullGroups} onSeeOffer={()=>setShowUpgrade(true)}/>}
-    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<span style={{fontFamily:serif,fontSize:20}}>MyFlashcard</span>} center="Tableau de bord" right={<><Btn small onClick={onSettings}>Paramètres</Btn>{isAdmin&&<Btn small onClick={onAdmin}>Admin</Btn>}<button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",color:C.textLt,cursor:"pointer"}}>Déconnexion</button></>}/>
+    <Nav theme={theme} onToggleTheme={onToggleTheme} left={<span style={{fontFamily:serif,fontSize:20}}>MyFlashcard</span>} center="Tableau de bord" right={<><Btn small onClick={onSettings}>Paramètres</Btn>{isAdmin&&<Btn small onClick={onAdmin} title={dm.total>0?`${dm.total} message${dm.total>1?"s":""} privé${dm.total>1?"s":""} non lu${dm.total>1?"s":""}`:undefined}>Admin<UnreadDot n={dm.total}/></Btn>}<button onClick={onLogout} style={{fontFamily:font,fontSize:12,background:"none",border:"none",color:C.textLt,cursor:"pointer"}}>Déconnexion</button></>}/>
     </div>
     <div className="mfc-page" style={{maxWidth:760,margin:"0 auto",padding:"28px 24px"}}>
       <div className="mfc-planbar" style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 18px",marginBottom:20,flexWrap:"wrap",gap:12}}>
@@ -8008,8 +8439,11 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
         {!isAdmin&&<button onClick={()=>setActiveTab("stats")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="stats"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="stats"?C.accent:C.border}`,background:activeTab==="stats"?C.accentBg:"transparent",color:activeTab==="stats"?C.accent:C.textMed,display:"flex",alignItems:"center",gap:6}}>📊 Statistiques</button>}
         {!isAdmin&&<button onClick={()=>setActiveTab("rank")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="rank"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="rank"?"var(--c-gold)":C.border}`,background:activeTab==="rank"?"var(--c-goldBg)":"transparent",color:activeTab==="rank"?"var(--c-gold)":C.textMed,display:"flex",alignItems:"center",gap:6}}>🏆 Rang{todayPts>0&&<span style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:"var(--c-gold)",color:"var(--c-onSolid)"}}>{todayPts}</span>}</button>}
         <button onClick={()=>setActiveTab("forum")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="forum"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="forum"?C.util:C.border}`,background:activeTab==="forum"?C.utilBg:"transparent",color:activeTab==="forum"?C.util:C.textMed,display:"flex",alignItems:"center",gap:6}}>💬 Forum{forumUnread>0&&activeTab!=="forum"&&<span title={`${forumUnread} message${forumUnread>1?"s":""} non lu${forumUnread>1?"s":""}`} style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:C.again,color:"var(--c-onSolid)"}}>{forumUnread}</span>}</button>
+        {!isAdmin&&dm.rows!=="missing"&&<button onClick={()=>setActiveTab("messages")} style={{fontFamily:font,fontSize:13,fontWeight:activeTab==="messages"?600:400,padding:"8px 20px",cursor:"pointer",borderRadius:8,border:`1.5px solid ${activeTab==="messages"?C.accent:C.border}`,background:activeTab==="messages"?C.accentBg:"transparent",color:activeTab==="messages"?C.accent:C.textMed,display:"flex",alignItems:"center",gap:6}}>✉️ Messages{activeTab!=="messages"&&<UnreadDot n={dm.total}/>}</button>}
       </div>
-      {activeTab==="forum"?(
+      {activeTab==="messages"&&!isAdmin?(
+        <MessagesTab currentUser={currentUser} pseudo={displayName} onSent={dm.refresh}/>
+      ):activeTab==="forum"?(
         <ForumTab currentUser={currentUser} pseudo={displayName} onRead={markForumRead}/>
       ):activeTab==="rank"&&!isAdmin?(
         <RankTab username={currentUser.username} tick={pointsTick}/>
