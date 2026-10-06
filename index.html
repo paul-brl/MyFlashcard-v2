@@ -1327,6 +1327,28 @@ const supa = {
   // Version légère (sans le texte des messages) : sert aux pastilles de non-lus
   // et à la liste des conversations de l'administrateur.
   getDmMeta: async (studentId) => {
+    // Administrateur : la liste des conversations est calculée par la base
+    // (une ligne par étudiant). On la remet ici sous la même forme que les
+    // messages : une ligne pour le dernier échange, une par message d'étudiant
+    // récent (pour les pastilles de non-lus). Si la fonction n'est pas encore
+    // installée, on retombe sur la lecture directe des messages.
+    if(!studentId){
+      try{
+        const r=await fetch(`${SUPA_URL}/rest/v1/rpc/admin_dm_conversations`,{method:"POST",headers:H,body:"{}"});
+        if(r.ok){
+          const d=await r.json();
+          if(Array.isArray(d)){
+            const rows=[];
+            d.forEach(c=>{
+              const base={student_id:c.student_id,student_username:c.student_username,student_name:c.student_name};
+              if(c.last_at)rows.push({...base,sender_role:c.last_role,created_at:c.last_at});
+              (c.student_times||[]).forEach(t=>{ if(t!==c.last_at||c.last_role!=="student")rows.push({...base,sender_role:"student",created_at:t}); });
+            });
+            return rows.sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at));
+          }
+        }
+      }catch{}
+    }
     try{
       let url=`${SUPA_URL}/rest/v1/private_messages?select=id,student_id,student_username,student_name,sender_role,created_at&order=created_at.desc&limit=5000`;
       if(studentId)url+=`&student_id=eq.${encodeURIComponent(studentId)}`;
@@ -1340,11 +1362,46 @@ const supa = {
   // plus récent (le plus récent s'affiche en bas, comme dans une messagerie).
   getDmThread: async (studentId) => {
     try{
-      const r=await fetch(`${SUPA_URL}/rest/v1/private_messages?select=id,student_id,sender_role,sender_name,body,created_at&student_id=eq.${encodeURIComponent(studentId)}&order=created_at.desc&limit=500`,{headers:H});
+      const url=cols=>`${SUPA_URL}/rest/v1/private_messages?select=${cols}&student_id=eq.${encodeURIComponent(studentId)}&order=created_at.desc&limit=500`;
+      let r=await fetch(url("id,student_id,sender_role,sender_name,body,created_at,broadcast_id"),{headers:H});
+      // Colonne broadcast_id absente (script SQL du 06/10 pas encore relancé) : on s'en passe.
+      if(r.status===400)r=await fetch(url("id,student_id,sender_role,sender_name,body,created_at"),{headers:H});
       if(!r.ok){ let t=""; try{t=await r.text();}catch{} return supa._dmMissing(r.status,t)?"missing":null; }
       const d=await r.json();
       return Array.isArray(d)?d.reverse():null;
     }catch{ return null; }
+  },
+  // ── Message à tous les étudiants ──
+  // Un seul appel : la base dépose le message dans la conversation de chaque
+  // étudiant (administrateurs exclus). emails = null → tous les étudiants ;
+  // sinon seulement ces adresses. dryRun → renvoie juste le nombre de destinataires.
+  broadcastDm: async ({body,senderName,emails,dryRun}) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/rpc/admin_broadcast_dm`,{method:"POST",headers:H,
+        body:JSON.stringify({p_body:body||"",p_sender_name:senderName||null,p_emails:emails||null,p_dry_run:!!dryRun})});
+      const t=await r.text();
+      if(!r.ok){
+        if(r.status===404||/PGRST202|Could not find the function/i.test(t))return {ok:false,error:"missing"};
+        let m=""; try{ m=JSON.parse(t).message||""; }catch{}
+        return {ok:false,error:m||`HTTP ${r.status}`};
+      }
+      const d=JSON.parse(t);
+      return {ok:true,count:d.count||0,broadcastId:d.broadcast_id||null};
+    }catch{ return {ok:false,error:"network"}; }
+  },
+  listBroadcasts: async () => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/rpc/admin_broadcast_list`,{method:"POST",headers:H,body:"{}"});
+      if(!r.ok)return null;
+      const d=await r.json(); return Array.isArray(d)?d:null;
+    }catch{ return null; }
+  },
+  // Retire un envoi groupé de toutes les conversations (en cas d'erreur).
+  deleteBroadcast: async (id) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/private_messages?broadcast_id=eq.${encodeURIComponent(id)}`,{method:"DELETE",headers:{...H,"Prefer":"return=minimal"}});
+      return r.ok;
+    }catch{ return false; }
   },
   sendDm: async (row) => {
     try{
@@ -6823,6 +6880,7 @@ function DmThread({studentId,studentUsername,studentName,viewer,onSent,emptyText
           <div style={{display:"flex",justifyContent:mine?"flex-end":"flex-start",marginTop:sameAuthor?2:8}}>
             <div style={{maxWidth:"min(82%,560px)",background:mine?C.accent:C.surface,color:mine?"var(--c-onSolid)":C.text,border:mine?`1px solid ${C.accent}`:`1px solid ${C.border}`,borderRadius:mine?(sameAuthor?"14px 4px 4px 14px":"14px 14px 4px 14px"):(sameAuthor?"4px 14px 14px 4px":"14px 14px 14px 4px"),padding:"7px 11px 5px",opacity:m._pending?0.65:1,boxShadow:"0 1px 1px rgba(0,0,0,0.04)"}}>
               {showName&&<p style={{fontSize:11,fontWeight:700,margin:"0 0 2px",color:mine?"inherit":C.again,opacity:mine?0.85:1}}>{m.sender_name||"Équipe"} · Équipe MyFlashCard</p>}
+              {m.broadcast_id&&viewer.role==="admin"&&<p style={{fontFamily:mono,fontSize:9,letterSpacing:1,textTransform:"uppercase",margin:"0 0 3px",opacity:0.8}}>📣 Envoyé à tous les étudiants</p>}
               <p style={{fontSize:14,lineHeight:1.5,margin:0,whiteSpace:"pre-wrap",overflowWrap:"anywhere",wordBreak:"break-word"}}>{m.body}</p>
               <p style={{fontSize:10,margin:"2px 0 0",textAlign:"right",opacity:0.7}}>{m._pending?"envoi…":dmTime(m.created_at)}</p>
             </div>
@@ -6857,11 +6915,126 @@ function MessagesTab({currentUser,pseudo,onSent}){
           emptyText="Une question sur une carte, ton abonnement ou ta façon de réviser ? Écris-nous ici : l'équipe te répond dans cette conversation."/>}
   </div>;
 }
+// ─── Espace admin · message privé à tous les étudiants ───────────────────────
+// Le message est déposé dans la conversation privée de chaque étudiant : il
+// déclenche la pastille de notification habituelle, et chacun peut répondre en
+// privé. Les comptes administrateurs ne le reçoivent pas.
+const BC_AUDIENCES=[["all","Tous les étudiants"],["buyers","Ont acheté"],["non_buyers","N'ont rien acheté"]];
+const bcIsBuyer=a=>isPaidPlan(a.plan_id||a.planId)||(Array.isArray(a.paid_groups)?a.paid_groups.length>0:(Array.isArray(a.groups)&&a.groups.some(g=>!FREE_GROUP_IDS.includes(g))));
+const bcEmails=(accounts,aud)=>aud==="all"?null:[...new Set((accounts||[])
+  .filter(a=>aud==="buyers"?bcIsBuyer(a):!bcIsBuyer(a))
+  .map(a=>String(a.email||a.username||"").trim().toLowerCase())
+  .filter(x=>x.includes("@")))];
+function AdminBroadcast({accounts,onClose,onSent}){
+  const me=sbEmail(), myName=getPseudo(me);
+  const [audience,setAudience]=useState("all");
+  const [text,setText]=useState("");
+  const [count,setCount]=useState(null);      // null = calcul en cours
+  const [missing,setMissing]=useState(false); // fonctions SQL pas encore installées
+  const [step,setStep]=useState("edit");      // edit · confirm · sending · done
+  const [sentTo,setSentTo]=useState(0),[err,setErr]=useState("");
+  const [history,setHistory]=useState(undefined);
+  const [confirmDel,setConfirmDel]=useState(null),[deleting,setDeleting]=useState(false);
+  const body=text.trim();
+  // Nombre de destinataires : calculé par la base (elle seule sait qui est admin).
+  useEffect(()=>{
+    let alive=true; setCount(null);
+    supa.broadcastDm({dryRun:true,emails:bcEmails(accounts,audience)}).then(r=>{
+      if(!alive)return;
+      if(r.ok){ setCount(r.count); setMissing(false); }
+      else if(r.error==="missing"){ setMissing(true); setCount(0); }
+      else setCount(audience==="all"?(accounts||[]).length:(bcEmails(accounts,audience)||[]).length);
+    });
+    return()=>{alive=false;};
+  },[audience,accounts]);
+  const loadHistory=useCallback(async()=>{ setHistory(await supa.listBroadcasts()); },[]);
+  useEffect(()=>{ loadHistory(); },[loadHistory]);
+  const send=async()=>{
+    setStep("sending"); setErr("");
+    const r=await supa.broadcastDm({body,senderName:myName,emails:bcEmails(accounts,audience)});
+    if(r.ok){ setSentTo(r.count); setText(""); setStep("done"); loadHistory(); if(onSent)onSent(); }
+    else { setErr(r.error==="network"?"Connexion perdue : le message n'est pas parti. Réessaie.":`Échec de l'envoi : ${r.error}`); setStep("edit"); }
+  };
+  const removeBroadcast=async id=>{
+    setDeleting(true);
+    const ok=await supa.deleteBroadcast(id);
+    setDeleting(false); setConfirmDel(null);
+    if(ok){ loadHistory(); if(onSent)onSent(); }
+    else setErr("Le message n'a pas pu être retiré. Réessaie dans un instant.");
+  };
+  const fmt=iso=>{ try{ const d=new Date(iso); return d.toLocaleDateString("fr-FR",{day:"numeric",month:"short"})+" à "+d.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}); }catch{ return ""; } };
+  const n=count||0, plural=n>1?"s":"";
+  const chip=(on)=>({fontFamily:font,fontSize:12.5,fontWeight:600,padding:"7px 14px",cursor:"pointer",borderRadius:20,border:`1.5px solid ${on?C.accent:C.border}`,background:on?C.accentBg:"transparent",color:on?C.accent:C.textMed});
+  return <Modal onClose={step==="sending"?()=>{}:onClose} width={580}>
+    <p style={{fontFamily:serif,fontSize:20,margin:"0 0 6px"}}>📣 Message à tous les étudiants</p>
+    <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 18px",lineHeight:1.6}}>Le message arrive dans la conversation privée de chaque étudiant, avec une notification. Chacun peut y répondre en privé : les réponses apparaissent dans tes conversations comme d'habitude.</p>
+    {missing?(
+      <div style={{border:`1.5px dashed ${C.border}`,borderRadius:10,padding:"16px 18px",background:C.bg,marginBottom:16}}>
+        <p style={{fontSize:13,color:C.textMed,margin:"0 0 6px",lineHeight:1.6}}>⚠️ L'envoi groupé n'est pas encore activé dans Supabase.</p>
+        <p style={{fontSize:11.5,color:C.textLt,margin:0,lineHeight:1.6}}>Relance le script <code style={{fontFamily:mono,fontSize:10.5}}>supabase_private_messages.sql</code> dans l'éditeur SQL (il peut être relancé sans risque).</p>
+      </div>
+    ):step==="done"?(
+      <div style={{background:C.goodBg,border:`1.5px solid ${C.good}`,borderRadius:10,padding:"14px 16px",marginBottom:16}}>
+        <p style={{fontSize:13.5,color:C.good,fontWeight:600,margin:"0 0 4px"}}>✓ Message envoyé à {sentTo} étudiant{sentTo>1?"s":""}.</p>
+        <p style={{fontSize:12,color:C.textMed,margin:"0 0 10px"}}>Ils le verront dans leur onglet « Messages », avec une pastille de notification.</p>
+        <Btn small onClick={()=>setStep("edit")}>Écrire un autre message</Btn>
+      </div>
+    ):<>
+      <Lbl>Destinataires</Lbl>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        {BC_AUDIENCES.map(([id,l])=><button key={id} disabled={step!=="edit"} onClick={()=>setAudience(id)} style={chip(audience===id)}>{l}</button>)}
+      </div>
+      <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 16px"}}>{count===null?"Calcul du nombre de destinataires…":<><strong style={{fontFamily:serif,fontSize:20,color:C.accent}}>{n}</strong> étudiant{plural} recevr{n>1?"ont":"a"} ce message</>}</p>
+      <Lbl>Message</Lbl>
+      <textarea value={text} disabled={step!=="edit"} onChange={e=>{setText(e.target.value.slice(0,DM_MAX));setErr("");}} rows={6}
+        placeholder="Ex. : Bonjour à tous ! Les cartes du cours 3 de biologie cellulaire sont en ligne…"
+        style={{...iBox,width:"100%",boxSizing:"border-box",minHeight:120,resize:"vertical"}}/>
+      <p style={{fontFamily:mono,fontSize:10,color:C.textLt,textAlign:"right",margin:"4px 0 12px"}}>{body.length}/{DM_MAX}</p>
+      {body&&<>
+        <Lbl>Aperçu côté étudiant</Lbl>
+        <div style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px",marginBottom:16}}>
+          <div style={{maxWidth:"85%",background:C.surface,border:`1px solid ${C.border}`,borderRadius:"14px 14px 14px 4px",padding:"7px 11px 5px"}}>
+            <p style={{fontSize:11,fontWeight:700,margin:"0 0 2px",color:C.again}}>{myName} · Équipe MyFlashCard</p>
+            <p style={{fontSize:14,lineHeight:1.5,margin:0,whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{body}</p>
+          </div>
+        </div>
+      </>}
+      {err&&<p style={{fontSize:12,color:C.again,margin:"0 0 12px"}}>{err}</p>}
+      {step==="edit"&&<Btn fill full onClick={()=>setStep("confirm")} disabled={!body||!count}>Envoyer à {count===null?"…":n} étudiant{plural}</Btn>}
+      {(step==="confirm"||step==="sending")&&<div style={{background:C.impBg,border:`1.5px solid var(--c-goldSoft)`,borderRadius:10,padding:"14px 16px"}}>
+        <p style={{fontSize:13,color:C.text,margin:"0 0 12px",lineHeight:1.6}}>Envoyer ce message à <strong>{n} étudiant{plural}</strong> ? Il apparaîtra tout de suite dans leur messagerie. Tu pourras le retirer ensuite depuis l'historique ci-dessous.</p>
+        <div style={{display:"flex",gap:10}}>
+          <Btn fill full onClick={send} disabled={step==="sending"}>{step==="sending"?"Envoi en cours…":"Confirmer l'envoi"}</Btn>
+          <Btn full onClick={()=>setStep("edit")} disabled={step==="sending"}>Modifier</Btn>
+        </div>
+      </div>}
+    </>}
+    {Array.isArray(history)&&history.length>0&&<div style={{marginTop:24,borderTop:`1px solid ${C.border}`,paddingTop:16}}>
+      <Lbl>Envois précédents</Lbl>
+      {history.map(h=><div key={h.broadcast_id} style={{padding:"10px 0",borderTop:`1px solid ${C.border}`}}>
+        <p style={{fontSize:11,color:C.textLt,margin:"0 0 3px"}}>{fmt(h.created_at)}{h.sender_name?` · par ${h.sender_name}`:""}</p>
+        <p style={{fontSize:13,color:C.text,margin:"0 0 5px",lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden",whiteSpace:"pre-wrap"}}>{h.body}</p>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:mono,fontSize:10.5,color:C.textMed}}>{h.recipients} destinataire{h.recipients>1?"s":""} · {h.replied} {h.replied>1?"ont":"a"} répondu</span>
+          {confirmDel!==h.broadcast_id
+            ?<button onClick={()=>setConfirmDel(h.broadcast_id)} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,textDecoration:"underline",padding:0}}>🗑 Retirer</button>
+            :<span style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <span style={{fontSize:11,color:C.again}}>Le retirer des {h.recipients} conversations ?</span>
+              <button onClick={()=>removeBroadcast(h.broadcast_id)} disabled={deleting} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"4px 10px",cursor:deleting?"wait":"pointer",borderRadius:5,border:`1.5px solid ${C.again}`,background:C.againBg,color:C.again}}>{deleting?"Retrait…":"Confirmer"}</button>
+              <button onClick={()=>setConfirmDel(null)} disabled={deleting} style={{fontFamily:font,fontSize:11,padding:"4px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed}}>Annuler</button>
+            </span>}
+        </div>
+      </div>)}
+    </div>}
+  </Modal>;
+}
 // ─── Espace admin · toutes les conversations ─────────────────────────────────
 function AdminMessages({accounts,dm}){
   const me=sbEmail();
   const myName=getPseudo(me);
   const [sel,setSel]=useState(null); // {studentId, username, name}
+  const [showBroadcast,setShowBroadcast]=useState(false);
+  const [threadKey,setThreadKey]=useState(0); // recharge la conversation ouverte après un envoi groupé
   const [q,setQ]=useState("");
   const rows=dm.rows;
   const convs=useMemo(()=>{
@@ -6916,8 +7089,12 @@ function AdminMessages({accounts,dm}){
 @media (max-width:760px){.mfc-dm-grid{grid-template-columns:minmax(0,1fr)}.mfc-dm-grid[data-open="1"] .mfc-dm-list{display:none}.mfc-dm-grid[data-open="0"] .mfc-dm-pane{display:none}.mfc-dm-back{display:inline-flex}}`}</style>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:4}}>
       <p style={{fontFamily:serif,fontSize:18,margin:0}}>Messages privés</p>
-      <p style={{fontFamily:mono,fontSize:10.5,color:C.textLt,margin:0}}>{convs.length} conversation{convs.length>1?"s":""}{waiting?` · ${waiting} en attente`:""}</p>
+      <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <p style={{fontFamily:mono,fontSize:10.5,color:C.textLt,margin:0}}>{convs.length} conversation{convs.length>1?"s":""}{waiting?` · ${waiting} en attente`:""}</p>
+        <Btn small fill onClick={()=>setShowBroadcast(true)}>📣 Message à tous</Btn>
+      </div>
     </div>
+    {showBroadcast&&<AdminBroadcast accounts={accounts} onClose={()=>setShowBroadcast(false)} onSent={()=>{dm.refresh();setThreadKey(k=>k+1);}}/>}
     <p style={{fontSize:12,color:C.textMed,margin:"0 0 14px",lineHeight:1.6}}>Chaque étudiant a sa conversation avec l'équipe. Tous les administrateurs voient toutes les conversations ; tes réponses apparaissent sous ton pseudo <strong>{myName}</strong>.</p>
     <div className="mfc-dm-grid" data-open={sel?"1":"0"}>
       <div className="mfc-dm-list" style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
@@ -6944,7 +7121,7 @@ function AdminMessages({accounts,dm}){
               <p style={{fontSize:11,color:C.textLt,margin:0,overflow:"hidden",textOverflow:"ellipsis"}}>{sel.username}</p>
             </div>
           </div>
-          <DmThread key={sel.studentId} studentId={sel.studentId} studentUsername={sel.username} studentName={sel.name}
+          <DmThread key={sel.studentId+"-"+threadKey} studentId={sel.studentId} studentUsername={sel.username} studentName={sel.name}
             viewer={{role:"admin",username:me,name:myName}} onSent={dm.refresh}
             emptyText={`Aucun message avec ${sel.name} pour l'instant. Ton message apparaîtra dans son onglet « Messages », avec une notification.`}/>
         </>:<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"60px 24px",textAlign:"center",background:C.surface}}>
