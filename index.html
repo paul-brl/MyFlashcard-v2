@@ -216,6 +216,11 @@
     .mfc-page { padding-left: 24px; padding-right: 24px; }
     @media (max-width: 640px) { .mfc-page { padding-left: 14px; padding-right: 14px; } }
 
+    /* Titre central de la barre : deux lignes au plus, coupé par « … ». Sans
+       cette limite, un intitulé long (matière · cours · chapitre · paquet)
+       écrasait le bouton Retour dès que la fenêtre était étroite.            */
+    .mfc-nav-center { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
     /* Barre de navigation : passe en colonne centrée sur mobile */
     @media (max-width: 640px) {
       .mfc-nav { flex-wrap: wrap; gap: 8px; padding: 10px 14px !important; }
@@ -1922,7 +1927,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-10-11-maitrise-par-matiere";
+const APP_VERSION="2026-10-11-entete-fenetre-etroite";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -3654,7 +3659,7 @@ function ThemeToggle({theme,onToggle,compact}){
     </svg>
   </button>;
 }
-function Nav({left,center,right,theme,onToggleTheme}){return <div className="mfc-nav" style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,gap:12}}><div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div className="mfc-nav-center" style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,textAlign:"center"}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{right}{onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme} compact/>}</div></div>;}
+function Nav({left,center,right,theme,onToggleTheme}){return <div className="mfc-nav" style={{background:C.surface,borderBottom:`1px solid ${C.border}`,padding:"12px 24px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,gap:12}}><div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}><img src={LANDING_LOGO} style={{height:22,width:"auto",flexShrink:0}} alt="MyFlashCard"/>{left}</div><div className="mfc-nav-center" title={typeof center==="string"?center:undefined} style={{fontFamily:mono,fontSize:10,letterSpacing:2,textTransform:"uppercase",color:C.textLt,textAlign:"center",flex:"1 1 0",minWidth:0}}>{center}</div><div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>{right}{onToggleTheme&&<ThemeToggle theme={theme} onToggle={onToggleTheme} compact/>}</div></div>;}
 function PasswordField({label,value,onChange,placeholder,onKeyDown,hint,autoComplete}){
   const [show,setShow]=useState(false);
   // Le bouton "œil" est le seul contrôle d'affichage voulu ici : autoComplete
