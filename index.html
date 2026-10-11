@@ -1922,7 +1922,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-10-11-navigation-etudiant";
+const APP_VERSION="2026-10-11-maitrise-par-matiere";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -8283,41 +8283,95 @@ function JGroupBlock({group,allCards,progress,jplans,onStudyJ,openGrid,canAccess
 // ══════════════════════════════════════════════════════════════════════════════
 // ─── TABLEAU DE BORD DE LA RÉVISION PERSONNALISÉE ────────────────────────────
 const masteryColor=m=>m===null?C.textLt:(m<0.5?C.again:(m<PERSO_WEAK?C.hard:(m<PERSO_SOLID?C.good:C.easy)));
-function MasteryBar({m,coverage}){
-  const col=masteryColor(m);
-  return <div style={{minWidth:120,flex:"1 1 120px"}}>
-    <div style={{height:8,borderRadius:4,background:"var(--c-borderSoft2)",overflow:"hidden",position:"relative"}}>
-      <div style={{height:"100%",width:`${m===null?0:Math.round(m*100)}%`,background:col,borderRadius:4,transition:"width 0.3s"}}/>
+// ─── RÉVISION PERSONNALISÉE : UN BLOC PAR MATIÈRE ────────────────────────────
+// Même découpage que la méthode Anki (matière, cours, chapitre, trois paquets),
+// mais chaque étage affiche sa maîtrise au lieu des cartes à réviser. À côté du
+// pourcentage, le nombre de cartes vues : sans lui, deux cartes réussies sur
+// quatre-vingts afficheraient fièrement 100 %.
+const persoAgg=rs=>({mastery:overallMastery(rs),seen:rs.reduce((a,r)=>a+r.seen,0),total:rs.reduce((a,r)=>a+r.total,0),cards:rs.flatMap(r=>r.cards)});
+const masteryPct=m=>m===null?"—":`${Math.round(m*100)} %`;
+function PersoGroupBlock({group,allCards,rows,onStudyPerso,canAccess,onUpgrade}){
+  const [activeCours,setActiveCours]=useState(null);
+  const chapters=activeCours?getDisplayChapters(group.id,activeCours,allCards):[];
+  if(!group.nums.some(n=>canAccess(group.id,n)))return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,opacity:0.75,padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+    <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.textMed}}>{group.label}</p>
+    <button onClick={()=>onUpgrade(group.id)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,whiteSpace:"nowrap",flexShrink:0}}>🔒 Débloquer</button>
+  </div>;
+  const gRows=rows.filter(r=>r.groupId===group.id);
+  const gAgg=persoAgg(gRows);
+  const cRows=gRows.filter(r=>r.num===activeCours);
+  const cAgg=persoAgg(cRows);
+  const courseTitle=`${group.label} · Cours ${activeCours}`;
+  const study=(a,title)=>{ if(a.total>0)onStudyPerso(a.cards,Math.min(a.total,50),`🎯 ${title}`); };
+  const pktBtn=(a,pk,title)=>{
+    const has=a.total>0,col=pC(pk.id);
+    return <button key={pk.id} onClick={()=>study(a,title)} title={has?`${a.seen} carte${a.seen>1?"s":""} travaillée${a.seen>1?"s":""} sur ${a.total}`:undefined} style={{fontFamily:font,padding:"6px 10px",cursor:has?"pointer":"default",borderRadius:6,border:`1.5px solid ${has?col:"var(--c-borderSoft)"}`,background:C.surface,color:has?col:"var(--c-textDisabled)",display:"flex",flexDirection:"column",alignItems:"center",gap:2,minWidth:74}}>
+      <span style={{fontSize:10,fontWeight:600}}>{pk.label}</span>
+      <span style={{fontSize:13,fontWeight:700,lineHeight:1.1,color:has?masteryColor(a.mastery):"inherit"}}>{has?masteryPct(a.mastery):"vide"}</span>
+      {has&&<span style={{fontFamily:mono,fontSize:8,color:C.textLt}}>{a.seen}/{a.total} vues</span>}
+    </button>;
+  };
+  return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12}}>
+    <div style={{padding:"11px 18px",borderBottom:`1px solid ${C.border}`,background:C.bg,display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:"4px 12px",flexWrap:"wrap"}}>
+      <p style={{fontFamily:serif,fontSize:15,margin:0}}>{group.label}</p>
+      <p style={{fontFamily:mono,fontSize:10,margin:0,color:C.textLt,whiteSpace:"nowrap"}}><strong style={{fontSize:12,color:masteryColor(gAgg.mastery)}}>{masteryPct(gAgg.mastery)}</strong> de maîtrise · {gAgg.seen}/{gAgg.total} cartes vues</p>
     </div>
-    <div style={{display:"flex",justifyContent:"space-between",marginTop:4,gap:8}}>
-      <span style={{fontFamily:mono,fontSize:9.5,fontWeight:700,color:col}}>{m===null?"jamais travaillé":`${Math.round(m*100)} % de maîtrise`}</span>
-      <span style={{fontFamily:mono,fontSize:9.5,color:C.textLt,whiteSpace:"nowrap"}}>couverture {Math.round((coverage||0)*100)} %</span>
+    <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",borderBottom:activeCours?`1px solid ${C.border}`:"none",background:C.surface}}>
+      {group.nums.map(n=>{
+        const locked=!canAccess(group.id,n);
+        const active=activeCours===n;
+        const m=locked?null:persoAgg(gRows.filter(r=>r.num===n)).mastery;
+        return <button key={n} onClick={()=>locked?onUpgrade(group.id):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12,fontWeight:active?600:400,padding:"8px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${!locked&&active?"var(--c-gold)":C.border}`,background:!locked&&active?"var(--c-goldBg)":"transparent",color:locked?C.textLt:active?"var(--c-gold)":C.textMed,display:"flex",alignItems:"center",gap:7}}>
+          Cours {n}
+          {locked?<span style={{fontSize:10}}>🔒</span>:<span style={{fontFamily:mono,fontSize:10,fontWeight:700,color:masteryColor(m)}}>{masteryPct(m)}</span>}
+        </button>;
+      })}
     </div>
+    {activeCours&&<div style={{animation:"fadeIn 0.18s ease"}}>
+      <div style={{padding:"10px 18px",background:"var(--c-surfaceAlt)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{minWidth:0}}>
+          <p style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:"var(--c-gold)",textTransform:"uppercase",fontWeight:600,margin:"0 0 3px"}}>Cours {activeCours} complet</p>
+          <p style={{fontFamily:mono,fontSize:10,margin:0,color:C.textLt}}><strong style={{fontSize:13,color:masteryColor(cAgg.mastery)}}>{masteryPct(cAgg.mastery)}</strong> de maîtrise · {cAgg.seen}/{cAgg.total} cartes vues</p>
+        </div>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"stretch"}}>
+          {PACKETS.map(pk=>pktBtn(persoAgg(cRows.filter(r=>r.packetId===pk.id)),pk,`${courseTitle} · ${pk.label}`))}
+          {cAgg.total>0&&<button onClick={()=>study(cAgg,courseTitle)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:"1.5px solid var(--c-gold)",background:"var(--c-goldBg)",color:"var(--c-gold)",whiteSpace:"nowrap"}}>Réviser le cours →</button>}
+        </div>
+      </div>
+      {cAgg.total===0
+        ?<div style={{padding:"14px 18px",borderTop:`1px solid ${C.border}`}}><p style={{fontSize:12,color:C.textLt,margin:0}}>Aucune carte pour ce cours.</p></div>
+        :(chapters.length?chapters:["Toutes les cartes"]).map((chName,i)=>{
+          const chIdx=i+1;
+          const chRows=cRows.filter(r=>r.chapterId===chIdx);
+          const chAgg=persoAgg(chRows);
+          const chTitle=chapters.length?`${courseTitle} · ${chName}`:courseTitle;
+          return <div key={chIdx} style={{display:"flex",alignItems:"center",padding:"9px 18px",gap:12,borderTop:`1px solid ${C.border}`,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:180}}>
+              {chapters.length>0&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:18,flexShrink:0}}>{chIdx}</span>}
+              <span style={{fontFamily:font,fontSize:13,color:C.text}}>{chName}</span>
+              <span style={{fontFamily:mono,fontSize:10,fontWeight:700,color:masteryColor(chAgg.mastery),flexShrink:0}}>{masteryPct(chAgg.mastery)}</span>
+            </div>
+            <div style={{display:"flex",gap:5,flexShrink:0,flexWrap:"wrap"}}>
+              {PACKETS.map(pk=>pktBtn(persoAgg(chRows.filter(r=>r.packetId===pk.id)),pk,`${chTitle} · ${pk.label}`))}
+            </div>
+          </div>;
+        })}
+    </div>}
   </div>;
 }
-function PersoModeView({groups,allCards,progress,onStudyPerso,isAdmin,userGroups,fullGroups,onExplain}){
-  const [filter,setFilter]=useState("all");
+function PersoModeView({groups,allCards,progress,onStudyPerso,isAdmin,userGroups,fullGroups,onUpgrade,onExplain}){
   const [size,setSize]=useState(30);
-  const [limit,setLimit]=useState(25);
   const canAccess=useCallback((g,n)=>isAdmin||isCourseAccessible(g,n,userGroups,fullGroups),[isAdmin,userGroups,fullGroups]);
   const scopeCards=useMemo(()=>allCards.filter(c=>groups.some(g=>g.id===c.groupId)&&canAccess(c.groupId,c.num)),[allCards,groups,canAccess]);
   const rows=useMemo(()=>persoRank(persoIndex(scopeCards,progress)),[scopeCards,progress]);
   const overall=useMemo(()=>overallMastery(rows),[rows]);
-  const FILTERS=[
-    {id:"all",   label:"Tous",              fn:()=>true},
-    {id:"weak",  label:"Sous 50 %",         fn:r=>r.mastery!==null&&r.mastery<0.5},
-    {id:"mid",   label:"Sous 70 %",         fn:r=>r.mastery!==null&&r.mastery<0.7},
-    {id:"fresh", label:"Jamais travaillés", fn:r=>r.mastery===null},
-  ];
-  const active=FILTERS.find(f=>f.id===filter)||FILTERS[0];
-  const shown=rows.filter(active.fn);
   const workedCards=useMemo(()=>scopeCards.filter(c=>cardMastery(progress[c.id])!==null).length,[scopeCards,progress]);
   return <div style={{animation:"fadeIn 0.18s ease"}}>
     <div style={{background:C.surface,border:"1.5px solid var(--c-goldSoft, #e6d3a3)",borderRadius:12,padding:"20px 22px",marginBottom:20}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
         <div style={{minWidth:0}}>
           <p style={{fontFamily:serif,fontSize:18,margin:"0 0 4px"}}>🎯 Ma maîtrise</p>
-          <p style={{fontSize:12,color:C.textMed,margin:0,lineHeight:1.6}}>Chaque paquet a son propre pourcentage de réussite. Attaque ceux du bas de la liste.</p>
+          <p style={{fontSize:12,color:C.textMed,margin:0,lineHeight:1.6}}>Chaque matière, chaque cours et chaque paquet a son pourcentage de maîtrise. Ouvre un cours pour voir le détail.</p>
         </div>
         <button onClick={onExplain} style={{fontFamily:font,fontSize:11,padding:"5px 10px",cursor:"pointer",borderRadius:5,border:`1px solid ${C.border}`,background:"transparent",color:C.textMed,flexShrink:0}}>ⓘ Le calcul</button>
       </div>
@@ -8335,37 +8389,8 @@ function PersoModeView({groups,allCards,progress,onStudyPerso,isAdmin,userGroups
       </div>
     </div>
 
-    <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-      {FILTERS.map(f=><button key={f.id} onClick={()=>{setFilter(f.id);setLimit(25);}} style={{fontFamily:font,fontSize:12,fontWeight:filter===f.id?700:400,padding:"7px 14px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${filter===f.id?"var(--c-gold)":C.border}`,background:filter===f.id?"var(--c-goldBg)":"transparent",color:filter===f.id?"var(--c-gold)":C.textMed}}>{f.label} <span style={{fontSize:10,opacity:0.7}}>({rows.filter(f.fn).length})</span></button>)}
-    </div>
-
-    {shown.length===0
-      ?<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"40px 24px",textAlign:"center",background:C.surface}}>
-        <p style={{fontSize:30,margin:"0 0 10px"}}>🎯</p>
-        <p style={{fontSize:13,color:C.textMed,margin:0,lineHeight:1.6}}>{filter==="all"?"Aucune carte accessible sur ce semestre.":"Aucun paquet dans cette catégorie — c'est bon signe."}</p>
-      </div>
-      :<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
-        {shown.slice(0,limit).map((r,i)=>{
-          const grp=GROUPS.find(g=>g.id===r.groupId);
-          const chName=getChapters(r.groupId,r.num)[r.chapterId-1];
-          const pk=PACKETS.find(p=>p.id===r.packetId);
-          return <div key={r.key} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderTop:i>0?`1px solid ${C.border}`:"none",flexWrap:"wrap"}}>
-            <div style={{width:3,alignSelf:"stretch",borderRadius:2,background:pC(r.packetId),flexShrink:0,minHeight:34}}/>
-            <div style={{flex:"1 1 210px",minWidth:0}}>
-              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:5}}>
-                <Tag color={pC(r.packetId)} bg={pB(r.packetId)} small>{pk?.label}</Tag>
-                <Tag color={C.textMed} bg={C.bg} small>{grp?.label}</Tag>
-                <Tag color={C.textMed} bg={C.bg} small>Cours {r.num}</Tag>
-                {chName&&<Tag color={C.textMed} bg={C.bg} small>Ch.{r.chapterId} {chName}</Tag>}
-              </div>
-              <p style={{fontSize:11,color:C.textLt,margin:0}}>{r.total} carte{r.total>1?"s":""} · {r.seen} travaillée{r.seen>1?"s":""}{r.weak>0?` · ${r.weak} fragile${r.weak>1?"s":""}`:""}</p>
-            </div>
-            <MasteryBar m={r.mastery} coverage={r.coverage}/>
-            <button onClick={()=>onStudyPerso(r.cards,Math.min(r.total,50),`🎯 ${grp?.label} · Cours ${r.num}${chName?" · "+chName:""} · ${pk?.label}`)} style={{fontFamily:font,fontSize:11.5,fontWeight:600,padding:"8px 14px",cursor:"pointer",borderRadius:6,border:"1.5px solid var(--c-gold)",background:"var(--c-goldBg)",color:"var(--c-gold)",whiteSpace:"nowrap",flexShrink:0}}>Réviser</button>
-          </div>;
-        })}
-        {shown.length>limit&&<button onClick={()=>setLimit(l=>l+25)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"12px",cursor:"pointer",border:"none",borderTop:`1px solid ${C.border}`,background:"transparent",color:C.accent,width:"100%"}}>Voir {Math.min(25,shown.length-limit)} paquets de plus ({shown.length-limit} restants)</button>}
-      </div>}
+    <p style={{fontFamily:serif,fontSize:18,margin:"0 0 14px"}}>Par matière · Cours · Chapitre</p>
+    {groups.map(group=><PersoGroupBlock key={group.id} group={group} allCards={allCards} rows={rows} onStudyPerso={onStudyPerso} canAccess={canAccess} onUpgrade={onUpgrade}/>)}
   </div>;
 }
 // ─── LA BARRE DE NAVIGATION ÉTUDIANT ─────────────────────────────────────────
@@ -8746,6 +8771,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onStudy,onStud
             groups={tabGroups} allCards={allCards} progress={progress}
             onStudyPerso={onStudyPerso} isAdmin={isAdmin}
             userGroups={userGroups} fullGroups={fullGroups}
+            onUpgrade={g=>PURCHASES_VISIBLE&&setShowUpgrade(typeof g==="string"?g:true)}
             onExplain={()=>setShowMethod(true)}/>
         ):(
         <div>
