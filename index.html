@@ -1927,7 +1927,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-10-11-entete-fenetre-etroite";
+const APP_VERSION="2026-10-11-reponse-signalements";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -5056,6 +5056,8 @@ function AdminCardReports({cards,onEditCard,justEdited,onClearJustEdited,onCount
   const [busy,setBusy]=useState(null);
   const [notes,setNotes]=useState({});
   const [confirmDel,setConfirmDel]=useState(null);
+  const [replies,setReplies]=useState({});       // id → texte en cours de saisie
+  const [replyState,setReplyState]=useState({}); // id → "sending" | "sent" | message d'erreur
   const load=useCallback(async()=>{
     const d=await supa.getCardReports();
     setRows(d);
@@ -5097,6 +5099,22 @@ function AdminCardReports({cards,onEditCard,justEdited,onClearJustEdited,onCount
     const ok=await supa.deleteCardReport(r.id);
     setBusy(null);
     if(ok)await load(); else alert("Suppression impossible.");
+  };
+  // Réponse à l'étudiant : elle part par la messagerie privée, il la retrouve dans
+  // son onglet « Messages » avec une notification. Le message rappelle la carte
+  // concernée, sinon une réponse isolée serait incompréhensible de son côté.
+  const sendReply=async r=>{
+    const text=(replies[r.id]||"").trim();
+    if(!text||replyState[r.id]==="sending")return;
+    const body=`À propos de ton signalement sur la carte « ${(r.card_excerpt||"sans extrait").slice(0,120)} » :\n\n${text}`;
+    if(body.length>DM_MAX){ setReplyState(p=>({...p,[r.id]:`Réponse trop longue (${body.length}/${DM_MAX} caractères).`})); return; }
+    setReplyState(p=>({...p,[r.id]:"sending"}));
+    const res=await supa.sendDm({
+      student_id:r.user_id, student_username:r.username||null, student_name:r.display_name||null,
+      sender_id:sbUserId(), sender_role:"admin", sender_name:getPseudo(sbEmail())||null, body,
+    });
+    if(res.ok){ setReplies(p=>({...p,[r.id]:""})); setReplyState(p=>({...p,[r.id]:"sent"})); }
+    else setReplyState(p=>({...p,[r.id]:res.error==="missing"?"La messagerie n'est pas encore activée.":res.error==="rate"?"Trop de messages d'un coup, réessaie dans quelques minutes.":"L'envoi a échoué."}));
   };
   const editCard=async r=>{
     const card=cardById[r.card_id];
@@ -5183,6 +5201,17 @@ function AdminCardReports({cards,onEditCard,justEdited,onClearJustEdited,onCount
             <div>
               <Lbl>Note interne (optionnelle)</Lbl>
               <input style={iLine} placeholder="Ce qui a été fait, ou pourquoi c'est écarté…" value={notes[r.id]!==undefined?notes[r.id]:(r.admin_note||"")} onChange={e=>setNotes(p=>({...p,[r.id]:e.target.value}))}/>
+            </div>
+            <div>
+              <Lbl>Répondre à l'étudiant</Lbl>
+              {r.user_id?<>
+                <textarea rows={3} style={{fontFamily:font,fontSize:13,color:C.text,background:"transparent",width:"100%",boxSizing:"border-box",border:`1.5px solid ${C.border}`,borderRadius:6,padding:"8px 10px",marginTop:6,resize:"vertical",lineHeight:1.5,outline:"none"}} placeholder="Par exemple, pourquoi la carte est juste. Il recevra ta réponse dans ses messages." value={replies[r.id]||""} onChange={e=>{const v=e.target.value;setReplies(p=>({...p,[r.id]:v}));setReplyState(p=>({...p,[r.id]:undefined}));}}/>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:8,flexWrap:"wrap"}}>
+                  <Btn small fill onClick={()=>sendReply(r)} disabled={!(replies[r.id]||"").trim()||replyState[r.id]==="sending"}>{replyState[r.id]==="sending"?"Envoi…":"✉️ Envoyer la réponse"}</Btn>
+                  {replyState[r.id]==="sent"&&<span style={{fontSize:11.5,color:C.good}}>✓ Réponse envoyée, il la verra dans ses messages.</span>}
+                  {replyState[r.id]&&replyState[r.id]!=="sent"&&replyState[r.id]!=="sending"&&<span style={{fontSize:11.5,color:C.again}}>{replyState[r.id]}</span>}
+                </div>
+              </>:<p style={{fontSize:11.5,color:C.textLt,margin:"6px 0 0"}}>Ce signalement n'est rattaché à aucun compte, impossible d'y répondre.</p>}
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               {card&&<Btn small fill onClick={()=>editCard(r)}>✏️ Corriger la carte</Btn>}
