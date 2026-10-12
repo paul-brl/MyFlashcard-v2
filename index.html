@@ -450,7 +450,10 @@ const supa = {
     const BATCH=1000; // metadata rows are tiny (~100 bytes each)
     // order=id : sans ordre explicite, Postgres ne garantit pas que deux pages
     // consécutives se suivent — des cartes pouvaient manquer ou être doublées.
-    const base=`${SUPA_URL}/rest/v1/cards?select=id,group_id,num,chapter_id,packet_id,sort_order,card_type&order=id.asc`;
+    // Lecture dans la vue « cards_meta » : elle liste TOUTES les cartes sans leur
+    // contenu, alors que la table « cards » ne rend le recto/verso qu'aux comptes
+    // qui y ont droit. C'est ce qui garde les cours verrouillés visibles.
+    const base=`${SUPA_URL}/rest/v1/cards_meta?select=id,group_id,num,chapter_id,packet_id,sort_order,card_type&order=id.asc`;
     try {
       const first=await fetch(`${base}&limit=${BATCH}&offset=0`,{headers:{...H,"Prefer":"count=exact"}});
       const firstData=await first.json();
@@ -1929,7 +1932,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-10-12-envoi-pdf-admin";
+const APP_VERSION="2026-10-12-liste-cartes";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
