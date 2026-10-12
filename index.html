@@ -695,23 +695,25 @@ const supa = {
   },
   // Envoi du fichier dans le bucket. `path` contient un jeton aléatoire, de sorte
   // qu'une URL publique reste impossible à deviner à partir du nom de la matière.
+  // L'envoi et la suppression passent par la session de l'administrateur
+  // connecté : le bucket refuse toute écriture faite avec la seule clé publique.
   uploadLessonFile: async (path, file) => {
     const r=await fetch(`${SUPA_URL}/storage/v1/object/${LESSON_BUCKET}/${path}`,{
       method:"POST",
-      headers:{ "apikey":SUPA_KEY, "Authorization":`Bearer ${SUPA_KEY}`, "Content-Type":file.type||"application/pdf", "x-upsert":"true" },
+      headers:{ "apikey":SUPA_KEY, "Authorization":H.Authorization, "Content-Type":file.type||"application/pdf", "x-upsert":"true" },
       body:file,
     });
     if(!r.ok){
       let t=""; try{ t=await r.text(); }catch{}
       if(/Bucket not found/i.test(t))throw new Error(`Le bucket « ${LESSON_BUCKET} » n'existe pas encore dans Supabase (Storage → New bucket, nom « ${LESSON_BUCKET} », public).`);
-      if(r.status===403||/row-level security|Unauthorized/i.test(t))throw new Error("Envoi refusé par Supabase : les règles d'accès du bucket ne sont pas encore posées (voir le script SQL fourni).");
+      if(r.status===403||/row-level security|Unauthorized/i.test(t))throw new Error("Envoi refusé par Supabase : l'envoi de PDF est réservé aux administrateurs. Reconnecte-toi puis réessaie.");
       throw new Error(`Envoi du PDF impossible (HTTP ${r.status})${t?" — "+t.slice(0,160):""}`);
     }
     return `${SUPA_URL}/storage/v1/object/public/${LESSON_BUCKET}/${path}`;
   },
   deleteLessonFile: async (path) => {
     if(!path)return;
-    try{ await fetch(`${SUPA_URL}/storage/v1/object/${LESSON_BUCKET}/${path}`,{method:"DELETE",headers:{apikey:SUPA_KEY,Authorization:`Bearer ${SUPA_KEY}`}}); }catch{}
+    try{ await fetch(`${SUPA_URL}/storage/v1/object/${LESSON_BUCKET}/${path}`,{method:"DELETE",headers:{apikey:SUPA_KEY,Authorization:H.Authorization}}); }catch{}
   },
   upsertLesson: async (lesson) => {
     const row={
@@ -1927,7 +1929,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-10-11-reponse-signalements";
+const APP_VERSION="2026-10-12-envoi-pdf-admin";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
