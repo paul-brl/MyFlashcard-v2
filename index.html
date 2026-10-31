@@ -1993,7 +1993,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-10-31-refonte";
+const APP_VERSION="2026-10-31-cursus";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -2774,7 +2774,25 @@ const GROUPS = [
   { id:"physio",   label:"Physiologie",                                       sem:2, nums:[1,2,3,4] },
   { id:"medic",    label:"Introduction à la connaissance du médicament",      sem:2, nums:[1,2,3]   },
   { id:"ssh",      label:"Sciences sociales et humaines",                     sem:2, nums:[1,2,3]   },
+  // ─── 2e année d'odontologie, Lyon 1 (cursus « odonto2-lyon », offert) ───────
+  // Le préfixe « o2- » compte : la règle d'accès de la base (cards_read) ouvre
+  // ces matières aux comptes Lyon, et à eux seuls. Une matière sans carte
+  // s'affiche « Bientôt ».
+  { id:"o2-hhd",        label:"Histologie et histopathologie dentaire", sem:1, nums:[1], cursus:"odonto2-lyon" },
+  { id:"o2-biodev",     label:"Biologie du développement oro-facial",   sem:1, nums:[1], cursus:"odonto2-lyon" },
+  { id:"o2-genet",      label:"Génétique et anomalies dentaires",       sem:1, nums:[1], cursus:"odonto2-lyon" },
+  { id:"o2-anatdent",   label:"Anatomie dentaire",                      sem:1, nums:[1], cursus:"odonto2-lyon" },
+  { id:"o2-biomat",     label:"Biomatériaux",                           sem:1, nums:[1], cursus:"odonto2-lyon" },
+  { id:"o2-dentisterie",label:"Dentisterie restauratrice",              sem:1, nums:[1], cursus:"odonto2-lyon" },
+  { id:"o2-ecosys",     label:"Écosystème buccal",                      sem:1, nums:[1], cursus:"odonto2-lyon" },
 ];
+const CURSUS_LYON="odonto2-lyon";
+const cursusOf=g=>(g&&g.cursus)||"pass-grenoble";
+const ODONTO_IDS=GROUPS.filter(g=>g.cursus===CURSUS_LYON).map(g=>g.id);
+// Compte Lyon : ses matières ouvertes sont celles de Lyon, toutes offertes. Toute
+// la logique d'accès du site (userGroups / fullGroups) fonctionne alors telle quelle.
+const withCursus=u=>u&&u.role!=="admin"&&u.cursus===CURSUS_LYON
+  ?{...u,plan:{...(u.plan||{}),planId:"prerentree",groups:ODONTO_IDS,fullGroups:ODONTO_IDS}}:u;
 const CHAPTERS = {
   "cell-bio": {
     1: ["Définition de la cellule","Membranes","Mitochondries","RE, Golgi, Modif post-trad, Vésicules","Noyau, mitose"],
@@ -2803,6 +2821,9 @@ const CHAPTERS = {
   },
   "biostat": {
     1: ["Décrire","Estimer","Comparer et tester","Evaluer les performances"],
+  },
+  "o2-hhd": {
+    1: ["L'émail","La dentine","La pulpe dentaire","Les caries de l'émail et de la dentine","Les pulpopathies","La réparation du complexe pulpodentinaire","Les cellules souches de la pulpe"],
   },
 };
 const getChapters = (groupId, num) => CHAPTERS[groupId]?.[num] || [];
@@ -2864,8 +2885,8 @@ const TEMP_FREE_ACTIVE = false;
 const TEMP_FREE_COURSES = ["cell-bio:2", "histo:2"];
 const isTempFreeCourse = (groupId, num) =>
   TEMP_FREE_ACTIVE && TEMP_FREE_COURSES.includes(`${groupId}:${num}`);
-const SEM1 = GROUPS.filter(g=>g.sem===1).map(g=>g.id);
-const SEM2 = GROUPS.filter(g=>g.sem===2).map(g=>g.id);
+const SEM1 = GROUPS.filter(g=>g.sem===1&&!g.cursus).map(g=>g.id);
+const SEM2 = GROUPS.filter(g=>g.sem===2&&!g.cursus).map(g=>g.id);
 const ALL  = [...SEM1,...SEM2];
 const PLANS = [
   { id:"sem1",       label:"Semestre 1",      price:"99 €",   groups:SEM1, desc:"Toutes les matières du semestre 1" },
@@ -4005,6 +4026,7 @@ function LoginView({onLogin,onShowLanding,onRegister,accounts,onPasswordReset,th
 }
 // ─── Register ─────────────────────────────────────────────────────────────────
 function RegisterView({onRegister,onBack,accounts}){
+  const [cursus,setCursus]=useState(null);   // « pass-grenoble » ou « odonto2-lyon », choisi avant le formulaire
   const [step,setStep]=useState(1),[form,setForm]=useState({email:"",password:"",confirm:"",pseudo:"",phone:""}),[code,setCode]=useState(""),[error,setError]=useState(""),[sending,setSending]=useState(false),[verifying,setVerifying]=useState(false),[resendCooldown,setResendCooldown]=useState(0);
   const cooldownRef=useRef(null);
   const pwdState=validatePassword(form.password);
@@ -4021,13 +4043,13 @@ function RegisterView({onRegister,onBack,accounts}){
       // les droits nécessaires. Le navigateur n'écrit plus rien dans accounts.
       const {data,error}=await sb.auth.signUp({
         email,password:form.password,
-        options:{data:{pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX),phone:normalizePhone(form.phone),cgu_version:CGU_VERSION,cgu_accepted_at:new Date().toISOString(),marketing_opt_in:marketingOk,marketing_version:MARKETING_VERSION,marketing_wording:MARKETING_WORDING}},
+        options:{data:{cursus:cursus||"pass-grenoble",pseudo:form.pseudo.trim().slice(0,PSEUDO_MAX),phone:normalizePhone(form.phone),cgu_version:CGU_VERSION,cgu_accepted_at:new Date().toISOString(),marketing_opt_in:marketingOk,marketing_version:MARKETING_VERSION,marketing_wording:MARKETING_WORDING}},
       });
       if(error){setError(error.message.includes("already")?"Cette adresse email est déjà utilisée.":`Erreur : ${error.message}`);return;}
       savePseudoLocal(email,form.pseudo.trim().slice(0,PSEUDO_MAX));
       if(data.session){
         applySession(data.session);
-        onRegister({username:email,email,planId:"prerentree",groups:FREE_GROUP_IDS,user_id:data.user?.id||null});
+        onRegister({username:email,email,planId:"prerentree",groups:cursus===CURSUS_LYON?ODONTO_IDS:FREE_GROUP_IDS,cursus:cursus||"pass-grenoble",user_id:data.user?.id||null});
       } else {
         setStep(3); // confirmation par e-mail requise
       }
@@ -4041,7 +4063,18 @@ function RegisterView({onRegister,onBack,accounts}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:24}}>{[1,2].map(s=><React.Fragment key={s}><div style={{width:28,height:28,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:step>=s?C.accent:C.border,color:step>=s?"var(--c-onSolid)":C.textLt,fontSize:12,fontWeight:600}}>{step>s?"✓":s}</div>{s<2&&<div style={{width:40,height:2,background:step>1?C.accent:C.border}}/>}</React.Fragment>)}</div>
       <p style={{textAlign:"center",fontSize:12,color:C.textLt,margin:"0 0 20px"}}>{step===1?"Étape 1 — Informations":"Étape 2 — Confirmation email"}</p>
       <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"28px",boxShadow:"0 4px 24px rgba(0,0,0,0.06)"}}>
-        {step===1&&<div><div style={{background:C.utilBg,border:`1px solid var(--c-utilSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p></div><div><Lbl>Numéro de téléphone</Lbl><input style={{...iLine,borderColor:form.phone&&!validatePhone(form.phone)?C.again:C.border}} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/>{form.phone&&!validatePhone(form.phone)?<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Numéro invalide — format français ou international</p>:<p style={{fontSize:10.5,color:C.textLt,margin:"4px 0 0",lineHeight:1.5}}>Obligatoire · uniquement pour te joindre au sujet de ton compte</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))} autoComplete="new-password"/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()} autoComplete="new-password"/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div><div style={{display:"flex",flexDirection:"column",gap:12,marginTop:20}}><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}><input type="checkbox" checked={cguOk} onChange={e=>{setCguOk(e.target.checked);setError("");}} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>J'ai lu et j'accepte les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Conditions Générales d'Utilisation</a> de MyFlashCard.</span></label><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.textMed}}><input type="checkbox" checked={marketingOk} onChange={e=>setMarketingOk(e.target.checked)} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>{MARKETING_WORDING} <span style={{color:C.textLt}}>(facultatif)</span></span></label><p style={{fontSize:11,color:C.textLt,lineHeight:1.6,margin:"2px 0 0"}}>MFC SAS traite les informations renseignées afin de créer et gérer votre compte et de fournir les services MyFlashCard. Pour en savoir plus sur l'utilisation de vos données et vos droits, consultez notre <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>.</p></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
+        {step===1&&!cursus&&<div>
+          <p style={{fontFamily:serif,fontSize:19,margin:"0 0 6px",textAlign:"center"}}>Tu es en…</p>
+          <p style={{fontSize:12.5,color:C.textMed,margin:"0 0 18px",textAlign:"center",lineHeight:1.5}}>On te montrera les cartes de ton cursus, et seulement elles.</p>
+          {[[ "pass-grenoble","🩺","PASS à Grenoble","Toutes les matières du concours de médecine"],
+            [CURSUS_LYON,"🦷","2e année d'odontologie à Lyon","Les matières de la FGSO2, Lyon 1"]].map(([id,ic,t,d])=>
+            <button key={id} onClick={()=>setCursus(id)} style={{width:"100%",display:"flex",alignItems:"center",gap:14,textAlign:"left",padding:"14px 16px",marginBottom:10,cursor:"pointer",borderRadius:10,border:`1.5px solid ${C.border}`,background:C.surface,fontFamily:font,color:C.text}}>
+              <span style={{fontSize:26}} aria-hidden="true">{ic}</span>
+              <span><span style={{display:"block",fontSize:14.5,fontWeight:600}}>{t}</span><span style={{display:"block",fontSize:12,color:C.textMed,marginTop:2}}>{d}</span></span>
+            </button>)}
+        </div>}
+        {step===1&&cursus&&<p style={{fontSize:12,color:C.textMed,margin:"0 0 14px",textAlign:"center"}}>{cursus===CURSUS_LYON?"🦷 2e année d'odontologie à Lyon":"🩺 PASS à Grenoble"} · <button onClick={()=>setCursus(null)} style={{fontFamily:font,fontSize:12,background:"none",border:"none",padding:0,cursor:"pointer",color:C.accent,textDecoration:"underline"}}>changer</button></p>}
+        {step===1&&cursus&&<div><div style={{background:C.utilBg,border:`1px solid var(--c-utilSoft)`,borderRadius:8,padding:"10px 14px",marginBottom:22}}><p style={{fontSize:12,color:C.util,margin:0,lineHeight:1.6}}>✓ Accès gratuit aux <strong>cinq premières matières du semestre 1</strong>.</p></div><div style={{display:"flex",flexDirection:"column",gap:18}}><div><Lbl>Adresse email</Lbl><input style={{...iLine,borderColor:form.email&&!validateEmail(form.email)?C.again:C.border}} type="email" placeholder="votre@email.com" value={form.email} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/>{form.email&&!validateEmail(form.email)&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Format invalide</p>}</div><div><Lbl>Pseudonyme</Lbl><input style={iLine} maxLength={PSEUDO_MAX} placeholder="Ex. Marie23" value={form.pseudo} onChange={e=>setForm(p=>({...p,pseudo:e.target.value.slice(0,PSEUDO_MAX)}))}/><p style={{fontFamily:mono,fontSize:10,color:form.pseudo.length>=PSEUDO_MAX?C.imp:C.textLt,margin:"4px 0 0"}}>{form.pseudo.length}/{PSEUDO_MAX} caractères · modifiable plus tard</p></div><div><Lbl>Numéro de téléphone</Lbl><input style={{...iLine,borderColor:form.phone&&!validatePhone(form.phone)?C.again:C.border}} type="tel" inputMode="tel" autoComplete="tel" placeholder="06 12 34 56 78" value={form.phone} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/>{form.phone&&!validatePhone(form.phone)?<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Numéro invalide — format français ou international</p>:<p style={{fontSize:10.5,color:C.textLt,margin:"4px 0 0",lineHeight:1.5}}>Obligatoire · uniquement pour te joindre au sujet de ton compte</p>}</div><div><PasswordField label="Mot de passe" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))} autoComplete="new-password"/><PasswordStrength password={form.password}/></div><div><PasswordField label="Confirmer le mot de passe" value={form.confirm} onChange={e=>setForm(p=>({...p,confirm:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&handleSendCode()} autoComplete="new-password"/>{form.confirm&&form.confirm!==form.password&&<p style={{fontSize:11,color:C.again,margin:"4px 0 0"}}>Les mots de passe ne correspondent pas</p>}</div></div><div style={{display:"flex",flexDirection:"column",gap:12,marginTop:20}}><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.text}}><input type="checkbox" checked={cguOk} onChange={e=>{setCguOk(e.target.checked);setError("");}} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>J'ai lu et j'accepte les <a href="/cgu.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Conditions Générales d'Utilisation</a> de MyFlashCard.</span></label><label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer",fontSize:12.5,lineHeight:1.55,color:C.textMed}}><input type="checkbox" checked={marketingOk} onChange={e=>setMarketingOk(e.target.checked)} style={{width:18,height:18,marginTop:2,flexShrink:0,accentColor:C.accent}}/><span>{MARKETING_WORDING} <span style={{color:C.textLt}}>(facultatif)</span></span></label><p style={{fontSize:11,color:C.textLt,lineHeight:1.6,margin:"2px 0 0"}}>MFC SAS traite les informations renseignées afin de créer et gérer votre compte et de fournir les services MyFlashCard. Pour en savoir plus sur l'utilisation de vos données et vos droits, consultez notre <a href="/confidentialite.html" target="_blank" rel="noopener noreferrer" style={{color:C.accent}}>Politique de confidentialité</a>.</p></div>{error&&<p style={{fontSize:12,color:C.again,margin:"14px 0 0",background:C.againBg,padding:"8px 12px",borderRadius:6}}>{error}</p>}<Btn fill full style={{marginTop:24,fontSize:14,padding:"12px"}} onClick={handleSendCode} disabled={sending}>{sending?<><span style={{display:"inline-block",animation:"spin 0.8s linear infinite"}}>↻</span> Envoi…</>:"Recevoir le code →"}</Btn></div>}
         {step===2&&<div>
           <div style={{textAlign:"center",marginBottom:24}}>
             <p style={{fontSize:40,margin:"0 0 12px"}}>✉️</p>
@@ -8689,9 +8722,17 @@ function FoldBtn({on,style,title,onClick,children}){
   return <button className="mfc-act" disabled={!on} title={title} onClick={onClick} style={{fontFamily:font,minHeight:38,padding:"5px 4px",borderRadius:7,lineHeight:1.2,fontSize:11.5,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer",...(on?style:FOLD_OFF)}}>{children}</button>;
 }
 // packetsOnly : pas de ligne « Tout », seulement les trois paquets (espace « Régler mes J »).
+// Matière de Lyon annoncée mais encore sans carte.
+function SoonBlock({label}){
+  return <div style={{background:C.surface,border:`1px dashed ${C.border}`,borderRadius:10,marginBottom:12,padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,opacity:0.8}}>
+    <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.textMed}}>{label}</p>
+    <span style={{fontFamily:mono,fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:C.textLt,whiteSpace:"nowrap"}}>Bientôt</span>
+  </div>;
+}
 function FoldBlock({group,allCards,progress,canAccess,onUpgrade,headerRight,rowExtra,labelExtra,renderButtons,packetsOnly=false}){
   const [activeCours,setActiveCours]=useState(null);
   const [openRows,setOpenRows]=useState({});
+  if(group.cursus&&!allCards.some(c=>c.groupId===group.id))return <SoonBlock label={group.label}/>;
   if(!group.nums.some(n=>canAccess(group.id,n)))return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,opacity:0.75,padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
     <p style={{fontFamily:serif,fontSize:15,margin:0,color:C.textMed}}>{group.label}</p>
     <button onClick={()=>onUpgrade(group.id)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textLt,whiteSpace:"nowrap",flexShrink:0}}>🔒 Débloquer</button>
@@ -8920,7 +8961,7 @@ function SubTabs({items,active,onGo}){
     <span className="mfc-subline" style={{left:pos?pos.left:0,width:pos?pos.width:0,background:pos?pos.col:"transparent",opacity:pos?1:0}}/>
   </div>;
 }
-function StudentNav({activeTab,memory,onGo,semAccess,hasMessages,myCardsCount,todayPts,forumUnread,dmTotal}){
+function StudentNav({activeTab,memory,onGo,semAccess,hasMessages,myCardsCount,todayPts,forumUnread,dmTotal,oneSem=false}){
   const section=navSectionOf(activeTab);
   const lessons=activeTab==="cours1"||activeTab==="cours2";
   const unread=forumUnread+(hasMessages?dmTotal:0);
@@ -8942,7 +8983,7 @@ function StudentNav({activeTab,memory,onGo,semAccess,hasMessages,myCardsCount,to
     <div style={{display:"flex",alignItems:"center",gap:"4px 12px",flexWrap:"wrap",minWidth:0}}>
       {section==="rev"&&<>
         <div style={{display:"flex",flexShrink:0,border:`1.5px solid ${C.border}`,borderRadius:6,background:C.surface,overflow:"hidden"}}>
-          {[1,2].map(n=>{
+          {(oneSem?[1]:[1,2]).map(n=>{
             const on=memory.sem===n;
             return <button key={n} className="mfc-noz" onClick={()=>onGo((lessons?"cours":"sem")+n)} title={`Semestre ${n}`} style={{fontFamily:font,fontSize:12,fontWeight:on?600:400,padding:"5px 9px",cursor:"pointer",border:"none",borderLeft:n===2?"1px solid var(--c-borderSoft)":"none",background:on?C.accent:"transparent",color:on?"var(--c-onSolid)":C.textMed,whiteSpace:"nowrap"}}>S{n}{!semAccess[n]&&<span style={{fontSize:9,marginLeft:5}}>🔒</span>}</button>;
           })}
@@ -8974,6 +9015,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   const [showMethod,setShowMethod]=useState(false); // false ou l'id de la méthode dont on lit la fiche
   const userGroups=currentUser.plan?.groups||[];
   const fullGroups=currentUser.plan?.fullGroups||[];
+  const lyon=currentUser.role!=="admin"&&currentUser.cursus===CURSUS_LYON;   // 2e année d'odonto Lyon : offert, un seul semestre
   const currentPlan=PLANS.find(p=>p.id===currentUser.plan?.planId);
   const displayName=pseudo||defaultPseudo(currentUser.username);
   const [showUpgrade,setShowUpgradeRaw]=useState(false),[semNotice,setSemNotice]=useState(false);
@@ -8998,7 +9040,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     {id:"cours1",label:"📘 Cours S1",sem:1,price:"99 €",kind:"lessons"},
     {id:"sem2",label:"Semestre 2",sem:2,price:"149 €"},
     {id:"cours2",label:"📘 Cours S2",sem:2,price:"149 €",kind:"lessons"},
-  ];
+  ].filter(t=>!(currentUser.cursus===CURSUS_LYON&&!isAdmin&&t.sem===2));   // Lyon : un seul semestre pour l'instant
   // Le semestre affiché est-il encore proposé à la vente ? Sinon, on montre le
   // contenu verrouillé sans prix ni bouton : promettre un tarif pour une offre
   // qu'on ne vend pas serait pire que de ne rien dire.
@@ -9068,7 +9110,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   const accessibleCards=useMemo(()=>isAdmin?allCards:allCards.filter(c=>isCourseAccessible(c.groupId,c.num,userGroups,fullGroups)),[allCards,isAdmin,userGroups,fullGroups]);
   const groupsForTab=useCallback(tabId=>{
     const sem=TABS.find(t=>t.id===tabId)?.sem;
-    return GROUPS.filter(g=>g.sem===sem);
+    return GROUPS.filter(g=>g.sem===sem&&(isAdmin||cursusOf(g)===(currentUser.cursus||"pass-grenoble")));
   },[]);
   const accessibleGroupsForTab=useCallback(tabId=>{
     const gs=groupsForTab(tabId);
@@ -9146,6 +9188,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     const setActiveCours=n=>setOpenCourse(o=>({...o,[group.id]:n}));
     const chapters=activeCours?getDisplayChapters(group.id,activeCours,allCards):[];
     const groupLocked=!isAdmin&&!group.nums.some(n=>isCourseAccessible(group.id,n,userGroups,fullGroups));
+    if(group.cursus&&!allCards.some(c=>c.groupId===group.id))return <SoonBlock key={group.id} label={group.label}/>;
     if(groupLocked){
       return <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden",marginBottom:12,opacity:0.75}}>
         <div style={{padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
@@ -9220,13 +9263,13 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
         <div style={{minWidth:0,flex:"1 1 auto"}}>
           <p style={{fontSize:12,color:C.textLt,margin:"0 0 2px",fontFamily:mono,letterSpacing:1,textTransform:"uppercase",overflow:"hidden",textOverflow:"ellipsis"}}>Bonjour {displayName}</p>
           <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <p style={{fontSize:15,margin:0,color:C.text}}>{currentPlan?.label||"Accès gratuit"}</p>
-            <Tag color={currentPlan?.price==="Gratuit"?C.util:C.accent} bg={currentPlan?.price==="Gratuit"?C.utilBg:C.accentBg} small>{currentPlan?.price||"Gratuit"}</Tag>
+            <p style={{fontSize:15,margin:0,color:C.text}}>{lyon?"2e année d'odontologie · Lyon":currentPlan?.label||"Accès gratuit"}</p>
+            {!lyon&&<Tag color={currentPlan?.price==="Gratuit"?C.util:C.accent} bg={currentPlan?.price==="Gratuit"?C.utilBg:C.accentBg} small>{currentPlan?.price||"Gratuit"}</Tag>}
           </div>
         </div>
-        {!isAdmin&&PURCHASES_VISIBLE&&<button className="mfc-planbtn" onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"flex",alignItems:"center",justifyContent:"center",gap:7,flexShrink:0,whiteSpace:"nowrap"}}>💳 Voir les offres</button>}
+        {!isAdmin&&!lyon&&PURCHASES_VISIBLE&&<button className="mfc-planbtn" onClick={()=>setShowUpgrade(true)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"9px 18px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.accent}`,background:C.accentBg,color:C.accent,display:"flex",alignItems:"center",justifyContent:"center",gap:7,flexShrink:0,whiteSpace:"nowrap"}}>💳 Voir les offres</button>}
       </div>
-      {!isAdmin&&<StudentNav activeTab={activeTab} memory={navMemory} onGo={goTab} semAccess={{1:hasTabAccess(TABS.find(t=>t.id==="sem1")),2:hasTabAccess(TABS.find(t=>t.id==="sem2"))}} hasMessages={dm.rows!=="missing"} myCardsCount={(userCards||[]).length} todayPts={todayPts} forumUnread={forumUnread} dmTotal={dm.total}/>}
+      {!isAdmin&&<StudentNav activeTab={activeTab} memory={navMemory} onGo={goTab} oneSem={lyon} semAccess={{1:hasTabAccess(TABS.find(t=>t.id==="sem1")),2:hasTabAccess(TABS.find(t=>t.id==="sem2"))}} hasMessages={dm.rows!=="missing"} myCardsCount={(userCards||[]).length} todayPts={todayPts} forumUnread={forumUnread} dmTotal={dm.total}/>}
       {resumeInfo&&resumeInfo.ids&&resumeInfo.ids.length>0&&(
         <div style={{background:"var(--c-violetBg)",border:"1.5px solid var(--c-violetSoft)",borderRadius:12,padding:"14px 18px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",animation:"fadeIn 0.2s ease"}}>
           <div style={{minWidth:0,flex:"1 1 auto"}}>
@@ -10290,7 +10333,8 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
     setPseudoSaved(true);
     setTimeout(()=>setPseudoSaved(false),2000);
   };
-  const [rGroup,setRGroup]=useState(GROUPS[0]?.id||""),[rNum,setRNum]=useState(1),[rPkt,setRPkt]=useState("all");
+  const myGroups=GROUPS.filter(g=>currentUser?.role==="admin"||cursusOf(g)===(currentUser?.cursus||"pass-grenoble"));
+  const [rGroup,setRGroup]=useState(myGroups[0]?.id||""),[rNum,setRNum]=useState(1),[rPkt,setRPkt]=useState("all");
   const [rResetOrder,setRResetOrder]=useState(false);
   const [confirmReset,setConfirmReset]=useState(false),[resetPwd,setResetPwd]=useState(""),[resetErr,setResetErr]=useState(""),[resetDone,setResetDone]=useState(false);
   const [confirmDelAcc,setConfirmDelAcc]=useState(false),[delAccPwd,setDelAccPwd]=useState(""),[delAccErr,setDelAccErr]=useState(""),[delAccBusy,setDelAccBusy]=useState(false);
@@ -10374,7 +10418,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
           <p style={{fontSize:11,color:C.textMed,margin:0,lineHeight:1.6}}>Remet à zéro la progression de révision (les cartes redeviennent "Nouveau"), pour un paquet précis ou pour tout un cours. Action irréversible, confirmation par mot de passe requise.</p>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <select value={rGroup} onChange={e=>{setRGroup(e.target.value);setRNum(1);}} style={{...iBox,flex:"1 1 200px",fontSize:12,padding:"8px 10px"}}>
-              {GROUPS.map(g=><option key={g.id} value={g.id}>{groupLabel(g)}</option>)}
+              {myGroups.map(g=><option key={g.id} value={g.id}>{groupLabel(g)}</option>)}
             </select>
             <select value={rNum} onChange={e=>setRNum(Number(e.target.value))} style={{...iBox,flex:"0 1 110px",fontSize:12,padding:"8px 10px"}}>
               {(GROUPS.find(g=>g.id===rGroup)?.nums||[1]).map(n=><option key={n} value={n}>Cours {n}</option>)}
@@ -10934,7 +10978,7 @@ function App(){
   const [promoTick,setPromoTick]=useState(0);
   useEffect(()=>{ const t=setInterval(()=>setPromoTick(n=>n+1),60000); return()=>clearInterval(t); },[]);
   const myAccount=useMemo(()=>accounts.find(a=>a.username===uname)||null,[accounts,uname]);
-  const promo=useMemo(()=>currentUser&&currentUser.role!=="admin"&&promoEligible(myAccount),[myAccount,currentUser,promoTick]);
+  const promo=useMemo(()=>currentUser&&currentUser.role!=="admin"&&currentUser.cursus!==CURSUS_LYON&&promoEligible(myAccount),[myAccount,currentUser,promoTick]);
   const changeStudyMode=useCallback(m=>{
     setStudyMode(m);
     if(uname)saveStudyMode(uname,m);
@@ -11070,7 +11114,7 @@ function App(){
             ? derivePaidGroups(freshAcc,saved.username)
             : [...new Set([...(isPaidPlan(planId)?(PLANS.find(p=>p.id===planId)?.groups||[]):[]),...extra])];
           const restoredFullGroups=computeFullGroups(planId,restoredPaid,[]);
-          const restored={...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}};
+          const restored=withCursus({...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}});
           setProg(startProgressSession(saved.username));
           refreshProgressFromCloud(saved.username);
           setPseudo(getPseudo(saved.username));
@@ -11155,7 +11199,7 @@ function App(){
           const extra=getExtraGroups(currentUser.username);
           const mergedGroups=computeGroups(subPlanId,supaGroups,extra);
           const mergedFullGroups=computeFullGroups(subPlanId,derivePaidGroups(acc,currentUser.username),[]);
-          const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}};
+          const newUser=withCursus({...currentUser,cursus:acc.cursus||currentUser.cursus||"pass-grenoble",plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}});
           setCurrentUser(newUser);
           storage.set("mx6-session",newUser);
         }catch{}
@@ -11183,9 +11227,9 @@ function App(){
     if(!acc){ await new Promise(r=>setTimeout(r,500)); acc=await supa.getAccount(lc); }
     if(!isAdmin)setPaidFromPurchases(await supa.getMyPurchases());
     const subPlanId=isAdmin?"both":toSubscriptionPlan(acc?.plan_id||acc?.planId);
-    const groups=isAdmin?ALL:computeGroups(subPlanId,Array.isArray(acc?.groups)?acc.groups:[],getExtraGroups(lc));
+    const groups=isAdmin?[...ALL,...ODONTO_IDS]:computeGroups(subPlanId,Array.isArray(acc?.groups)?acc.groups:[],getExtraGroups(lc));
     const fullGroups=isAdmin?ALL:computeFullGroups(subPlanId,derivePaidGroups(acc,lc),[]);
-    const u={username:lc,role:isAdmin?"admin":"student",plan:{planId:subPlanId,groups,fullGroups}};
+    const u=withCursus({username:lc,role:isAdmin?"admin":"student",cursus:acc?.cursus||"pass-grenoble",plan:{planId:subPlanId,groups,fullGroups}});
     setProg(startProgressSession(lc));
     refreshProgressFromCloud(lc);
     setPseudo(getPseudo(lc));
@@ -11378,7 +11422,7 @@ function App(){
   const handleRegister=useCallback(async newAcc=>{
     await supa.upsertAccount(newAcc);
     setAccounts(p=>[...p,{...newAcc,plan_id:newAcc.planId}]);
-    const u={username:newAcc.username,role:"student",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}};
+    const u=withCursus({username:newAcc.username,role:"student",cursus:newAcc.cursus||"pass-grenoble",plan:{planId:newAcc.planId,groups:newAcc.groups,fullGroups:[]}});
     setProg(startProgressSession(newAcc.username));
     // Pseudonyme choisi à l'inscription : enregistré en local puis poussé vers
     // la table "profiles" (best-effort — si elle n'existe pas, le local suffit).
@@ -11568,9 +11612,9 @@ function App(){
           supa.updatePaidGroups(currentUser.username,mergedPaid).catch(()=>{});
         }
         const curStr=JSON.stringify([...(currentUser.plan?.groups||[])].sort());
-        const newStr=JSON.stringify([...mergedGroups].sort());
-        if(subPlanId!==currentUser.plan?.planId||curStr!==newStr){
-          const newUser={...currentUser,plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}};
+        const newStr=JSON.stringify([...(withCursus({...currentUser,cursus:acc.cursus||currentUser.cursus,plan:{groups:mergedGroups}}).plan.groups)].sort());
+        if(subPlanId!==currentUser.plan?.planId||curStr!==newStr||(acc.cursus&&acc.cursus!==currentUser.cursus)){
+          const newUser=withCursus({...currentUser,cursus:acc.cursus||currentUser.cursus||"pass-grenoble",plan:{planId:subPlanId,groups:mergedGroups,fullGroups:mergedFullGroups}});
           setCurrentUser(newUser);
           storage.set("mx6-session",newUser);
         }
