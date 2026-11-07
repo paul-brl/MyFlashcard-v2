@@ -38,6 +38,8 @@
       --c-easyBg: #eff6ff;
       --c-onSolid: #ffffff;
       --c-violet: #7c3aed;
+      --c-schema: #3d3a36;
+      --c-schemaBg: #f0ece6;
       --c-violetBg: #f5f3ff;
       --c-violetBg2: #ede9fe;
       --c-violetTint: #faf8ff;
@@ -126,6 +128,8 @@
       --c-easyBg: #1c2a44;
       --c-onSolid: #1c1b22;
       --c-violet: #b48ef5;
+      --c-schema: #d9d4cd;
+      --c-schemaBg: #2b2926;
       --c-violetBg: #2a2140;
       --c-violetBg2: #35275c;
       --c-violetTint: #23203a;
@@ -2034,7 +2038,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-06-classement-reseaux";
+const APP_VERSION="2026-11-07-schemas";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -3272,11 +3276,38 @@ function globalDue(cards,prog,ids,settings,pkId=null){
 function globalReviewDueCards(cards,prog,ids,pkId=null){
   return cards.filter(c=>{
     if(!ids.includes(c.groupId))return false;
-    if(pkId&&effPkt(c,prog)!==pkId)return false;
+    if(pkId&&(pkId===SCHEMAS?c.card_type!=="occlusion":effPkt(c,prog)!==pkId))return false;
     const p=prog[c.id];
     return p&&!p.buried&&p.state==="review"&&isDue(p);
   });
 }
+// ─── Paquet virtuel « Schémas » ──────────────────────────────────────────────
+// Les cartes à images (occlusion) restent dans leurs paquets habituels et dans
+// toutes les révisions mélangées. « Schémas » est seulement une autre façon de
+// les sélectionner : même carte, même progression, aucun doublon.
+const SCHEMAS="__schemas__";
+const _occCache=new WeakMap();
+function occCards(cards){let a=_occCache.get(cards);if(!a){a=cards.filter(c=>c.card_type==="occlusion");_occCache.set(cards,a);}return a;}
+// Même définition que l'index des paquets : à revoir, nouvelles, à jour.
+// num : un cours, ou une liste de cours (toute la matière, cours débloqués) ;
+// chId "__course__" = tout le cours ; pkId "__all__" = les trois paquets.
+function schemaStats(cards,prog,gid,num,chId,pkId="__all__"){
+  let rev=0,nw=0,up=0,total=0;
+  for(const c of occCards(cards)){
+    if(c.groupId!==gid||(Array.isArray(num)?!num.includes(c.num):c.num!==num))continue;
+    if(chId!=="__course__"&&c.chapterId!==chId)continue;
+    if(pkId!=="__all__"&&effPkt(c,prog)!==pkId)continue;
+    const p=prog[c.id];
+    if(p?.buried)continue;
+    total++;
+    if(isDue(p)){if(isNew(p))nw++;else rev++;}
+    else if(p&&!isNew(p))up++;
+  }
+  return {rev,nw,up,total};
+}
+// Une séance de schémas suit l'ordre du cours : les légendes d'un même schéma
+// passent d'affilée, dans l'ordre du raisonnement.
+const schemaOrder=(a,b)=>((a.num??0)-(b.num??0))||((a.chapterId??0)-(b.chapterId??0))||((a.sort_order??0)-(b.sort_order??0))||String(a.id).localeCompare(String(b.id));
 function globalReviewDue(cards,prog,ids,pkId=null){
   return globalReviewDueCards(cards,prog,ids,pkId).length;
 }
@@ -3814,7 +3845,7 @@ function awardJPoints(username,cardId,j,packetId){
 }
 // ─── Design ──────────────────────────────────────────────────────────────────
 const C={bg:"var(--c-bg)",surface:"var(--c-surface)",border:"var(--c-border)",text:"var(--c-text)",textMed:"var(--c-textMed)",textLt:"var(--c-textLt)",accent:"var(--c-accent)",accentBg:"var(--c-accentBg)",prio:"var(--c-prio)",prioBg:"var(--c-prioBg)",imp:"var(--c-imp)",impBg:"var(--c-impBg)",util:"var(--c-util)",utilBg:"var(--c-utilBg)",again:"var(--c-again)",againBg:"var(--c-againBg)",hard:"var(--c-hard)",hardBg:"var(--c-hardBg)",good:"var(--c-good)",goodBg:"var(--c-goodBg)",easy:"var(--c-easy)",easyBg:"var(--c-easyBg)"};
-const pC=id=>id==="prioritaire"?C.prio:id==="important"?C.imp:C.util;
+const pC=id=>id==="prioritaire"?C.prio:id==="important"?C.imp:id===SCHEMAS?"var(--c-schema)":C.util;
 const parseContent=raw=>{
   if(!raw)return{text:"",img:null};
   try{const p=JSON.parse(raw);if(p?.type==="occlusion")return{text:"",img:null};if(p?.text!==undefined)return{text:p.text||"",img:p.img||null};}catch{}
@@ -3865,7 +3896,7 @@ function ImageDropZone({value,onChange,label="Image (optionnelle)"}){
     </div>
   );
 }
-const pB=id=>id==="prioritaire"?C.prioBg:id==="important"?C.impBg:C.utilBg;
+const pB=id=>id==="prioritaire"?C.prioBg:id==="important"?C.impBg:id===SCHEMAS?"var(--c-schemaBg)":C.utilBg;
 const font="system-ui,-apple-system,'Segoe UI',sans-serif";
 const serif="Georgia,'Times New Roman',serif";
 const mono="'Courier New',Courier,monospace";
@@ -8272,49 +8303,21 @@ function CountChips({c,onPick}){
   </span>;
 }
 // ─── Fenêtre « Nouveautés » ──────────────────────────────────────────────────
-// Montrée une seule fois par appareil après une mise à jour du site
-// (settings.newsSeen !== NEWS_ID), revoyable depuis les Paramètres. Changer
-// NEWS_ID (et le texte) pour annoncer une prochaine mise à jour.
-const NEWS_ID="2026-11-refonte";
+// Montrée une seule fois à chaque étudiant (settings.newsSeen !== NEWS_ID).
+// Changer NEWS_ID (et le texte) pour annoncer une prochaine mise à jour.
+const NEWS_ID="2026-11-schemas";
 function NewsModal({onClose}){
-  const [step,setStep]=useState(0);
   const P=({children})=><p style={{fontSize:13.5,lineHeight:1.6,color:C.textMed,margin:"0 0 12px"}}>{children}</p>;
   const B=({children})=><b style={{color:C.text}}>{children}</b>;
-  const steps=[
-    {icon:"📚",title:"Ta page de révision a changé",body:<>
-      <P>Ouvre une matière, clique sur <B>Cours 1, 2…</B>, puis sur une ligne (le cours complet ou un chapitre) : tu retrouves tes paquets <B>Prioritaire</B>, <B>Important</B> et <B>Utile</B>.</P>
-      <P>Chaque bouton a sa couleur :</P>
-      <div style={{margin:"-4px 0 14px"}}><CountLegend/></div>
-      <P><B>À faire</B> mélange tes nouvelles cartes et celles à revoir. Les pastilles à côté du nom d'une matière lancent toute la matière d'un coup.</P>
-    </>},
-    {icon:"♾️",title:"Plus de limite par jour",body:<>
-      <P>Tu révises <B>autant de cartes que tu veux</B>. Toutes les 100 cartes, une petite pause t'est proposée : tu continues ou tu t'arrêtes.</P>
-      <P>Les nouvelles cartes arrivent <B>intercalées</B> : une toutes les 5 révisions. Tu changes ça dans la petite fenêtre qui s'ouvre avant chaque session.</P>
-      <P><B>À jour</B> sert à revoir en avance les cartes déjà maîtrisées, sans toucher à ton planning.</P>
-    </>},
-    {icon:"⏱️",title:"Pendant la révision",body:<>
-      <P>Sous la carte : un <B>chrono</B> facultatif (éteint au départ), <B>Précédente</B>, <B>Adapter</B> pour écrire ta propre version de la carte, et <B>Enfouir</B> pour la mettre de côté.</P>
-      <P>Une erreur dans une carte ? <B>Signale-la</B> : on la corrige et tu reçois la réponse dans tes <B>Messages</B>.</P>
-    </>},
-    {icon:"📅",title:"Méthode des J",body:<>
-      <P>Le grand bouton <B>Régler mes J</B> te laisse choisir tes jours de révision par paquet, chapitre ou cours. Avant d'appliquer, tu vois exactement ce qui va changer.</P>
-      <P>Sous chaque méthode (Anki, J, personnalisée), <B>ⓘ Comment ça marche</B> t'explique son fonctionnement.</P>
-    </>},
-  ];
-  const st=steps[step], last=step===steps.length-1;
   return <Modal onClose={onClose} width={460}>
-    <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Nouveau sur MyFlashcard · {step+1}/{steps.length}</p>
-    <p style={{fontFamily:serif,fontSize:22,margin:"0 0 16px",lineHeight:1.25}}><span aria-hidden="true">{st.icon}</span> {st.title}</p>
-    {st.body}
-    <div style={{background:"var(--c-upBg)",border:"1px solid var(--c-upBd)",color:"var(--c-upFg)",borderRadius:8,padding:"9px 12px",fontSize:12.5,lineHeight:1.5,margin:"6px 0 18px"}}>✓ Ta progression n'a pas bougé : toutes tes cartes et tes révisions sont là.</div>
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-      <span style={{display:"inline-flex",gap:6}} aria-hidden="true">{steps.map((_,i)=><span key={i} style={{width:7,height:7,borderRadius:"50%",background:i===step?"var(--c-todo)":C.border}}/>)}</span>
-      <span style={{display:"inline-flex",gap:8}}>
-        {step>0&&<Btn small onClick={()=>setStep(step-1)}>Précédent</Btn>}
-        <Btn fill small onClick={()=>last?onClose():setStep(step+1)}>{last?"C'est parti":"Suivant"}</Btn>
-      </span>
+    <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Nouveau sur MyFlashcard</p>
+    <p style={{fontFamily:serif,fontSize:22,margin:"0 0 16px",lineHeight:1.25}}><span aria-hidden="true">🖼️</span> Un onglet pour tes schémas</p>
+    <P>Les schémas du cours sont dans tes cartes : une légende est cachée, à toi de la retrouver.</P>
+    <P>Pour ne travailler <B>que les schémas</B>, ouvre le nouvel onglet <B>Schémas</B>, à côté de Flashcards. Tu les retrouves par <B>matière</B>, <B>cours</B> et <B>chapitre</B>, en <B>Prioritaire</B>, <B>Important</B> ou <B>Utile</B>. Les légendes d'un même schéma passent à la suite.</P>
+    <P>Ce sont les mêmes cartes que dans tes flashcards : elles y restent, et ta progression est commune.</P>
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:18}}>
+      <Btn fill small onClick={onClose}>C'est parti</Btn>
     </div>
-    {last&&<p style={{fontSize:11,color:C.textLt,margin:"14px 0 0",textAlign:"center"}}>Tu pourras revoir ce message dans tes Paramètres.</p>}
   </Modal>;
 }
 function CountLegend(){
@@ -9056,6 +9059,7 @@ function SubTabs({items,active,onGo}){
 function StudentNav({activeTab,memory,onGo,semAccess,hasMessages,myCardsCount,todayPts,forumUnread,dmTotal,oneSem=false}){
   const section=navSectionOf(activeTab);
   const lessons=activeTab==="cours1"||activeTab==="cours2";
+  const schemasTab=activeTab==="schemas1"||activeTab==="schemas2";
   const unread=forumUnread+(hasMessages?dmTotal:0);
   const unreadTitle=n=>`${n} message${n>1?"s":""} non lu${n>1?"s":""}`;
   const pill=(n,bg,title)=><span title={title} style={{fontFamily:mono,fontSize:8,fontWeight:700,padding:"1px 6px",borderRadius:10,background:bg,color:"var(--c-onSolid)"}}>{n}</span>;
@@ -9077,13 +9081,14 @@ function StudentNav({activeTab,memory,onGo,semAccess,hasMessages,myCardsCount,to
         <div style={{display:"flex",flexShrink:0,border:`1.5px solid ${C.border}`,borderRadius:6,background:C.surface,overflow:"hidden"}}>
           {(oneSem?[1]:[1,2]).map(n=>{
             const on=memory.sem===n;
-            return <button key={n} className="mfc-noz" onClick={()=>onGo((lessons?"cours":"sem")+n)} title={`Semestre ${n}`} style={{fontFamily:font,fontSize:12,fontWeight:on?600:400,padding:"5px 9px",cursor:"pointer",border:"none",borderLeft:n===2?"1px solid var(--c-borderSoft)":"none",background:on?C.accent:"transparent",color:on?"var(--c-onSolid)":C.textMed,whiteSpace:"nowrap"}}>S{n}{!semAccess[n]&&<span style={{fontSize:9,marginLeft:5}}>🔒</span>}</button>;
+            return <button key={n} className="mfc-noz" onClick={()=>onGo((lessons?"cours":schemasTab?"schemas":"sem")+n)} title={`Semestre ${n}`} style={{fontFamily:font,fontSize:12,fontWeight:on?600:400,padding:"5px 9px",cursor:"pointer",border:"none",borderLeft:n===2?"1px solid var(--c-borderSoft)":"none",background:on?C.accent:"transparent",color:on?"var(--c-onSolid)":C.textMed,whiteSpace:"nowrap"}}>S{n}{!semAccess[n]&&<span style={{fontSize:9,marginLeft:5}}>🔒</span>}</button>;
           })}
         </div>
         <SubTabs active={activeTab} onGo={onGo} items={[
           sub("sem"+memory.sem,"Flashcards","var(--c-accent)"),
+          sub("schemas"+memory.sem,"Schémas","var(--c-accent)"),
           sub("cours"+memory.sem,"Cours","var(--c-accent)"),
-          sub("mes-cartes","Mes cartes","var(--c-violet)",myCardsCount>0&&pill(myCardsCount,"var(--c-violet)")),
+          sub("mes-cartes","Mes cartes","var(--c-accent)",myCardsCount>0&&pill(myCardsCount,"var(--c-accent)")),
         ]}/>
       </>}
       {section==="prog"&&<>
@@ -9132,6 +9137,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     {id:"cours1",label:"📘 Cours S1",sem:1,price:"99 €",kind:"lessons"},
     {id:"sem2",label:"Semestre 2",sem:2,price:"149 €"},
     {id:"cours2",label:"📘 Cours S2",sem:2,price:"149 €",kind:"lessons"},
+    {id:"schemas1",label:"Schémas S1",sem:1,price:"99 €",kind:"schemas"},
+    {id:"schemas2",label:"Schémas S2",sem:2,price:"149 €",kind:"schemas"},
   ].filter(t=>!(currentUser.cursus===CURSUS_LYON&&!isAdmin&&t.sem===2));   // Lyon : un seul semestre pour l'instant
   // Le semestre affiché est-il encore proposé à la vente ? Sinon, on montre le
   // contenu verrouillé sans prix ni bouton : promettre un tarif pour une offre
@@ -9256,18 +9263,18 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   // Les quatre boutons d'une ligne : à faire, nouvelles, à revoir, à jour.
   // pk : paquet de la ligne, qui donne sa teinte au bouton « à faire ».
   function actButtons(c,scope,pk){
-    const {gid,num,chapterId,pkId}=scope;
+    const {gid,num,chapterId,pkId,sch=false}=scope;
     const todo=c.rev+c.nw;
     const off={cursor:"default",border:`1.5px dashed ${C.border}`,background:"transparent",color:C.textLt,fontWeight:400};
     const base={fontFamily:font,minHeight:38,padding:"5px 4px",borderRadius:7,lineHeight:1.2,fontSize:11.5,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",cursor:"pointer"};
     const mixOn=pk?{border:`1.5px solid ${pC(pk.id)}`,background:pB(pk.id),color:pC(pk.id)}:{border:"1.5px solid var(--c-todo)",background:"var(--c-todo)",color:"var(--c-todoFg)"};
     const kinds=[
-      {k:"nw",n:c.nw,txt:n=>`${fmtN(n)} nouvelle${n>1?"s":""}`,none:"Aucune nouvelle",on:{border:"1.5px solid var(--c-nwBd)",background:"var(--c-nwBg)",color:"var(--c-nwFg)"},go:()=>onStudy(gid,num,chapterId,pkId,"new")},
-      {k:"rev",n:c.rev,txt:n=>`${fmtN(n)} à revoir`,none:"Aucune à revoir",on:{border:"1.5px solid var(--c-revBd)",background:"var(--c-revBg)",color:"var(--c-revFg)"},go:()=>onStudy(gid,num,chapterId,pkId,"rev")},
-      {k:"up",n:c.up,txt:n=>`${fmtN(n)} à jour`,none:"Aucune à jour",on:{border:"1.5px solid var(--c-upBd)",background:"var(--c-upBg)",color:"var(--c-upFg)"},go:()=>onStudyCram&&onStudyCram(gid,num,chapterId==="__course__"?"__all__":chapterId,pkId)},
+      {k:"nw",n:c.nw,txt:n=>`${fmtN(n)} nouvelle${n>1?"s":""}`,none:"Aucune nouvelle",on:{border:"1.5px solid var(--c-nwBd)",background:"var(--c-nwBg)",color:"var(--c-nwFg)"},go:()=>onStudy(gid,num,chapterId,pkId,"new",sch)},
+      {k:"rev",n:c.rev,txt:n=>`${fmtN(n)} à revoir`,none:"Aucune à revoir",on:{border:"1.5px solid var(--c-revBd)",background:"var(--c-revBg)",color:"var(--c-revFg)"},go:()=>onStudy(gid,num,chapterId,pkId,"rev",sch)},
+      {k:"up",n:c.up,txt:n=>`${fmtN(n)} à jour`,none:"Aucune à jour",on:{border:"1.5px solid var(--c-upBd)",background:"var(--c-upBg)",color:"var(--c-upFg)"},go:()=>onStudyCram&&onStudyCram(gid,num,chapterId==="__course__"?"__all__":chapterId,pkId,sch)},
     ];
     return [
-      <button key="mix" className="mfc-act" disabled={todo===0} onClick={()=>askLaunch("mix",c,()=>onStudy(gid,num,chapterId,pkId))} style={{...base,...(todo>0?mixOn:off)}}>{todo>0?`${fmtN(todo)} à faire`:"Rien à faire"}</button>,
+      <button key="mix" className="mfc-act" disabled={todo===0} onClick={()=>askLaunch("mix",c,()=>onStudy(gid,num,chapterId,pkId,null,sch))} style={{...base,...(todo>0?mixOn:off)}}>{todo>0?`${fmtN(todo)} à faire`:"Rien à faire"}</button>,
       ...kinds.map(K=><button key={K.k} className="mfc-act" disabled={K.n===0} onClick={()=>askLaunch(K.k,c,K.go)} style={{...base,...(K.n>0?K.on:off)}}>{K.n>0?K.txt(K.n):K.none}</button>)
     ];
   }
@@ -9275,9 +9282,12 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   // Appelé comme une fonction (GroupBlock({group})) et non en <GroupBlock/> : défini dans
   // Dashboard, il serait un nouveau composant à chaque affichage, et React détruirait puis
   // recréerait tout le bloc (clignotement, cours refermé). Ne pas y mettre de useState.
-  function GroupBlock({group}){
-    const activeCours=openCourse[group.id]??null;
-    const setActiveCours=n=>setOpenCourse(o=>({...o,[group.id]:n}));
+  // sch : onglet « Schémas » : mêmes matières, cours, chapitres et paquets, mais
+  // seulement les cartes à images. Cours et chapitres sans schéma n'apparaissent pas.
+  function GroupBlock({group,sch=false}){
+    const ok=sch?`s:${group.id}`:group.id;   // l'onglet Schémas garde ses propres cours ouverts
+    const activeCours=openCourse[ok]??null;
+    const setActiveCours=n=>setOpenCourse(o=>({...o,[ok]:n}));
     const chapters=activeCours?getDisplayChapters(group.id,activeCours,allCards):[];
     const groupLocked=!isAdmin&&!group.nums.some(n=>isCourseAccessible(group.id,n,userGroups,fullGroups));
     if(group.cursus&&!allCards.some(c=>c.groupId===group.id))return <SoonBlock key={group.id} label={group.label}/>;
@@ -9292,20 +9302,21 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
       </div>;
     }
     const nums=group.nums.filter(n=>isAdmin||isCourseAccessible(group.id,n,userGroups,fullGroups));
-    const gc=groupCounts(allCards,progress,group.id,nums);
+    const gc=sch?schemaStats(allCards,progress,group.id,nums,"__course__"):groupCounts(allCards,progress,group.id,nums);
     // Pastilles de la matière : toute la matière, cours débloqués seulement.
     const pickGroup=k=>askLaunch(k,gc,k==="up"
-      ?()=>onStudyCram&&onStudyCram(group.id,"__all__","__all__","__all__")
-      :()=>onStudy(group.id,"__all__","__course__","__all__",k==="mix"?null:k));
+      ?()=>onStudyCram&&onStudyCram(group.id,"__all__","__all__","__all__",sch)
+      :()=>onStudy(group.id,"__all__","__course__","__all__",k==="mix"?null:k,sch));
+    const hasSch=(n,ch="__course__")=>schemaStats(allCards,progress,group.id,n,ch).total>0;
     // Une ligne dépliable : le cours complet (en tête) ou un chapitre.
     const renderRow=({rowKey,num,name,per,chapterId,allLabel,isCourse})=>{
       const all=sumC(per);
-      const isOpen=!!openRows[rowKey];
+      const isOpen=!!openRows[(sch?"s:":"")+rowKey];
       const todo=all.rev+all.nw;
       const userN=isCourse?0:(userCards||[]).filter(c=>c.groupId===group.id&&c.num===activeCours&&c.chapterId===chapterId).length;
       const lines=[{label:allLabel,col:"var(--c-todo)",c:all,pkId:"__all__",pk:null},...PACKETS.map((pk,i)=>({label:pk.label,col:pC(pk.id),c:per[i],pkId:pk.id,pk}))];
       return <div key={rowKey} style={{borderTop:"1px solid var(--c-borderSoft)",background:isOpen?"var(--c-cream)":isCourse?"var(--c-creamHead)":C.surface}}>
-        <button className="mfc-row" onClick={()=>setOpenRows(o=>({...o,[rowKey]:!o[rowKey]}))} aria-expanded={isOpen} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 18px 10px 12px",cursor:"pointer",border:"none",background:"transparent",textAlign:"left",color:C.text,fontFamily:font}}>
+        <button className="mfc-row" onClick={()=>{const k=(sch?"s:":"")+rowKey;setOpenRows(o=>({...o,[k]:!o[k]}));}} aria-expanded={isOpen} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 18px 10px 12px",cursor:"pointer",border:"none",background:"transparent",textAlign:"left",color:C.text,fontFamily:font}}>
           <span className="mfc-chev" style={{display:"inline-flex",flexShrink:0,color:C.textMed}}><svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{transform:`rotate(${isOpen?90:0}deg)`,transition:"transform .18s ease"}}><path d="M6 3.5 10.5 8 6 12.5"/></svg></span>
           {num!=null&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:1,color:C.textLt,minWidth:12,flexShrink:0}}>{num}</span>}
           <span style={{fontSize:13,fontWeight:isCourse||isOpen?700:todo>0?500:400,color:isCourse?"var(--c-todo)":C.text,lineHeight:1.3}}>{name}</span>
@@ -9314,7 +9325,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
         {isOpen&&<div style={{display:"flex",flexDirection:"column",gap:6,padding:"2px 18px 14px 44px"}}>
           {lines.map(line=><div key={line.pkId} className="mfc-pkrow">
             <span className="mfc-pklab" style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11.5,fontWeight:700,color:line.col}}><span style={{width:7,height:7,borderRadius:"50%",background:line.col,display:"inline-block",flexShrink:0}}/>{line.label}</span>
-            {actButtons(line.c,{gid:group.id,num:activeCours,chapterId,pkId:line.pkId},line.pk)}
+            {actButtons(line.c,{gid:group.id,num:activeCours,chapterId,pkId:line.pkId,sch},line.pk)}
           </div>)}
         </div>}
       </div>;
@@ -9325,7 +9336,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
         <CountChips c={gc} onPick={pickGroup}/>
       </div>
       <div style={{display:"flex",gap:8,padding:"10px 18px",flexWrap:"wrap",background:C.surface}}>
-        {group.nums.map(n=>{
+        {group.nums.filter(n=>!sch||hasSch(n)).map(n=>{
           const locked=!isAdmin&&!isCourseAccessible(group.id,n,userGroups,fullGroups);
           const active=activeCours===n;
           return <button key={n} className={locked?undefined:"mfc-pill"} aria-expanded={locked?undefined:active} onClick={()=>locked?(PURCHASES_VISIBLE&&setShowUpgrade(group.id)):setActiveCours(active?null:n)} style={{fontFamily:font,fontSize:12.5,fontWeight:active?600:400,padding:"7px 16px",cursor:"pointer",borderRadius:7,border:`1.5px solid ${active?"var(--c-todo)":C.border}`,background:active?"var(--c-creamHead)":C.surface,color:locked?C.textLt:active?"var(--c-todo)":C.textMed,display:"flex",alignItems:"center",gap:6,opacity:locked?0.7:1}}>Cours {n}{locked&&<span style={{fontSize:10}}>🔒</span>}</button>;
@@ -9336,8 +9347,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
           {!allCards.some(c=>c.groupId===group.id&&c.num===activeCours)
             ?<div style={{padding:"14px 18px",borderTop:"1px solid var(--c-borderSoft)"}}><p style={{fontSize:12,color:C.textLt,margin:0}}>Aucune carte pour ce cours.</p></div>
             :<>
-              {renderRow({rowKey:`${group.id}-${activeCours}-0`,num:null,name:`Cours ${activeCours} complet`,per:PACKETS.map(pk=>coursePacketStats(allCards,progress,group.id,activeCours,pk.id)),chapterId:"__course__",allLabel:"Tout le cours",isCourse:true})}
-              {chapters.map((chName,i)=>renderRow({rowKey:`${group.id}-${activeCours}-${i+1}`,num:i+1,name:chName,per:PACKETS.map(pk=>chapterStats(allCards,progress,group.id,activeCours,i+1,pk.id)),chapterId:i+1,allLabel:"Tout le chapitre",isCourse:false}))}
+              {renderRow({rowKey:`${group.id}-${activeCours}-0`,num:null,name:sch?`Cours ${activeCours} · tous les schémas`:`Cours ${activeCours} complet`,per:PACKETS.map(pk=>sch?schemaStats(allCards,progress,group.id,activeCours,"__course__",pk.id):coursePacketStats(allCards,progress,group.id,activeCours,pk.id)),chapterId:"__course__",allLabel:sch?"Tous les schémas":"Tout le cours",isCourse:true})}
+              {chapters.map((chName,i)=>(!sch||hasSch(activeCours,i+1))&&renderRow({rowKey:`${group.id}-${activeCours}-${i+1}`,num:i+1,name:chName,per:PACKETS.map(pk=>sch?schemaStats(allCards,progress,group.id,activeCours,i+1,pk.id):chapterStats(allCards,progress,group.id,activeCours,i+1,pk.id)),chapterId:i+1,allLabel:sch?"Tous les schémas du chapitre":"Tout le chapitre",isCourse:false}))}
             </>}
         </div>
       )}
@@ -9433,6 +9444,17 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
             <p style={{fontSize:14,color:C.textMed,margin:"0 0 24px",lineHeight:1.6}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
           </div>
         )
+      ):(activeTab==="schemas1"||activeTab==="schemas2")&&tabHasAccess?(
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"6px 12px",flexWrap:"wrap",margin:"0 0 6px"}}>
+            <p style={{fontFamily:serif,fontSize:18,margin:0}}>Schémas · Par matière · Cours · Chapitre</p>
+            <CountLegend/>
+          </div>
+          <p style={{fontSize:12,color:C.textMed,margin:"0 0 14px",lineHeight:1.6}}>Toutes les cartes à images, à part. Ce sont les mêmes cartes que dans tes flashcards : ta progression est commune, rien n'est compté deux fois. Les légendes d'un même schéma passent à la suite.</p>
+          {tabGroups.filter(g=>occCards(allCards).some(c=>c.groupId===g.id)).length===0
+            ?<div style={{border:`1.5px dashed ${C.border}`,borderRadius:12,padding:"36px 24px",textAlign:"center",background:C.surface}}><p style={{fontSize:14,color:C.textMed,margin:0}}>Pas encore de schéma pour ce semestre.</p></div>
+            :tabGroups.filter(g=>occCards(allCards).some(c=>c.groupId===g.id)).map(g=><React.Fragment key={g.id}>{GroupBlock({group:g,sch:true})}</React.Fragment>)}
+        </div>
       ):tabHasAccess?(
         (!isAdmin&&studyMode==="j")?(
           <JModeView
@@ -10487,7 +10509,7 @@ function SettingsView({settings,onSave,onBack,currentUser,accounts,cards,onReset
             <p style={{fontSize:13,fontWeight:500,margin:"0 0 4px"}}>Explications des boutons</p>
             <p style={{fontSize:11,color:C.textMed,margin:"0 0 10px"}}>Les petites fenêtres qui expliquent « à faire », « nouvelles », « à revoir » et « à jour » avant de lancer une session.</p>
             <button onClick={()=>setS(p=>({...p,hideExplain:{}}))} disabled={!Object.values(s.hideExplain||{}).some(Boolean)} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>{Object.values(s.hideExplain||{}).some(Boolean)?"↺ Réafficher toutes les explications":"✓ Toutes les explications sont affichées"}</button>
-          <button onClick={()=>setS(p=>({...p,newsSeen:null}))} disabled={s.newsSeen==null} style={{fontFamily:font,fontSize:12,fontWeight:600,padding:"7px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed,marginLeft:8,opacity:s.newsSeen==null?0.5:1}}>{s.newsSeen==null?"Les nouveautés s'afficheront à ton retour":"Revoir les nouveautés"}</button></div>
+          </div>
         </div>
       </SettingsSection>
       <SettingsSection title="⚡ Images et rapidité d'affichage">
@@ -11219,7 +11241,9 @@ function App(){
             ? derivePaidGroups(freshAcc,saved.username)
             : [...new Set([...(isPaidPlan(planId)?(PLANS.find(p=>p.id===planId)?.groups||[]):[]),...extra])];
           const restoredFullGroups=computeFullGroups(planId,restoredPaid,[]);
-          const restored=withCursus({...saved,plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}});
+          // Le cursus vient du compte en base (comme les droits), pas de la session gardée
+          // dans le navigateur : un compte d'odonto ne retombe jamais sur la vue PASS gratuite.
+          const restored=withCursus({...saved,cursus:freshAcc?.cursus||saved.cursus||"pass-grenoble",plan:{planId,groups:restoredGroups,fullGroups:restoredFullGroups}});
           setProg(startProgressSession(saved.username));
           refreshProgressFromCloud(saved.username);
           setPseudo(getPseudo(saved.username));
@@ -11864,7 +11888,7 @@ function App(){
     if(currentUser)clearStudySession(currentUser.username);
     setResumeInfo(null);
   },[currentUser]);
-  const startStudy=useCallback(async(gid,num,chapterId,pkId,kind=null)=>{
+  const startStudy=useCallback(async(gid,num,chapterId,pkId,kind=null,onlySch=false)=>{
     if(gid==="__user__"){
       const queue=buildQueue(userCards,prog,settings,getNewShownToday(),true);
       if(!queue.length){alert(getEmptyQueueMsg(userCards,prog,settings,getNewShownToday()));return;}
@@ -11896,13 +11920,15 @@ function App(){
     // rien = les deux mélangées (« à faire »), dans l'ordre choisi dans les Paramètres.
     const byKind=list=>kind==="new"?list.filter(c=>isNew(prog[c.id])):kind==="rev"?list.filter(c=>!isNew(prog[c.id])):list;
     const kindLabel=kind==="new"?" · Nouvelles":kind==="rev"?" · À revoir":" · À faire";
-    const filtered=byKind(allCards.filter(c=>c.groupId===gid&&(isGroup||c.num===num)&&(isCourse||c.chapterId===chapterId)&&(allPk||effPkt(c,prog)===pkId)&&canAccess(c.groupId,c.num)));
-    const queue=buildQueue(filtered,prog,settings,getNewShownToday(),true);
+    const filtered=byKind(allCards.filter(c=>c.groupId===gid&&(isGroup||c.num===num)&&(isCourse||c.chapterId===chapterId)&&(allPk||(pkId===SCHEMAS?c.card_type==="occlusion":effPkt(c,prog)===pkId))&&(!onlySch||c.card_type==="occlusion")&&canAccess(c.groupId,c.num)));
+    const built=buildQueue(filtered,prog,settings,getNewShownToday(),true);
+    const queue=pkId===SCHEMAS||onlySch?[...built].sort(schemaOrder):built;
     if(!queue.length){alert(getEmptyQueueMsg(filtered,prog,settings,getNewShownToday()));return;}
     const fullQueue=await enrichCards(queue);
     const chName=isCourse?"Cours complet":(getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`);
-    const pkLabel=allPk?"Tous les paquets":PACKETS.find(p=>p.id===pkId)?.label;
-    const label=isGroup?`${grp?.label} · Toute la matière · ${pkLabel}${kindLabel}`:`${grp?.label} · Cours ${num} · ${chName} · ${pkLabel}${kindLabel}`;
+    const pkLabel=allPk?"Tous les paquets":pkId===SCHEMAS?"Schémas":PACKETS.find(p=>p.id===pkId)?.label;
+    const where=isGroup?`${grp?.label} · Toute la matière · ${pkLabel}${kindLabel}`:`${grp?.label} · Cours ${num} · ${chName} · ${pkLabel}${kindLabel}`;
+    const label=onlySch?`Schémas · ${where}`:where;
     setStudyCtx({label,queue:fullQueue});
     setView("study");
   },[allCards,userCards,prog,settings,getNewShownToday,enrichCards,currentUser]);
@@ -11910,7 +11936,7 @@ function App(){
   // Contrairement à startStudy, aucune notion d'échéance n'entre en jeu : la
   // carte est simplement montrée. Le garde-fou d'accès reste identique — un
   // cours non débloqué ne s'ouvre pas plus ici qu'en révision normale.
-  const startCramStudy=useCallback(async(gid,num,chapterId,pkId)=>{
+  const startCramStudy=useCallback(async(gid,num,chapterId,pkId,onlySch=false)=>{
     const isAdminUser=currentUser?.role==="admin";
     const uGroups=currentUser?.plan?.groups||[];
     const uFull=currentUser?.plan?.fullGroups||[];
@@ -11922,28 +11948,29 @@ function App(){
     }
     const grp=GROUPS.find(g=>g.id===gid);
     const wholeCourse=isGroup||chapterId==="__all__"||chapterId==="__course__";
-    const scopeFiltered=allCards.filter(c=>c.groupId===gid&&(isGroup||c.num===num)&&canAccess(c.groupId,c.num));
-    const queue=buildCramQueue(scopeFiltered,prog,{chapterId:wholeCourse?"__all__":chapterId,packetId:pkId,settings,newShownToday:getNewShownToday(),upToDateOnly:true});
+    const scopeFiltered=allCards.filter(c=>c.groupId===gid&&(isGroup||c.num===num)&&canAccess(c.groupId,c.num)&&(pkId!==SCHEMAS||c.card_type==="occlusion")&&(!onlySch||c.card_type==="occlusion"));
+    const cramQ=buildCramQueue(scopeFiltered,prog,{chapterId:wholeCourse?"__all__":chapterId,packetId:pkId===SCHEMAS?"__all__":pkId,settings,newShownToday:getNewShownToday(),upToDateOnly:true});
+    const queue=pkId===SCHEMAS||onlySch?[...cramQ].sort(schemaOrder):cramQ;
     if(!queue.length){alert("Aucune carte à jour dans cette sélection.");return;}
     const fullQueue=await enrichCards(queue);
     const chName=wholeCourse?"Cours complet":(getChapters(gid,num)[chapterId-1]||`Ch. ${chapterId}`);
-    const pkLabel=pkId&&pkId!=="__all__"?PACKETS.find(p=>p.id===pkId)?.label:"Tous les paquets";
+    const pkLabel=pkId===SCHEMAS?"Schémas":pkId&&pkId!=="__all__"?PACKETS.find(p=>p.id===pkId)?.label:"Tous les paquets";
     const where=isGroup?`${grp?.label} · Toute la matière`:`${grp?.label} · Cours ${num} · ${chName}`;
-    setStudyCtx({label:`🗓️ En avance · ${where} · ${pkLabel}`,queue:fullQueue,cram:true});
+    setStudyCtx({label:`🗓️ En avance · ${onlySch?"Schémas · ":""}${where} · ${pkLabel}`,queue:fullQueue,cram:true});
     setView("study");
   },[allCards,prog,currentUser,enrichCards,settings,getNewShownToday]);
   const startGlobalStudy=useCallback(async pkId=>{
     const ids=currentUser?.plan?.groups||[];
     const fGroups=currentUser?.plan?.fullGroups||[];
     const isAdminUser=currentUser?.role==="admin";
-    const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||effPkt(c,prog)===pkId)&&(isAdminUser||isCourseAccessible(c.groupId,c.num,ids,fGroups)));
+    const globalFiltered=allCards.filter(c=>ids.includes(c.groupId)&&(!pkId||(pkId===SCHEMAS?c.card_type==="occlusion":effPkt(c,prog)===pkId))&&(isAdminUser||isCourseAccessible(c.groupId,c.num,ids,fGroups)));
     // Révision globale : uniquement les cartes déjà passées à maturation (état "révision") et dues, pas de nouvelles cartes.
     const dueReview=globalFiltered.filter(c=>{const p=prog[c.id];return p&&!p.buried&&p.state==="review"&&isDue(p);});
     if(!dueReview.length){alert("Aucune flashcard en attente d'être révisée pour le moment.");return;}
     const sorted=[...dueReview].sort((a,b)=>new Date(prog[a.id].next)-new Date(prog[b.id].next));
     const queue=sorted;
     const fullQueue=await enrichCards(queue);
-    setStudyCtx({label:pkId?`Toutes tes cartes à revoir · ${PACKETS.find(p=>p.id===pkId)?.label}`:"Toutes tes cartes à revoir",queue:fullQueue});
+    setStudyCtx({label:pkId?`Toutes tes cartes à revoir · ${pkId===SCHEMAS?"Schémas":PACKETS.find(p=>p.id===pkId)?.label}`:"Toutes tes cartes à revoir",queue:fullQueue});
     setView("study");
   },[allCards,prog,currentUser,settings,enrichCards]);
   // Une carte en attente que la fin du paquet remet en jeu : on lève son report
