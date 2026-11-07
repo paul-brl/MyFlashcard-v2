@@ -511,6 +511,33 @@ sb.auth.onAuthStateChange((evt, session) => {
     try { window.dispatchEvent(new CustomEvent("mfc-token-ready")); } catch {}
   }
 });
+// Supabase ne renvoie jamais plus de 1000 lignes par requête. Toute lecture
+// qui peut dépasser ce nombre passe par ici : pages successives, ordre fixe
+// (à mettre dans l'adresse), page en échec retentée 3 fois. Si une page manque
+// malgré tout, rows vaut null : mieux vaut garder ce qu'on a que d'afficher une
+// liste tronquée. Avant le 07/11/2026, les cartes personnelles au-delà de 1000
+// disparaissaient ainsi de l'écran (compte de 1 752 cartes).
+const fetchAllRows = async (url) => {
+  const sep=url.includes("?")?"&":"?";
+  const first=await fetch(`${url}${sep}limit=1000&offset=0`,{headers:{...H,"Prefer":"count=exact"}});
+  if(!first.ok) return {res:first,rows:null};
+  const firstRows=await first.json();
+  if(!Array.isArray(firstRows)) return {res:first,rows:null};
+  let total=firstRows.length;
+  const range=first.headers.get("content-range");
+  if(range&&range.includes("/")){const t=parseInt(range.split("/")[1],10);if(!isNaN(t))total=t;}
+  const step=firstRows.length||1000;
+  let rows=firstRows;
+  for(let off=step;off<total;off+=step){
+    let page=null;
+    for(let a=1;a<=3&&!page;a++){
+      try{ const r=await fetch(`${url}${sep}limit=${step}&offset=${off}`,{headers:H}); if(r.ok){const d=await r.json(); if(Array.isArray(d))page=d;} }catch{}
+    }
+    if(!page) return {res:first,rows:null};
+    rows=rows.concat(page);
+  }
+  return {res:first,rows};
+};
 const supa = {
   // Load metadata only — NO front/back. Fast even for 100k cards.
   // First page tells us the total count (Prefer: count=exact), then every
@@ -1008,12 +1035,11 @@ const supa = {
     const withType="id,group_id,num,chapter_id,packet_id,integrated,personal_course_name,card_type";
     const withoutType="id,group_id,num,chapter_id,packet_id,integrated,personal_course_name";
     try {
-      let r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${withType}`, { headers: H });
-      if (!r.ok) r = await fetch(`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${withoutType}`, { headers: H });
-      if (!r.ok) return null; // HTTP error: table might not exist, auth error, etc.
-      const d = await r.json();
-      if (!Array.isArray(d)) return null; // Supabase returned an error object
-      return d.map(mapRow);
+      const url=sel=>`${SUPA_URL}/rest/v1/user_cards?username=eq.${encodeURIComponent(username)}&select=${sel}&order=id.asc`;
+      let {res,rows}=await fetchAllRows(url(withType));
+      if (!res.ok) ({res,rows}=await fetchAllRows(url(withoutType)));
+      if (!rows) return null; // erreur HTTP, réponse inattendue ou page manquante
+      return rows.map(mapRow);
     } catch { return null; } // Network error
   },
   // Téléchargement brut du recto/verso d'une ou plusieurs cartes personnelles,
@@ -1128,9 +1154,7 @@ const supa = {
   // adaptations restent purement locales à l'appareil (voir cache localStorage).
   getCardOverrides: async (username) => {
     try {
-      const r=await fetch(`${SUPA_URL}/rest/v1/card_overrides?username=eq.${encodeURIComponent(username)}&select=card_id,front,back,updated_at`,{headers:H});
-      if(!r.ok)return null;
-      const d=await r.json();
+      const {rows:d}=await fetchAllRows(`${SUPA_URL}/rest/v1/card_overrides?username=eq.${encodeURIComponent(username)}&select=card_id,front,back,updated_at&order=card_id.asc`);
       if(!Array.isArray(d))return null;
       const map={};
       d.forEach(o=>{ map[o.card_id]={front:o.front,back:o.back,updatedAt:o.updated_at}; });
@@ -1273,10 +1297,9 @@ const supa = {
   // Détail carte par carte d'une journée (sert à l'anti-farming du jour).
   getPointAwards: async (username, day) => {
     try {
-      const r=await fetch(`${SUPA_URL}/rest/v1/point_awards?username=eq.${encodeURIComponent(username)}&day=eq.${day}&select=card_id,points,age,packet_id`,{headers:H});
-      const s=await supa._pointsStatus(r);
+      const {res,rows}=await fetchAllRows(`${SUPA_URL}/rest/v1/point_awards?username=eq.${encodeURIComponent(username)}&day=eq.${day}&select=card_id,points,age,packet_id&order=card_id.asc`);
+      const s=await supa._pointsStatus(res);
       if(s!==true) return s===null?null:false;
-      const rows=await r.json();
       return Array.isArray(rows)?rows:false;
     } catch(e){ return false; }
   },
