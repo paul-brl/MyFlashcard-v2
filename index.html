@@ -2038,7 +2038,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-07-schemas";
+const APP_VERSION="2026-11-08-bdo";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -2874,6 +2874,9 @@ const CHAPTERS = {
   },
   "o2-hhd": {
     1: ["L'émail","La dentine","La pulpe dentaire","Les caries de l'émail et de la dentine","Les pulpopathies","La réparation du complexe pulpodentinaire","Les cellules souches de la pulpe"],
+  },
+  "o2-biodev": {
+    1: ["Les crêtes neurales","L'appareil branchial","La face et le palais","L'odontogenèse","La dentinogenèse","L'amélogenèse","La racine et le parodonte","L'éruption dentaire"],
   },
 };
 const getChapters = (groupId, num) => CHAPTERS[groupId]?.[num] || [];
