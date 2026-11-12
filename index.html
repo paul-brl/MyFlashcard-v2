@@ -2038,7 +2038,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-08-bdo";
+const APP_VERSION="2026-11-12-rang-cursus";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -7614,9 +7614,13 @@ function AdminRank({accounts=[],cursus="all"}){
   const shown=useMemo(()=>{
     if(!Array.isArray(rows))return [];
     const needle=q.toLowerCase().trim();
+    // Classements distincts par cursus : le rang se compte DANS le cursus choisi
+    // (avant le 12/11/2026, il se comptait sur tous les cursus mélangés).
+    // La recherche et « Anonymes seulement » filtrent ensuite sans renuméroter.
     return rows
+      .filter(r=>cursus==="all"||accCursus(accounts.find(a=>a.username===r.username))===cursus)
       .map((r,i)=>({...r,pos:i+1}))
-      .filter(r=>(cursus==="all"||accCursus(accounts.find(a=>a.username===r.username))===cursus)&&(!onlyAnon||r.anonymous)&&(!needle||`${r.username||""} ${r.pseudo||""}`.toLowerCase().includes(needle)));
+      .filter(r=>(!onlyAnon||r.anonymous)&&(!needle||`${r.username||""} ${r.pseudo||""}`.toLowerCase().includes(needle)));
   },[rows,q,onlyAnon,cursus,accounts]);
   const nAnon=Array.isArray(rows)?rows.filter(r=>r.anonymous).length:0;
   const shift=n=>{const d=new Date(day+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+n);setDay(dateKey(d));};
