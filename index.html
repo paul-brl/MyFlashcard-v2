@@ -1541,6 +1541,53 @@ const supa = {
       return {ok:true,row:Array.isArray(d)&&d[0]?d[0]:null};
     }catch{ return {ok:false,error:"network"}; }
   },
+  // ─── Appels avec un P2 (table « call_requests », voir supabase_call_requests.sql) ───
+  _callMissing: (status,text) => status===404 || /PGRST20[0-9]|does not exist|schema cache/i.test(text||""),
+  getMyCallRequest: async () => {
+    try{
+      const uid=sbUserId(); if(!uid)return {ok:false,error:"nosession"};
+      const r=await fetch(`${SUPA_URL}/rest/v1/call_requests?user_id=eq.${uid}&status=in.(new,scheduled)&select=id,status,slot_at&limit=1`,{headers:H});
+      const t=await r.text();
+      if(!r.ok)return {ok:false,error:supa._callMissing(r.status,t)?"missing":`HTTP ${r.status}`};
+      let d=[]; try{ d=JSON.parse(t); }catch{}
+      return {ok:true,row:Array.isArray(d)&&d[0]?d[0]:null};
+    }catch{ return {ok:false,error:"network"}; }
+  },
+  getMyPhone: async () => {
+    try{
+      const uid=sbUserId(); if(!uid)return "";
+      const r=await fetch(`${SUPA_URL}/rest/v1/accounts?user_id=eq.${uid}&select=phone&limit=1`,{headers:H});
+      if(!r.ok)return "";
+      const d=await r.json();
+      return Array.isArray(d)&&d[0]&&d[0].phone?String(d[0].phone):"";
+    }catch{ return ""; }
+  },
+  createCallRequest: async (row) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/call_requests`,{method:"POST",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify([row])});
+      if(r.ok)return {ok:true};
+      const t=await r.text();
+      if(r.status===409||/duplicate key|call_requests_one_open/i.test(t))return {ok:false,error:"duplicate"};
+      return {ok:false,error:supa._callMissing(r.status,t)?"missing":`HTTP ${r.status}`};
+    }catch{ return {ok:false,error:"network"}; }
+  },
+  getCallRequests: async () => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/call_requests?select=*&order=created_at.desc&limit=500`,{headers:H});
+      const t=await r.text();
+      if(!r.ok)return {ok:false,error:supa._callMissing(r.status,t)?"missing":`HTTP ${r.status}`};
+      let d=[]; try{ d=JSON.parse(t); }catch{}
+      return {ok:true,rows:Array.isArray(d)?d:[]};
+    }catch{ return {ok:false,error:"network"}; }
+  },
+  updateCallRequest: async (id,patch) => {
+    try{
+      const r=await fetch(`${SUPA_URL}/rest/v1/call_requests?id=eq.${encodeURIComponent(id)}`,{method:"PATCH",headers:{...H,"Prefer":"return=representation"},body:JSON.stringify({...patch,updated_at:new Date().toISOString()})});
+      if(!r.ok)return {ok:false};
+      const d=await r.json();
+      return {ok:Array.isArray(d)&&d.length>0};
+    }catch{ return {ok:false}; }
+  },
   getForumMeta: async () => {
     try {
       const r=await fetch(`${SUPA_URL}/rest/v1/forum_posts_public?select=id,user_id,created_at&order=created_at.desc&limit=500`,{headers:H});
@@ -5680,7 +5727,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
       </div>
     )}
     <Nav theme={theme} onToggleTheme={onToggleTheme} left={<button onClick={onBack} style={{fontFamily:font,fontSize:13,background:"none",border:"none",cursor:"pointer",color:C.textMed}}>← Quitter l'admin</button>} center={`Admin · ${cardsC.length} cartes · ${accountsC.length} étudiants`} right={tab==="cards"&&<Btn fill onClick={()=>openEditor(null)}>+ Nouvelle carte</Btn>}/>
-    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0,overflowX:"auto"}}><TB id="cards" label="📚 Flashcards"/><TB id="cardreports" label="🚩 Erreurs" badge={openReports}/><TB id="messages" label="✉️ Messages" badge={dm.total}/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements forum"/><TB id="announce" label="✉ Annonces"/></div>
+    <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"0 24px",display:"flex",gap:0,overflowX:"auto"}}><TB id="cards" label="📚 Flashcards"/><TB id="cardreports" label="🚩 Erreurs" badge={openReports}/><TB id="messages" label="✉️ Messages" badge={dm.total}/><TB id="lessons" label="📘 Cours"/><TB id="users" label="👤 Étudiants"/><TB id="rank" label="🏆 Rang"/><TB id="reports" label="⚑ Signalements forum"/><TB id="announce" label="✉ Annonces"/><TB id="calls" label="📞 Appels"/></div>
     <div style={{borderBottom:`1px solid ${C.border}`,background:C.surface,padding:"10px 24px"}}><CursusPick value={cursus} onChange={setCursus}/></div>
     {tab==="cards"&&<div style={{display:subView==="editor"?"none":"block"}}><AdminCards cards={cardsC} cursus={cursus} onNew={()=>openEditor(null)} onEdit={c=>openEditor(c)} onDelete={onDeleteCard} onSortCards={onSortCards}/></div>}
     {tab==="cardreports"&&<AdminCardReports cards={cards} cursus={cursus} onEditCard={(c,rid)=>openEditor(c,rid)} justEdited={justEditedReport} onClearJustEdited={()=>setJustEditedReport(null)} onCountChange={setOpenReports}/>}
@@ -5690,6 +5737,7 @@ function AdminView({cards,accounts,onSaveCard,onDeleteCard,onSaveUser,onDeleteUs
     {tab==="reports"&&<AdminReports cursus={cursus}/>}
     {tab==="announce"&&<AdminAnnounce accounts={accountsC} cursus={cursus}/>}
     {tab==="messages"&&<AdminMessages accounts={accountsC} cursus={cursus} dm={dm}/>}
+    {tab==="calls"&&<AdminCalls accounts={accountsC}/>}
   <Footer/>
   </div>;
 }
@@ -8327,6 +8375,136 @@ function NewsModal({onClose}){
     </div>
   </Modal>;
 }
+// ─── Appels avec un P2 (suivi étudiant) ──────────────────────────────────────
+// Fenêtre proposée aux étudiants de PASS Grenoble avant le concours, tant qu'ils
+// n'ont pas de demande ouverte. L'admin fixe ensuite le créneau (onglet « Appels »).
+const CALL_END_MS=new Date("2026-12-15T00:00:00").getTime();   // concours des P1
+const CALL_CALLER="Martin";
+const CALLER_PHONES={Martin:"07 68 49 87 04",Paul:"07 66 11 91 11"};   // numéros des mentions légales
+const callSlotLabel=iso=>{try{return new Date(iso).toLocaleString("fr-FR",{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"});}catch{return iso||"";}};
+function CallRequestModal({currentUser,settings,onSaveSettings,onClose}){
+  const [step,setStep]=useState(1);
+  const [avail,setAvail]=useState(""),[phone,setPhone]=useState(""),[topic,setTopic]=useState("");
+  const [err,setErr]=useState(""),[sending,setSending]=useState(false);
+  useEffect(()=>{let off=false;supa.getMyPhone().then(p=>{if(!off&&p)setPhone(x=>x||p);});return()=>{off=true;};},[]);
+  const remember=v=>{try{onSaveSettings({...settings,callPrompt:v});}catch{}};
+  const later=()=>{remember({s:"later",until:Date.now()+7*86400000});onClose();};
+  const never=()=>{remember({s:"no"});onClose();};
+  const send=async()=>{
+    setErr("");
+    const ph=normalizePhone(phone);
+    if(avail.trim().length<3){setErr("Indique tes disponibilités (jours et horaires).");return;}
+    if(ph.replace(/\D/g,"").length<9){setErr("Indique un numéro de téléphone valide.");return;}
+    setSending(true);
+    const res=await supa.createCallRequest({user_id:sbUserId(),username:currentUser.username,phone:ph,availability:avail.trim().slice(0,1000),topic:topic.trim()?topic.trim().slice(0,1000):null});
+    setSending(false);
+    if(res.ok||res.error==="duplicate"){remember({s:"done"});setStep(3);return;}
+    setErr(res.error==="missing"?"Cette fonction n'est pas encore activée. Réessaie dans quelques jours."
+      :"La demande n'est pas partie. Vérifie ta connexion et réessaie.");
+  };
+  const P=({children})=><p style={{fontSize:13.5,lineHeight:1.6,color:C.textMed,margin:"0 0 12px"}}>{children}</p>;
+  const ta={...iLine,resize:"vertical",minHeight:54,fontSize:13.5,lineHeight:1.5,display:"block"};
+  return <Modal onClose={step===3?onClose:later} width={460}>
+    {step===1&&<div>
+      <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Avant le concours</p>
+      <p style={{fontFamily:serif,fontSize:22,margin:"0 0 16px",lineHeight:1.25}}><span aria-hidden="true">📞</span> Les concours approchent</p>
+      <P>Tu veux en parler <b style={{color:C.text}}>30 minutes au téléphone</b> avec un P2 qui est passé par là ? Stress, planning, méthode, jour J : on t'aide à aborder la dernière ligne droite.</P>
+      <P><b style={{color:C.text}}>C'est gratuit.</b></P>
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:18}}>
+        <Btn fill full onClick={()=>setStep(2)}>Je réserve un appel</Btn>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+          <button onClick={later} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,padding:"4px 0"}}>Plus tard</button>
+          <button onClick={never} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt,padding:"4px 0"}}>Non merci</button>
+        </div>
+      </div>
+    </div>}
+    {step===2&&<div>
+      <p style={{fontFamily:serif,fontSize:20,margin:"0 0 14px"}}>Ta demande d'appel</p>
+      <Lbl>Tes disponibilités</Lbl>
+      <textarea value={avail} onChange={e=>setAvail(e.target.value)} placeholder="Ex. : la semaine du 1er décembre, après 18 h, ou le week-end" style={ta} maxLength={1000}/>
+      <div style={{height:14}}/>
+      <Lbl>Ton numéro de téléphone</Lbl>
+      <input value={phone} onChange={e=>setPhone(e.target.value)} inputMode="tel" placeholder="06 12 34 56 78" style={iLine} maxLength={30}/>
+      <p style={{fontSize:11,color:C.textLt,margin:"6px 0 14px",lineHeight:1.5}}>Il ne sert qu'à t'appeler.</p>
+      <Lbl>Ce dont tu veux parler (facultatif)</Lbl>
+      <textarea value={topic} onChange={e=>setTopic(e.target.value)} placeholder="Stress, organisation, méthode, jour J…" style={ta} maxLength={1000}/>
+      <p style={{fontSize:11,color:C.textLt,margin:"10px 0 0",lineHeight:1.5}}>Si tu es mineur, préviens un parent. Cet appel n'est ni un suivi psychologique ni du cours particulier.</p>
+      {err&&<p style={{fontSize:12,color:C.again,margin:"10px 0 0"}}>{err}</p>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:16}}>
+        <button onClick={()=>setStep(1)} style={{fontFamily:font,fontSize:12,background:"none",border:"none",cursor:"pointer",color:C.textLt}}>← Retour</button>
+        <Btn fill disabled={sending} onClick={send}>{sending?"Envoi…":"Envoyer ma demande"}</Btn>
+      </div>
+    </div>}
+    {step===3&&<div style={{textAlign:"center"}}>
+      <p style={{fontSize:32,margin:"0 0 8px"}} aria-hidden="true">✅</p>
+      <p style={{fontFamily:serif,fontSize:20,margin:"0 0 10px"}}>Demande envoyée</p>
+      <P>On fixe un créneau qui colle à tes disponibilités. Tu recevras la confirmation dans tes <b style={{color:C.text}}>messages privés</b> sur le site.</P>
+      <div style={{marginTop:16}}><Btn fill full onClick={onClose}>Compris</Btn></div>
+    </div>}
+  </Modal>;
+}
+// Onglet admin « Appels » : demandes, choix du créneau, confirmation par message privé.
+function AdminCalls({accounts}){
+  const [rows,setRows]=useState(null),[err,setErr]=useState(""),[filter,setFilter]=useState("new");
+  const [slots,setSlots]=useState({}),[callers,setCallers]=useState({}),[notes,setNotes]=useState({}),[busy,setBusy]=useState(null),[flash,setFlash]=useState("");
+  const load=useCallback(async()=>{const r=await supa.getCallRequests();if(!r.ok){setErr(r.error==="missing"?"missing":"Lecture impossible.");setRows([]);return;}setErr("");setRows(r.rows);},[]);
+  useEffect(()=>{load();},[load]);
+  const nameOf=r=>{const a=(accounts||[]).find(x=>x.user_id===r.user_id);return a?.username||r.username||"Étudiant";};
+  const fmt=iso=>{try{return new Date(iso).toLocaleString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});}catch{return iso||"";}};
+  const callerOf=r=>callers[r.id]||r.caller||CALL_CALLER;
+  const confirm=async r=>{
+    const who=callerOf(r);
+    const v=slots[r.id];if(!v){setFlash("Choisis d'abord un créneau.");return;}
+    const when=new Date(v);if(isNaN(when.getTime())){setFlash("Créneau invalide.");return;}
+    setBusy(r.id);setFlash("");
+    const up=await supa.updateCallRequest(r.id,{status:"scheduled",slot_at:when.toISOString(),caller:who});
+    if(!up.ok){setBusy(null);setFlash("Modification refusée par Supabase (droits administrateur ?).");return;}
+    const body=`Ton appel avec un P2 est confirmé : ${callSlotLabel(when.toISOString())}. ${who} t'appellera au ${r.phone}, depuis le ${CALLER_PHONES[who]||""}. Si le créneau ne te convient plus, réponds simplement ici.`;
+    const dm=await supa.sendDm({student_id:r.user_id,student_username:r.username||null,student_name:null,sender_id:sbUserId(),sender_role:"admin",sender_name:who,body});
+    let mailOk=false;
+    try{const m=await fetch(`${EDGE_URL}/send-call-confirmation`,{method:"POST",headers:H,body:JSON.stringify({request_id:r.id})});mailOk=m.ok;}catch{}
+    setBusy(null);
+    setFlash(dm.ok&&mailOk?"Créneau confirmé : message privé et e-mail envoyés à l'étudiant."
+      :`Créneau enregistré. Message privé ${dm.ok?"envoyé":"NON parti"}, e-mail ${mailOk?"envoyé":"NON parti"}${dm.ok||mailOk?"":" : préviens l'étudiant à la main"}.`);
+    load();
+  };
+  const setStatus=async(r,status)=>{
+    setBusy(r.id);setFlash("");
+    const patch={status};if(notes[r.id]!==undefined)patch.admin_note=notes[r.id].slice(0,2000)||null;
+    const up=await supa.updateCallRequest(r.id,patch);
+    setBusy(null);if(!up.ok)setFlash("Modification refusée par Supabase.");load();
+  };
+  const FILTERS=[["new","À traiter"],["scheduled","Confirmés"],["done","Faits"],["cancelled","Annulés"],["all","Tous"]];
+  const shown=(rows||[]).filter(r=>filter==="all"||r.status===filter);
+  const count=k=>(rows||[]).filter(r=>k==="all"||r.status===k).length;
+  const stTag=s=>s==="new"?<Tag color={C.imp} bg={C.impBg} small>à traiter</Tag>:s==="scheduled"?<Tag color={C.util} bg={C.utilBg} small>confirmé</Tag>:s==="done"?<Tag color={C.good} bg={C.bg} small>fait</Tag>:<Tag color={C.textMed} bg={C.bg} small>annulé</Tag>;
+  return <div style={{maxWidth:820,margin:"0 auto",padding:"20px 24px"}}>
+    <p style={{fontFamily:serif,fontSize:20,margin:"0 0 4px"}}>Appels avec un P2</p>
+    <p style={{fontSize:12,color:C.textLt,margin:"0 0 14px",lineHeight:1.6}}>Chaque demande : disponibilités de l'étudiant et téléphone. Tu choisis un créneau, et la confirmation part en message privé et par e-mail.</p>
+    {err==="missing"&&<div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:14,margin:"0 0 14px"}}><p style={{fontSize:13,color:C.textMed,margin:"0 0 6px"}}>⚠️ La table <code style={{fontFamily:mono,fontSize:11}}>call_requests</code> n'existe pas encore.</p><p style={{fontSize:11,color:C.textLt,margin:0}}>À créer une fois dans l'éditeur SQL Supabase : fichier <code style={{fontFamily:mono,fontSize:10}}>supabase_call_requests.sql</code>.</p></div>}
+    {err&&err!=="missing"&&<p style={{fontSize:12,color:C.again}}>{err}</p>}
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",margin:"0 0 14px"}}>{FILTERS.map(([k,l])=><button key={k} onClick={()=>setFilter(k)} style={{fontFamily:font,fontSize:12,padding:"5px 12px",borderRadius:16,cursor:"pointer",border:`1.5px solid ${filter===k?C.accent:C.border}`,background:filter===k?C.accentBg:"transparent",color:filter===k?C.accent:C.textMed}}>{l} ({count(k)})</button>)}</div>
+    {flash&&<p style={{fontSize:12.5,color:C.textMed,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",margin:"0 0 12px"}}>{flash}</p>}
+    {rows===null&&<p style={{fontSize:13,color:C.textLt}}>Chargement…</p>}
+    {rows!==null&&!err&&shown.length===0&&<p style={{fontSize:13,color:C.textLt}}>Aucune demande dans cette catégorie.</p>}
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>{shown.map(r=><div key={r.id} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,padding:"14px 16px"}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",margin:"0 0 8px"}}>{stTag(r.status)}<span style={{fontSize:12.5,fontWeight:600,color:C.text}}>{nameOf(r)}</span><span style={{fontSize:11,color:C.textLt}}>demandé le {fmt(r.created_at)}</span></div>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 4px",lineHeight:1.55}}><b style={{color:C.text}}>Disponibilités :</b> {r.availability}</p>
+      <p style={{fontSize:13,color:C.textMed,margin:"0 0 4px"}}><b style={{color:C.text}}>Téléphone :</b> <a href={`tel:${r.phone}`} style={{color:C.accent}}>{r.phone}</a></p>
+      {r.topic&&<p style={{fontSize:13,color:C.textMed,margin:"0 0 4px",lineHeight:1.55}}><b style={{color:C.text}}>Sujet :</b> {r.topic}</p>}
+      {r.status==="scheduled"&&r.slot_at&&<p style={{fontSize:13,color:C.util,margin:"4px 0",fontWeight:600}}>Créneau : {callSlotLabel(r.slot_at)}{r.caller?` · ${r.caller} appelle`:""}</p>}
+      {r.admin_note&&<p style={{fontSize:12,color:C.textLt,margin:"4px 0",lineHeight:1.5}}>Note : {r.admin_note}</p>}
+      {(r.status==="new"||r.status==="scheduled")&&<div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginTop:10}}>
+        {["Martin","Paul"].map(n=><button key={n} type="button" onClick={()=>setCallers(x=>({...x,[r.id]:n}))} style={{fontFamily:font,fontSize:12,padding:"5px 12px",borderRadius:16,cursor:"pointer",border:`1.5px solid ${callerOf(r)===n?C.accent:C.border}`,background:callerOf(r)===n?C.accentBg:"transparent",color:callerOf(r)===n?C.accent:C.textMed}}>{n} appelle</button>)}
+        <input type="datetime-local" value={slots[r.id]||""} onChange={e=>setSlots(x=>({...x,[r.id]:e.target.value}))} style={{fontFamily:font,fontSize:13,padding:"6px 8px",border:`1.5px solid ${C.border}`,borderRadius:6,background:"transparent",color:C.text}}/>
+        <Btn fill small disabled={busy===r.id} onClick={()=>confirm(r)}>{r.status==="new"?"Confirmer le créneau":"Replanifier"}</Btn>
+        {r.status==="scheduled"&&<Btn small disabled={busy===r.id} onClick={()=>setStatus(r,"done")}>Fait</Btn>}
+        <Btn small danger disabled={busy===r.id} onClick={()=>setStatus(r,"cancelled")}>Annuler</Btn>
+      </div>}
+      {(r.status==="scheduled"||r.status==="done")&&<input value={notes[r.id]!==undefined?notes[r.id]:(r.admin_note||"")} onChange={e=>setNotes(x=>({...x,[r.id]:e.target.value}))} placeholder="Note après l'appel (facultatif, enregistrée avec « Fait »)" style={{...iLine,fontSize:12,marginTop:10}}/>}
+    </div>)}</div>
+  </div>;
+}
 function CountLegend(){
   return <span style={{display:"inline-flex",gap:10,flexWrap:"wrap",alignItems:"center",fontSize:11,color:C.textMed}}>
     {COUNT_KINDS.map(t=><span key={t.k} style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,borderRadius:"50%",background:t.bg,border:`1px solid ${t.bd}`,display:"inline-block"}}/>{t.label(2)}</span>)}
@@ -9133,6 +9311,17 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   const [explain,setExplain]=useState(null);
   const [showNews,setShowNews]=useState(()=>settings?.newsSeen!==NEWS_ID);
   const closeNews=()=>{setShowNews(false);onSaveSettings({...settings,newsSeen:NEWS_ID});};
+  // Fenêtre « appel avec un P2 » : PASS Grenoble, avant le concours, une fois la fenêtre Nouveautés fermée.
+  const [callOpen,setCallOpen]=useState(false);
+  const callPrompt=settings?.callPrompt;
+  const callEligible=!isAdmin&&(currentUser.cursus||"pass-grenoble")==="pass-grenoble"&&!showNews&&Date.now()<CALL_END_MS
+    &&!(callPrompt&&(callPrompt.s==="no"||callPrompt.s==="done"||(callPrompt.s==="later"&&Date.now()<(callPrompt.until||0))));
+  useEffect(()=>{
+    if(!callEligible)return;
+    let off=false;
+    supa.getMyCallRequest().then(r=>{if(!off&&r.ok&&!r.row)setCallOpen(true);});
+    return()=>{off=true;};
+  },[callEligible]);
   const [explainDont,setExplainDont]=useState(false);
   const [explainSaved,setExplainSaved]=useState(false);
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
@@ -9494,6 +9683,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
     {showNews&&<NewsModal onClose={closeNews}/>}
+    {callOpen&&!showNews&&<CallRequestModal currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>setCallOpen(false)}/>}
     {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
       <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
       <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
