@@ -7387,7 +7387,7 @@ function DmThread({studentId,studentUsername,studentName,viewer,onSent,emptyText
           <div style={{display:"flex",justifyContent:mine?"flex-end":"flex-start",marginTop:sameAuthor?2:8}}>
             <div style={{maxWidth:"min(82%,560px)",background:mine?C.accent:C.surface,color:mine?"var(--c-onSolid)":C.text,border:mine?`1px solid ${C.accent}`:`1px solid ${C.border}`,borderRadius:mine?(sameAuthor?"14px 4px 4px 14px":"14px 14px 4px 14px"):(sameAuthor?"4px 14px 14px 4px":"14px 14px 14px 4px"),padding:"7px 11px 5px",opacity:m._pending?0.65:1,boxShadow:"0 1px 1px rgba(0,0,0,0.04)"}}>
               {showName&&<p style={{fontSize:11,fontWeight:700,margin:"0 0 2px",color:mine?"inherit":C.again,opacity:mine?0.85:1}}>{m.sender_name||"Équipe"} · Équipe MyFlashCard</p>}
-              <p style={{fontSize:14,lineHeight:1.5,margin:0,whiteSpace:"pre-wrap",overflowWrap:"anywhere",wordBreak:"break-word"}}>{m.body}</p>
+              <div style={{fontSize:14,lineHeight:1.5,margin:0,whiteSpace:"pre-wrap",overflowWrap:"anywhere",wordBreak:"break-word"}}><DmText text={m.body} viewer={viewer}/></div>
               <p style={{fontSize:10,margin:"2px 0 0",textAlign:"right",opacity:0.7}}>{m._pending?"envoi…":dmTime(m.created_at)}</p>
             </div>
           </div>
@@ -8375,6 +8375,19 @@ function NewsModal({onClose}){
     </div>
   </Modal>;
 }
+// Messages privés : seuls les liens vers notre propre site sont cliquables. Dans le message
+// d'annulation d'un appel, le lien « ?appel=1 » devient, pour l'étudiant, un bouton qui ouvre
+// directement le formulaire de demande d'appel (sans quitter la messagerie).
+function DmText({text,viewer}){
+  const [ask,setAsk]=useState(false);
+  const student=!!viewer&&viewer.role==="student"&&Date.now()<CALL_END_MS;
+  const parts=String(text||"").split(/(https:\/\/myflashcard\.fr\/[^\s]*)/g);
+  return <>{parts.map((t,i)=>{
+    if(!/^https:\/\/myflashcard\.fr\//.test(t))return t;
+    if(student&&/[?&]appel=1/.test(t))return <button key={i} type="button" onClick={()=>setAsk(true)} style={{display:"inline-block",margin:"6px 0 0",fontFamily:font,fontSize:13,fontWeight:600,padding:"7px 14px",borderRadius:8,border:"none",cursor:"pointer",background:C.accent,color:"var(--c-onSolid)"}}>Redemander un créneau</button>;
+    return <a key={i} href={t} style={{color:"inherit",textDecoration:"underline",fontWeight:600}}>{t}</a>;
+  })}{ask&&<CallRequestModal currentUser={{username:viewer.username}} settings={{}} onSaveSettings={()=>{}} onClose={()=>setAsk(false)}/>}</>;
+}
 // ─── Appels avec un P2 (suivi étudiant) ──────────────────────────────────────
 // Fenêtre proposée aux étudiants de PASS Grenoble avant le concours, tant qu'ils
 // n'ont pas de demande ouverte. L'admin fixe ensuite le créneau (onglet « Appels »).
@@ -8452,27 +8465,45 @@ function AdminCalls({accounts}){
   const nameOf=r=>{const a=(accounts||[]).find(x=>x.user_id===r.user_id);return a?.username||r.username||"Étudiant";};
   const fmt=iso=>{try{return new Date(iso).toLocaleString("fr-FR",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});}catch{return iso||"";}};
   const callerOf=r=>callers[r.id]||r.caller||CALL_CALLER;
+  // Prévient l'étudiant : message privé + e-mail. kind : confirm | reschedule | cancel.
+  const notify=async(r,who,body,kind,prevSlot)=>{
+    const dm=await supa.sendDm({student_id:r.user_id,student_username:r.username||null,student_name:null,sender_id:sbUserId(),sender_role:"admin",sender_name:who,body});
+    let mailOk=false;
+    try{const m=await fetch(`${EDGE_URL}/send-call-confirmation`,{method:"POST",headers:H,body:JSON.stringify({request_id:r.id,kind,previous_slot_at:prevSlot||null})});mailOk=m.ok;}catch{}
+    return {dm:dm.ok,mail:mailOk};
+  };
+  const sentTxt=(n,verb)=>n.dm&&n.mail?`${verb} : message privé et e-mail envoyés à l'étudiant.`
+    :`${verb}. Message privé ${n.dm?"envoyé":"NON parti"}, e-mail ${n.mail?"envoyé":"NON parti"}${n.dm||n.mail?"":" : préviens l'étudiant à la main"}.`;
   const confirm=async r=>{
     const who=callerOf(r);
     const v=slots[r.id];if(!v){setFlash("Choisis d'abord un créneau.");return;}
     const when=new Date(v);if(isNaN(when.getTime())){setFlash("Créneau invalide.");return;}
+    const resched=r.status==="scheduled"&&!!r.slot_at,prev=r.slot_at||null;
     setBusy(r.id);setFlash("");
     const up=await supa.updateCallRequest(r.id,{status:"scheduled",slot_at:when.toISOString(),caller:who});
     if(!up.ok){setBusy(null);setFlash("Modification refusée par Supabase (droits administrateur ?).");return;}
-    const body=`Ton appel avec un P2 est confirmé : ${callSlotLabel(when.toISOString())}. ${who} t'appellera au ${r.phone}, depuis le ${CALLER_PHONES[who]||""}. Si le créneau ne te convient plus, réponds simplement ici.`;
-    const dm=await supa.sendDm({student_id:r.user_id,student_username:r.username||null,student_name:null,sender_id:sbUserId(),sender_role:"admin",sender_name:who,body});
-    let mailOk=false;
-    try{const m=await fetch(`${EDGE_URL}/send-call-confirmation`,{method:"POST",headers:H,body:JSON.stringify({request_id:r.id})});mailOk=m.ok;}catch{}
-    setBusy(null);
-    setFlash(dm.ok&&mailOk?"Créneau confirmé : message privé et e-mail envoyés à l'étudiant."
-      :`Créneau enregistré. Message privé ${dm.ok?"envoyé":"NON parti"}, e-mail ${mailOk?"envoyé":"NON parti"}${dm.ok||mailOk?"":" : préviens l'étudiant à la main"}.`);
+    const nowTxt=callSlotLabel(when.toISOString());
+    const callTxt=`${who} t'appellera au ${r.phone}, depuis le ${CALLER_PHONES[who]||""}.`;
+    const body=resched
+      ?`Ton appel avec un P2 est déplacé : ${nowTxt} (au lieu de ${callSlotLabel(prev)}). ${callTxt} Si ce nouveau créneau ne te convient pas, réponds simplement ici.`
+      :`Ton appel avec un P2 est confirmé : ${nowTxt}. ${callTxt} Si le créneau ne te convient plus, réponds simplement ici.`;
+    const n=await notify(r,who,body,resched?"reschedule":"confirm",prev);
+    setBusy(null);setFlash(sentTxt(n,resched?"Appel déplacé":"Créneau confirmé"));
     load();
   };
   const setStatus=async(r,status)=>{
     setBusy(r.id);setFlash("");
     const patch={status};if(notes[r.id]!==undefined)patch.admin_note=notes[r.id].slice(0,2000)||null;
     const up=await supa.updateCallRequest(r.id,patch);
-    setBusy(null);if(!up.ok)setFlash("Modification refusée par Supabase.");load();
+    if(!up.ok){setBusy(null);setFlash("Modification refusée par Supabase.");load();return;}
+    // Appel confirmé puis annulé : on prévient l'étudiant.
+    if(status==="cancelled"&&r.status==="scheduled"&&r.slot_at){
+      const who=r.caller||CALL_CALLER;
+      const body=`Nous devons annuler ton appel avec un P2 prévu ${callSlotLabel(r.slot_at)}. Désolé pour le dérangement. Pour redemander un créneau en une minute : https://myflashcard.fr/?appel=1`;
+      const n=await notify(r,who,body,"cancel",null);
+      setFlash(sentTxt(n,"Appel annulé"));
+    }
+    setBusy(null);load();
   };
   const FILTERS=[["new","À traiter"],["scheduled","Confirmés"],["done","Faits"],["cancelled","Annulés"],["all","Tous"]];
   const shown=(rows||[]).filter(r=>filter==="all"||r.status===filter);
@@ -9314,8 +9345,10 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   // Fenêtre « appel avec un P2 » : PASS Grenoble, avant le concours, une fois la fenêtre Nouveautés fermée.
   const [callOpen,setCallOpen]=useState(false);
   const callPrompt=settings?.callPrompt;
-  const callEligible=!isAdmin&&(currentUser.cursus||"pass-grenoble")==="pass-grenoble"&&!showNews&&Date.now()<CALL_END_MS
-    &&!(callPrompt&&(callPrompt.s==="no"||callPrompt.s==="done"||(callPrompt.s==="later"&&Date.now()<(callPrompt.until||0))));
+  // Lien « ?appel=1 » (message d'annulation) : rouvre la demande d'appel, même après « Non merci ».
+  const callAsk=new URLSearchParams(location.search).has("appel");
+  const callEligible=!showNews&&Date.now()<CALL_END_MS&&(callAsk||(!isAdmin&&(currentUser.cursus||"pass-grenoble")==="pass-grenoble"
+    &&!(callPrompt&&(callPrompt.s==="no"||callPrompt.s==="done"||(callPrompt.s==="later"&&Date.now()<(callPrompt.until||0))))));
   useEffect(()=>{
     if(!callEligible)return;
     let off=false;
@@ -9683,7 +9716,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
     {showNews&&<NewsModal onClose={closeNews}/>}
-    {callOpen&&!showNews&&<CallRequestModal currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>setCallOpen(false)}/>}
+    {callOpen&&!showNews&&<CallRequestModal currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
     {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
       <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
       <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
