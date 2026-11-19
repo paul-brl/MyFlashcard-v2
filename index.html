@@ -10228,8 +10228,11 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
             // Les deux faces sont empilées dans la MÊME case d'une grille, et non plus
             // en position absolue : la carte prend donc la hauteur de la face la plus
             // longue. Un texte long agrandit le cadre au lieu d'en déborder.
+            // Rotation seulement de la question vers la réponse. Le retour au recto
+            // (carte suivante ou « revoir la question ») est instantané : sinon la
+            // réponse de la carte suivante apparaît pendant le demi-tour.
             return(
-              <div style={{width:"100%",minHeight:minH,position:"relative",display:"grid",gridTemplateColumns:"minmax(0,1fr)",transformStyle:"preserve-3d",WebkitTransformStyle:"preserve-3d",transform:showBack?"rotateY(180deg)":"rotateY(0)",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)",cursor:"pointer"}} onClick={()=>showBack?setShowBack(false):setShowBack(true)}>
+              <div style={{width:"100%",minHeight:minH,position:"relative",display:"grid",gridTemplateColumns:"minmax(0,1fr)",transformStyle:"preserve-3d",WebkitTransformStyle:"preserve-3d",transform:showBack?"rotateY(180deg)":"rotateY(0)",transition:showBack?"transform 0.4s cubic-bezier(0.4,0,0.2,1)":"none",cursor:"pointer"}} onClick={()=>showBack?setShowBack(false):setShowBack(true)}>
                 <div style={{gridArea:"1 / 1",position:"relative",backfaceVisibility:"hidden",WebkitBackfaceVisibility:"hidden",transform:"rotateY(0deg)",background:C.surface,borderRadius:12,border:`1.5px solid ${C.border}`,padding:"24px 28px",display:"flex",flexDirection:"column",justifyContent:"center",minHeight:minH,minWidth:0,overflowWrap:"anywhere",wordBreak:"break-word"}}>
                   <Lbl>Question · cliquer pour révéler</Lbl>
                   {fc.text&&<MathText text={fc.text} style={{fontFamily:serif,fontSize:20,lineHeight:1.6,margin:"8px 0 0",whiteSpace:"pre-wrap",...(!isAdmin?noSel:{})}} onContextMenu={!isAdmin?e=>e.preventDefault():undefined}/>}
