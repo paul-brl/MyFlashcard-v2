@@ -2925,6 +2925,12 @@ const CHAPTERS = {
   "o2-biodev": {
     1: ["Les crêtes neurales","L'appareil branchial","La face et le palais","L'odontogenèse","La dentinogenèse","L'amélogenèse","La racine et le parodonte","L'éruption dentaire"],
   },
+  "o2-genet": {
+    1: ["ED1 · Biologie moléculaire et hérédité","ED2 · L'aspect des dents normales","ED3 · Anomalies de nombre, de forme et de la dentine","ED4 · Anomalies de l'émail","ED5 · Méthode de l'étude de cas"],
+  },
+  "o2-ecosys": {
+    1: ["ED1 · Microbiologie générale","ED2 · Hôte, bactéries et microbiote","ED3 · Milieu buccal et infections à distance","ED4 · Biofilms et carie","ED5 · Étiologie et risque carieux","TP · Microbiote et risque carieux"],
+  },
 };
 const getChapters = (groupId, num) => CHAPTERS[groupId]?.[num] || [];
 const getDisplayChapters = (groupId, num, cards) => {
@@ -8536,6 +8542,24 @@ function AdminCalls({accounts}){
     </div>)}</div>
   </div>;
 }
+// Fenêtre « Nouveautés » réservée au cursus odonto Lyon (settings.newsOdontoSeen !== NEWS_ODONTO_ID).
+// Les étudiants de PASS ne la voient jamais. Montrée avant la fenêtre générale si les deux sont à voir.
+const NEWS_ODONTO_ID="2026-11-annales-odonto";
+const DRIVE_ANNOTES="https://drive.google.com/drive/folders/1e6acrsSx1RN76gVw_eAO0i6dV520bMyf?usp=sharing";
+function NewsOdontoModal({onClose}){
+  const P=({children})=><p style={{fontSize:13.5,lineHeight:1.6,color:C.textMed,margin:"0 0 12px"}}>{children}</p>;
+  const B=({children})=><b style={{color:C.text}}>{children}</b>;
+  return <Modal onClose={onClose} width={460}>
+    <p style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",color:C.textLt,margin:"0 0 10px"}}>Nouveau pour les partiels</p>
+    <p style={{fontFamily:serif,fontSize:22,margin:"0 0 16px",lineHeight:1.25}}><span aria-hidden="true">🦷</span> Tes cartes suivent les annales jusqu'en 2025-26</p>
+    <P>Les sujets d'<B>histologie</B> et de <B>BDO</B> de <B>2023-24, 2024-25 et 2025-26</B> sont maintenant pris en compte. Les cartes qui y sont tombées passent en <B>Prioritaire</B>.</P>
+    <P>Le Pr Farges se répète : <B>70 %</B> des affirmations des QCM de 2025-26 étaient déjà tombées mot pour mot les années d'avant. Commence par le Prioritaire.</P>
+    <P>Les <B>cours annotés par les annales</B> (diapos de la fac et ronéos du tutorat), à jour, sont dans le <a href={DRIVE_ANNOTES} target="_blank" rel="noopener" style={{color:C.accent,fontWeight:600}}>dossier partagé</a>.</P>
+    <div style={{display:"flex",justifyContent:"flex-end",marginTop:18}}>
+      <Btn fill small onClick={onClose}>C'est noté</Btn>
+    </div>
+  </Modal>;
+}
 function CountLegend(){
   return <span style={{display:"inline-flex",gap:10,flexWrap:"wrap",alignItems:"center",fontSize:11,color:C.textMed}}>
     {COUNT_KINDS.map(t=><span key={t.k} style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,borderRadius:"50%",background:t.bg,border:`1px solid ${t.bd}`,display:"inline-block"}}/>{t.label(2)}</span>)}
@@ -9355,6 +9379,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     supa.getMyCallRequest().then(r=>{if(!off&&r.ok&&!r.row)setCallOpen(true);});
     return()=>{off=true;};
   },[callEligible]);
+  const [showNewsOdonto,setShowNewsOdonto]=useState(()=>currentUser?.cursus===CURSUS_LYON&&settings?.newsOdontoSeen!==NEWS_ODONTO_ID);
+  const closeNewsOdonto=()=>{setShowNewsOdonto(false);onSaveSettings({...settings,newsOdontoSeen:NEWS_ODONTO_ID});};
   const [explainDont,setExplainDont]=useState(false);
   const [explainSaved,setExplainSaved]=useState(false);
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
@@ -9715,8 +9741,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
       )}
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
-    {showNews&&<NewsModal onClose={closeNews}/>}
-    {callOpen&&!showNews&&<CallRequestModal currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
+    {showNewsOdonto?<NewsOdontoModal onClose={closeNewsOdonto}/>:showNews&&<NewsModal onClose={closeNews}/>}
+    {callOpen&&!showNews&&!showNewsOdonto&&<CallRequestModal currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
     {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
       <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
       <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
