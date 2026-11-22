@@ -1562,6 +1562,10 @@ const supa = {
       return Array.isArray(d)&&d[0]&&d[0].phone?String(d[0].phone):"";
     }catch{ return ""; }
   },
+  // Trace anonyme de la fenêtre d'appel (table « call_prompt_events »). Silencieux : ne bloque jamais l'étudiant.
+  logCallEvent: async (event, username) => {
+    try{ await fetch(`${SUPA_URL}/rest/v1/call_prompt_events`,{method:"POST",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify([{user_id:sbUserId(),username:username||null,event}])}); }catch{}
+  },
   createCallRequest: async (row) => {
     try{
       const r=await fetch(`${SUPA_URL}/rest/v1/call_requests`,{method:"POST",headers:{...H,"Prefer":"return=minimal"},body:JSON.stringify([row])});
@@ -8395,14 +8399,15 @@ const CALL_END_MS=new Date("2026-12-15T00:00:00").getTime();   // concours des P
 const CALL_CALLER="Martin";
 const CALLER_PHONES={Martin:"07 68 49 87 04",Paul:"07 66 11 91 11"};   // numéros des mentions légales
 const callSlotLabel=iso=>{try{return new Date(iso).toLocaleString("fr-FR",{weekday:"long",day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"});}catch{return iso||"";}};
-function CallRequestModal({currentUser,settings,onSaveSettings,onClose}){
+function CallRequestModal({currentUser,settings,onSaveSettings,onClose,track}){
   const [step,setStep]=useState(1);
   const [avail,setAvail]=useState(""),[phone,setPhone]=useState(""),[topic,setTopic]=useState("");
   const [err,setErr]=useState(""),[sending,setSending]=useState(false);
   useEffect(()=>{let off=false;supa.getMyPhone().then(p=>{if(!off&&p)setPhone(x=>x||p);});return()=>{off=true;};},[]);
   const remember=v=>{try{onSaveSettings({...settings,callPrompt:v});}catch{}};
-  const later=()=>{remember({s:"later",until:Date.now()+7*86400000});onClose();};
-  const never=()=>{remember({s:"no"});onClose();};
+  useEffect(()=>{if(track)supa.logCallEvent("seen",currentUser.username);},[]);   // eslint-disable-line
+  const later=()=>{if(track)supa.logCallEvent("later",currentUser.username);remember({s:"later",until:Date.now()+7*86400000});onClose();};
+  const never=()=>{if(track)supa.logCallEvent("no",currentUser.username);remember({s:"no"});onClose();};
   const send=async()=>{
     setErr("");
     const ph=normalizePhone(phone);
@@ -9716,7 +9721,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
     {showNews&&<NewsModal onClose={closeNews}/>}
-    {callOpen&&!showNews&&<CallRequestModal currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
+    {callOpen&&!showNews&&<CallRequestModal track={!callAsk} currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
     {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
       <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
       <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
