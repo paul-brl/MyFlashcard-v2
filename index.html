@@ -2089,7 +2089,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-23-minuterie";
+const APP_VERSION="2026-11-23-minuterie-2";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -10111,6 +10111,7 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
   // déclaré terminé tant qu'il reste une carte en attente.
   const [waiting,setWaiting]=useState([]);
   const [wTick,setWTick]=useState(0);
+  const retours=useRef(new Map()); // carte revenue d'attente → heure où son délai a sonné
   const [recallFlash,setRecallFlash]=useState(null);
   const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0),[confirmDelCard,setConfirmDelCard]=useState(null),[delFlash,setDelFlash]=useState(false),[confirmBury,setConfirmBury]=useState(false),[showBuried,setShowBuried]=useState(false);
   const [occReduite,setOccReduite]=useState(false),[occZoom,setOccZoom]=useState(0);
@@ -10208,7 +10209,22 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
     const ids=new Set(ready.map(r=>r.card.id));
     const ordonnees=[...ready].sort((a,b)=>a.until-b.until).map(r=>r.card);
     setWaiting(w=>w.filter(x=>!ids.has(x.card.id)));
-    setLocalQ(q=>[...q,...ordonnees]);
+    // Une carte dont le délai est écoulé passe JUSTE APRÈS la carte affichée
+    // (correction du 23/11/2026 : elle était ajoutée en fin de file, donc revue
+    // seulement après toutes les autres). File vide : elle devient la suivante.
+    // Entre cartes revenues, la première arrivée à maturité passe d'abord : une
+    // carte se place après celles déjà revenues dont le délai a sonné avant le sien.
+    const prets=[...ready].sort((a,b)=>a.until-b.until);
+    setLocalQ(q=>{
+      const n=[...q];
+      prets.forEach(r=>{
+        let pos=(fileVide||idx>=n.length)?n.length:idx+1;
+        while(pos<n.length&&retours.current.has(n[pos].id)&&retours.current.get(n[pos].id)<=r.until)pos++;
+        n.splice(pos,0,r.card);
+        retours.current.set(r.card.id,r.until);
+      });
+      return n;
+    });
     setDone(false);
     if(fileVide){
       // En méthode des J, le report est aussi inscrit dans la progression : on le
