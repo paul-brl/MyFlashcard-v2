@@ -2089,7 +2089,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-23-zoom-anat-2";
+const APP_VERSION="2026-11-23-minuterie";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -3629,7 +3629,7 @@ const J_SNOOZE=[
   {id:"m1",  label:"1 min",  mins:1,  hint:"presque tout de suite"},
   {id:"m5",  label:"5 min",  mins:5,  hint:"quelques cartes plus loin"},
   {id:"m10", label:"10 min", mins:10, hint:"le temps de faire autre chose"},
-  {id:"m30", label:"30 min", mins:30, hint:"en pratique : à la fin du paquet"},
+  {id:"m30", label:"30 min", mins:30, hint:"dans une demi-heure"},
 ];
 // ─── Révision personnalisée : quand la carte revient dans la session ─────────
 // Les quatre notes gardent leur sens, mais chacune décide aussi dans combien de
@@ -10186,23 +10186,24 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
     });
     return()=>{alive=false;};
   },[idx,localQ,overrides,username]);
-  // Le battement qui fait revenir les cartes en attente. Cinq secondes : assez fin
-  // pour un report d'une minute, assez lâche pour ne rien coûter.
+  // Le battement qui fait revenir les cartes en attente, dans les trois méthodes
+  // (23/11/2026 : Anki aussi). Une seconde, pour le compte à rebours de l'écran
+  // d'attente ; il ne fait que comparer quelques dates, il ne coûte rien.
   useEffect(()=>{
-    if(mode==="anki")return;
-    const t=setInterval(()=>setWTick(n=>n+1),5000);
+    if(!waiting.length)return;
+    const t=setInterval(()=>setWTick(n=>n+1),1000);
     return()=>clearInterval(t);
-  },[mode]);
+  },[waiting.length]);
   useEffect(()=>{
-    if(mode==="anki"||!waiting.length)return;
+    if(!waiting.length)return;
     const now=Date.now();
-    // Deux façons pour une carte en attente de revenir : sa minuterie a sonné, ou
-    // la file est vide. Ce second cas est celui qui compte le plus : il évite
-    // d'annoncer « paquet terminé » alors que des cartes attendent encore, et il
-    // fait qu'un report de 30 minutes se comporte en pratique comme une fin de
-    // paquet plutôt que comme une demi-heure d'attente les bras croisés.
+    // Une carte en attente ne revient que quand SON délai est écoulé (correction du
+    // 23/11/2026 : avant, une file vide les rappelait toutes d'un coup, si bien qu'un
+    // « dans 5 min » revenait tout de suite dès qu'il restait peu de cartes). Quand
+    // il n'y a plus rien d'autre à réviser, l'écran d'attente affiche le compte à
+    // rebours et propose « Reprendre maintenant ».
     const fileVide=done||localQ.length===0||idx>=localQ.length;
-    const ready=fileVide?waiting:waiting.filter(w=>w.until<=now);
+    const ready=waiting.filter(w=>w.until<=now);
     if(!ready.length)return;
     const ids=new Set(ready.map(r=>r.card.id));
     const ordonnees=[...ready].sort((a,b)=>a.until-b.until).map(r=>r.card);
@@ -10224,8 +10225,11 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
   // si la page est rechargée ou l'onglet fermé en cours de session.
   useEffect(()=>{
     if(!onQueueChange)return;
-    onQueueChange(done?[]:localQ.slice(idx).map(c=>c.id));
-  },[localQ,idx,done]);
+    // Les cartes en attente (minuterie) font partie de la session : elles sont
+    // remontées aussi, sinon un rechargement de page les ferait oublier.
+    const file=done?[]:localQ.slice(idx).map(c=>c.id);
+    onQueueChange([...file,...waiting.map(w=>w.card.id).filter(id=>!file.includes(id))]);
+  },[localQ,idx,done,waiting]);
   const cardStart=useRef(Date.now());
   // Historique de la session : permet de revenir sur la carte précédente et de
   // corriger une note donnée par erreur. Chaque entrée mémorise l'état EXACT
@@ -10289,7 +10293,10 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
       const mins=PERSO_SNOOZE[rating];
       if(mins!=null)setWaiting(w=>[...w,{card,until:Date.now()+mins*60000}]);
     } else if(np.state==="learning"||np.state==="relearning"){
-      q.splice(Math.min(idx+4,q.length),0,card);
+      // Le délai de la note (1, 5 ou 10 min selon les réglages) est respecté :
+      // la carte attend sa minuterie, comme en Personnalisée et en méthode des J.
+      const t=np.next?new Date(np.next).getTime():NaN;
+      setWaiting(w=>[...w,{card,until:Number.isFinite(t)?t:Date.now()+60000}]);
     }
     setLocalQ(q);if(!q.length||idx>=q.length){setDone(true);}
   };
@@ -10344,9 +10351,9 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
     const snap=histRef2.current.pop();
     if(!snap)return;
     const revoked=onUndo?onUndo(snap):null;
-    // En méthode des J, la carte qu'on annule peut être partie en attente : on
+    // La carte qu'on annule peut être partie en attente (toutes les méthodes) : on
     // l'en retire, sinon elle réapparaîtrait en double quand la minuterie sonne.
-    if(mode==="j")setWaiting(w=>w.filter(x=>x.card.id!==snap.cardId));
+    setWaiting(w=>w.filter(x=>x.card.id!==snap.cardId));
     setLocalQ(snap.queue);
     setIdx(snap.idx);
     setStats(snap.stats);
@@ -10419,11 +10426,18 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
   // Cet écran ne dure qu'un battement : l'effet ci-dessus remet immédiatement les
   // cartes en attente dans la file. Il existe pour qu'aucune image de « paquet
   // terminé » ne s'affiche, même une fraction de seconde, alors qu'il en reste.
-  if((done||!card)&&mode!=="anki"&&waiting.length>0){
+  if((done||!card)&&waiting.length>0){
+    const prochaine=Math.min(...waiting.map(w=>w.until));
+    const reste=Math.max(0,Math.ceil((prochaine-Date.now())/1000));
+    const mmss=`${Math.floor(reste/60)}:${String(reste%60).padStart(2,"0")}`;
     return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}>
-      <div style={{fontSize:44}}>↻</div>
-      <p style={{fontFamily:serif,fontSize:22,margin:0}}>On reprend les {waiting.length} carte{waiting.length>1?"s":""} en attente</p>
-      <p style={{fontSize:13,color:C.textMed,margin:0,maxWidth:380,lineHeight:1.7}}>Tu as vu toutes les autres — le paquet n'est pas terminé tant qu'il reste celles-ci.</p>
+      <div style={{fontSize:44}}>⏳</div>
+      <p style={{fontFamily:serif,fontSize:22,margin:0}}>Prochaine carte dans {mmss}</p>
+      <p style={{fontSize:13,color:C.textMed,margin:0,maxWidth:380,lineHeight:1.7}}>{waiting.length} carte{waiting.length>1?"s":""} en attente : chacune revient quand son délai est écoulé. Le paquet n'est pas terminé tant qu'il en reste.</p>
+      <div style={{display:"flex",gap:10,marginTop:6,flexWrap:"wrap",justifyContent:"center"}}>
+        <button onClick={pullWaiting} style={{fontFamily:font,fontSize:13,fontWeight:600,padding:"9px 16px",borderRadius:8,border:"none",background:C.accent,color:"var(--c-onSolid)",cursor:"pointer"}}>Reprendre maintenant</button>
+        <button onClick={onBack} style={{fontFamily:font,fontSize:13,padding:"9px 16px",borderRadius:8,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed,cursor:"pointer"}}>Arrêter là</button>
+      </div>
     </div>;
   }
   if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p>{cram&&<p style={{fontSize:12,color:C.textLt,margin:0,maxWidth:340,lineHeight:1.6}}>🗓️ Révision en avance : ces cartes ont bien été reprogrammées, avec un gain proportionné à l'avance que tu avais prise.</p>}{sessionPts>0&&<p style={{fontFamily:mono,fontSize:12,color:"var(--c-gold)",margin:0}}>🏆 +{sessionPts} points aujourd'hui</p>}<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap",justifyContent:"center"}}>{canUndo&&<Btn onClick={handleUndoClick}>↩ Revenir à la dernière carte</Btn>}<Btn fill onClick={onBack}>← Tableau de bord</Btn></div>{isSem1Client&&<StudyClientEnd count={stats.total}/>}{promoOn&&<StudyPromoEnd count={stats.total} onOpen={()=>setPromoOpen(true)}/>}{promoModal}</div>;
