@@ -2089,7 +2089,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-12-rang-cursus";
+const APP_VERSION="2026-11-23-zoom-anat";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -2934,6 +2934,9 @@ const CHAPTERS = {
   },
   "o2-ecosys": {
     1: ["ED1 · Microbiologie générale","ED2 · Hôte, bactéries et microbiote","ED3 · Milieu buccal et infections à distance","ED4 · Biofilms et carie","ED5 · Étiologie et risque carieux","TP · Microbiote et risque carieux"],
+  },
+  "o2-anatdent": {
+    1: ["Incisives","Canines","Prémolaires","Molaires"],
   },
 };
 const getChapters = (groupId, num) => CHAPTERS[groupId]?.[num] || [];
@@ -4392,13 +4395,58 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
     try{ paintOcclusion(canvasRef.current,img,data,showBack,showOthers); }
     catch(e){ console.error("OcclusionCanvas:",e); }
   },[img,data,showBack,showOthers]);
+  // ─── Agrandir (23/11/2026) ──────────────────────────────────────────────────
+  // Une grande image (un tableau entier, par exemple) est réduite à 300 px de haut
+  // et devient illisible. Le bouton « Agrandir » n'apparaît que si l'image est
+  // affichée à moins de 60 % de sa taille : les petites images ne changent pas.
+  // Le plein écran la montre à taille réelle, centrée sur la zone demandée ;
+  // toucher l'image retourne la carte comme d'habitude (le clic remonte).
+  const [reduite,setReduite]=useState(false);
+  const [zoom,setZoom]=useState(false);
+  const zoomCanvasRef=useRef(null), zoomBoxRef=useRef(null);
+  useEffect(()=>{
+    const cv=canvasRef.current; if(!cv||!img)return;
+    const mesure=()=>setReduite(cv.width>0&&cv.clientWidth/cv.width<0.6);
+    mesure();
+    if(typeof ResizeObserver==="undefined")return;
+    const ro=new ResizeObserver(mesure); ro.observe(cv);
+    return()=>ro.disconnect();
+  },[img]);
+  React.useLayoutEffect(()=>{
+    if(!zoom||!img||!data)return;
+    try{ paintOcclusion(zoomCanvasRef.current,img,data,showBack,showOthers); }
+    catch(e){ console.error("OcclusionCanvas zoom:",e); }
+  },[zoom,img,data,showBack,showOthers]);
+  useEffect(()=>{
+    if(!zoom)return;
+    const box=zoomBoxRef.current, z=data?.zones?.find(z=>z.id===data.targetZone);
+    if(box&&z){ box.scrollLeft=z.x+z.w/2-box.clientWidth/2; box.scrollTop=z.y+z.h/2-box.clientHeight/2; }
+    const esc=e=>{ if(e.key==="Escape")setZoom(false); };
+    window.addEventListener("keydown",esc);
+    return()=>window.removeEventListener("keydown",esc);
+  },[zoom]);
   if(imgErr)return <p style={{fontSize:12,color:C.again,textAlign:"center",margin:"12px 0"}}>⚠️ Image de cette carte introuvable.</p>;
   // Pendant le tout premier chargement, on réserve la place au lieu de la laisser
   // vide : la carte ne « saute » pas quand l'image arrive.
   if(!img)return <div style={{height:220,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,border:`1px solid ${C.border}`}}>
     <span style={{fontSize:12,color:C.textLt,fontFamily:mono,letterSpacing:1}}>chargement de l'image…</span>
   </div>;
-  return <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>;
+  // Dans le plein écran, seul le toucher sur l'image remonte (il retourne la carte) ;
+  // le fond, la barre et le bouton Fermer ne doivent rien déclencher derrière.
+  const stop=e=>{ if(e.target!==zoomCanvasRef.current)e.stopPropagation(); };
+  return <div style={{position:"relative"}}>
+    <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>
+    {reduite&&<button onClick={e=>{e.stopPropagation();setZoom(true);}} style={{position:"absolute",right:8,bottom:8,fontFamily:font,fontSize:12,fontWeight:600,padding:"6px 10px",borderRadius:6,border:"none",background:"rgba(20,28,48,0.85)",color:"#fff",cursor:"zoom-in"}}>🔍 Agrandir</button>}
+    {zoom&&<div onClick={stop} style={{position:"fixed",inset:0,zIndex:1300,background:"rgba(0,0,0,0.88)",display:"flex",flexDirection:"column"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 12px",color:"#fff",fontFamily:font,fontSize:12}}>
+        <span>Fais glisser pour te déplacer · touche l'image pour retourner la carte</span>
+        <button onClick={()=>setZoom(false)} style={{fontFamily:font,fontSize:13,fontWeight:600,padding:"7px 12px",borderRadius:6,border:"none",background:"#fff",color:"#111",cursor:"pointer",whiteSpace:"nowrap"}}>✕ Fermer</button>
+      </div>
+      <div ref={zoomBoxRef} style={{flex:1,overflow:"auto",WebkitOverflowScrolling:"touch"}}>
+        <canvas ref={zoomCanvasRef} style={{display:"block",margin:"0 auto",cursor:"pointer"}}/>
+      </div>
+    </div>}
+  </div>;
 }
 // ─── Card Editor ──────────────────────────────────────────────────────────────
 function CardEditor({card,onSave,onCancel,userGroups,officialCards,userCards,onSortCards,onDeleteCards,theme,onToggleTheme}){
