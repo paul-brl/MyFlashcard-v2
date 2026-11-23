@@ -2089,7 +2089,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-23-zoom-anat";
+const APP_VERSION="2026-11-23-zoom-anat-2";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -4359,7 +4359,7 @@ function paintOcclusion(canvas,img,data,showBack,showOthers){
     }
   });
 }
-function OcclusionCanvas({cardFront,showBack,showOthers}){
+function OcclusionCanvas({cardFront,showBack,showOthers,zoomTick,onReduite}){
   const canvasRef=useRef(null);
   const data=useMemo(()=>{ try{ return JSON.parse(cardFront); }catch{ return null; } },[cardFront]);
   // Image déjà décodée en mémoire ? On la prend TOUT DE SUITE, dès le premier
@@ -4412,6 +4412,13 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
     const ro=new ResizeObserver(mesure); ro.observe(cv);
     return()=>ro.disconnect();
   },[img]);
+  // Écran de révision : le bouton « Agrandir » est dans la rangée de boutons
+  // (entre « Voir les indices » et « Révéler »). Le parent apprend ici s'il faut
+  // l'afficher, et demande l'ouverture en incrémentant zoomTick.
+  useEffect(()=>{ if(onReduite)onReduite(reduite); },[reduite,onReduite]);
+  // N'ouvre que sur un nouveau clic : une carte qui s'affiche ne s'ouvre jamais seule.
+  const tickVu=useRef(zoomTick);
+  useEffect(()=>{ if(zoomTick&&zoomTick!==tickVu.current){ tickVu.current=zoomTick; setZoom(true); } },[zoomTick]);
   React.useLayoutEffect(()=>{
     if(!zoom||!img||!data)return;
     try{ paintOcclusion(zoomCanvasRef.current,img,data,showBack,showOthers); }
@@ -4436,7 +4443,7 @@ function OcclusionCanvas({cardFront,showBack,showOthers}){
   const stop=e=>{ if(e.target!==zoomCanvasRef.current)e.stopPropagation(); };
   return <div style={{position:"relative"}}>
     <canvas ref={canvasRef} style={{maxWidth:"100%",maxHeight:300,borderRadius:8,display:"block",margin:"0 auto"}}/>
-    {reduite&&<button onClick={e=>{e.stopPropagation();setZoom(true);}} style={{position:"absolute",right:8,bottom:8,fontFamily:font,fontSize:12,fontWeight:600,padding:"6px 10px",borderRadius:6,border:"none",background:"rgba(20,28,48,0.85)",color:"#fff",cursor:"zoom-in"}}>🔍 Agrandir</button>}
+    {reduite&&!onReduite&&<button onClick={e=>{e.stopPropagation();setZoom(true);}} style={{position:"absolute",right:8,bottom:8,fontFamily:font,fontSize:12,fontWeight:600,padding:"6px 10px",borderRadius:6,border:"none",background:"rgba(20,28,48,0.85)",color:"#fff",cursor:"zoom-in"}}>🔍 Agrandir</button>}
     {zoom&&<div onClick={stop} style={{position:"fixed",inset:0,zIndex:1300,background:"rgba(0,0,0,0.88)",display:"flex",flexDirection:"column"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,padding:"10px 12px",color:"#fff",fontFamily:font,fontSize:12}}>
         <span>Fais glisser pour te déplacer · touche l'image pour retourner la carte</span>
@@ -10106,6 +10113,7 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
   const [wTick,setWTick]=useState(0);
   const [recallFlash,setRecallFlash]=useState(null);
   const [idx,setIdx]=useState(0),[showBack,setShowBack]=useState(false),[showOthers,setShowOthers]=useState(false),[localQ,setLocalQ]=useState(queue),[done,setDone]=useState(false),[stats,setStats]=useState({correct:0,total:0}),[buryFlash,setBuryFlash]=useState(false),[showPktChange,setShowPktChange]=useState(false),[gainFlash,setGainFlash]=useState(null),[sessionPts,setSessionPts]=useState(0),[confirmDelCard,setConfirmDelCard]=useState(null),[delFlash,setDelFlash]=useState(false),[confirmBury,setConfirmBury]=useState(false),[showBuried,setShowBuried]=useState(false);
+  const [occReduite,setOccReduite]=useState(false),[occZoom,setOccZoom]=useState(0);
   // Adaptation personnelle de la carte affichée.
   const [adaptCard,setAdaptCard]=useState(null),[adaptFlash,setAdaptFlash]=useState(null);
   const saveStudySettings=patch=>onSaveSettings&&onSaveSettings({...settings,...patch});
@@ -10516,9 +10524,9 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
           <div style={{background:C.surface,border:`1.5px solid ${showBack?col:C.border}`,borderRadius:12,padding:"16px 20px",transition:"border-color 0.3s"}}>
             {getOcclusionTitle(card.front)&&<p style={{fontFamily:serif,fontSize:17,fontWeight:600,color:C.text,margin:"0 0 12px",textAlign:"center"}}>{getOcclusionTitle(card.front)}</p>}
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><Lbl>{showBack?"Réponse révélée":showOthers?"Indices visibles (image)":"Zone rouge = à deviner · Zones noires = masquées"}</Lbl>{showBack&&<Tag color={C.good} bg={C.goodBg} small>Révélé</Tag>}</div>
-            <div onClick={()=>showBack?setShowBack(false):setShowBack(true)} style={{cursor:"pointer"}}><OcclusionCanvas cardFront={card.front} showBack={showBack} showOthers={showOthers}/></div>
-            {!showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={e=>{e.stopPropagation();setShowOthers(s=>!s);}} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${showOthers?C.imp:C.border}`,background:showOthers?C.impBg:"transparent",color:showOthers?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>{showOthers?"🔲 Masquer les indices":"👁 Voir les indices (image)"}</button><button onClick={()=>setShowBack(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${col}`,background:pB(card.packetId),color:col}}>Révéler →</button></div>}
-            {showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={()=>setShowBack(false)} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,padding:0}}>← Cliquer sur l'image pour revoir la question</button></div>}
+            <div onClick={()=>showBack?setShowBack(false):setShowBack(true)} style={{cursor:"pointer"}}><OcclusionCanvas cardFront={card.front} showBack={showBack} showOthers={showOthers} zoomTick={occZoom} onReduite={setOccReduite}/></div>
+            {!showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={e=>{e.stopPropagation();setShowOthers(s=>!s);}} style={{fontFamily:font,fontSize:11,fontWeight:500,padding:"6px 12px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${showOthers?C.imp:C.border}`,background:showOthers?C.impBg:"transparent",color:showOthers?C.imp:C.textMed,display:"flex",alignItems:"center",gap:6}}>{showOthers?"🔲 Masquer les indices":"👁 Voir les indices (image)"}</button>{occReduite&&<button onClick={e=>{e.stopPropagation();setOccZoom(t=>t+1);}} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"zoom-in",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>🔍 Agrandir</button>}<button onClick={()=>setShowBack(true)} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 14px",cursor:"pointer",borderRadius:6,border:`1.5px solid ${col}`,background:pB(card.packetId),color:col}}>Révéler →</button></div>}
+            {showBack&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}><button onClick={()=>setShowBack(false)} style={{fontFamily:font,fontSize:11,background:"none",border:"none",cursor:"pointer",color:C.textLt,padding:0}}>← Cliquer sur l'image pour revoir la question</button>{occReduite&&<button onClick={e=>{e.stopPropagation();setOccZoom(t=>t+1);}} style={{fontFamily:font,fontSize:11,fontWeight:600,padding:"6px 12px",cursor:"zoom-in",borderRadius:6,border:`1.5px solid ${C.border}`,background:"transparent",color:C.textMed}}>🔍 Agrandir</button>}</div>}
           </div>
         </div>
       ):(
