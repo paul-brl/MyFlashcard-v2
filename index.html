@@ -1330,7 +1330,7 @@ const supa = {
   },
   getLeaderboard: async (day) => {
     try {
-      const r=await fetch(`${SUPA_URL}/rest/v1/daily_points_public?day=eq.${day}&select=user_id,points,cards,display_name,anonymous&order=points.desc&limit=200`,{headers:H});
+      const r=await fetch(`${SUPA_URL}/rest/v1/daily_points_public?day=eq.${day}&select=user_id,points,cards,display_name,anonymous,is_me&order=points.desc&limit=200`,{headers:H});
       if(!r.ok) return null;
       const rows=await r.json();
       return Array.isArray(rows)?rows:null;
@@ -6920,7 +6920,7 @@ function RankTab({username,tick}){
         ):(
           <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:10,overflow:"hidden"}}>
             {board.map((row,i)=>{
-              const me=!!row.user_id&&row.user_id===sbUserId();
+              const me=row.is_me===true||(!!row.user_id&&row.user_id===sbUserId());
               const r=rankFor(row.points||0);
               const medal=i===0?"🥇":i===1?"🥈":i===2?"🥉":null;
               return <div key={(row.user_id||"x")+i}style={{display:"flex",alignItems:"center",gap:12,padding:"10px 16px",borderTop:i?`1px solid ${C.border}`:"none",background:me?C.accentBg:"transparent"}}>
