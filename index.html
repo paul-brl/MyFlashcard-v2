@@ -2090,7 +2090,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-23-anonymat-classement";
+const APP_VERSION="2026-11-25-notifications";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -2252,7 +2252,7 @@ const setForumSeen = (u, iso) => { try { if (iso) localStorage.setItem(forumSeen
 // messages à l'identifiant Auth, jamais au nom d'utilisateur.
 const latestOtherPost = (rows, uid) => (rows||[])
   .filter(p => p && p.user_id !== uid && p.created_at)
-  .reduce((max, p) => (p.created_at > max ? p.created_at : max), "");
+  .reduce((max, p) => (dmTs(p.created_at) > dmTs(max) ? p.created_at : max), "");
 // ─── Cours PDF : identifiants et petit magasin partagé ────────────────────────
 // Un cours est identifié par le triplet matière / cours / chapitre, exactement
 // comme une flashcard. Un même chapitre ne peut donc porter qu'un seul PDF :
@@ -7287,7 +7287,15 @@ function dmUnreadFor(rows,role,username){
     });
     return {total,by};
   }
-  const seen=dmTs(getDmSeen(username));
+  let seenIso=getDmSeen(username);
+  if(!seenIso){
+    // Premier passage sur cet appareil (nouveau navigateur, cache vidé) : comme pour
+    // l'administrateur, l'historique n'est pas compté comme « non lu ».
+    const latest=rows.filter(r=>r.sender_role==="admin").reduce((m,r)=>Math.max(m,dmTs(r.created_at)),0);
+    seenIso=new Date(latest||Date.now()).toISOString();
+    try{ localStorage.setItem(dmSeenKey(username),seenIso); }catch{}
+  }
+  const seen=dmTs(seenIso);
   return {total:rows.filter(r=>r.sender_role==="admin"&&dmTs(r.created_at)>seen).length,by:{}};
 }
 // Pastilles de notification : relues toutes les 30 s, au retour sur l'onglet,
@@ -8427,6 +8435,23 @@ function CountChips({c,onPick}){
 // Montrée une seule fois à chaque étudiant (settings.newsSeen !== NEWS_ID).
 // Changer NEWS_ID (et le texte) pour annoncer une prochaine mise à jour.
 const NEWS_ID="2026-11-schemas";
+// Mémoire des pop-ups (Nouveautés, appel) : une clé par utilisateur, et non plus un réglage
+// commun à tout le navigateur. Au premier passage, on reprend les anciens réglages.
+const POPUP_KEYS=["newsSeen","newsOdontoSeen","callPrompt"];
+const popupsKey=u=>`mfc-popups-${u}`;
+const readPopups=(u,legacy)=>{
+  const v=storage.get(popupsKey(u));
+  if(v&&typeof v==="object")return v;
+  const seed={}; POPUP_KEYS.forEach(k=>{ if(legacy&&legacy[k]!==undefined)seed[k]=legacy[k]; });
+  storage.set(popupsKey(u),seed);
+  return seed;
+};
+const writePopups=(u,patch)=>{
+  const cur=storage.get(popupsKey(u))||{}, next={...cur};
+  POPUP_KEYS.forEach(k=>{ if(patch&&patch[k]!==undefined)next[k]=patch[k]; });
+  storage.set(popupsKey(u),next);
+  return next;
+};
 function NewsModal({onClose}){
   const P=({children})=><p style={{fontSize:13.5,lineHeight:1.6,color:C.textMed,margin:"0 0 12px"}}>{children}</p>;
   const B=({children})=><b style={{color:C.text}}>{children}</b>;
@@ -9425,14 +9450,18 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
   const [openCourse,setOpenCourse]=useState({});
   const [openRows,setOpenRows]=useState({});
   const [explain,setExplain]=useState(null);
-  const [showNews,setShowNews]=useState(()=>settings?.newsSeen!==NEWS_ID);
-  const closeNews=()=>{setShowNews(false);onSaveSettings({...settings,newsSeen:NEWS_ID});};
+  const [popups,setPopups]=useState(()=>readPopups(currentUser.username,settings));
+  const savePopups=patch=>setPopups(writePopups(currentUser.username,patch));
+  const [showNews,setShowNews]=useState(()=>popups.newsSeen!==NEWS_ID);
+  // Un seul pop-up par visite : si « Nouveautés » s'affiche, la fenêtre d'appel attend la prochaine visite.
+  const [newsAtOpen]=useState(()=>popups.newsSeen!==NEWS_ID||(currentUser?.cursus===CURSUS_LYON&&popups.newsOdontoSeen!==NEWS_ODONTO_ID));
+  const closeNews=()=>{setShowNews(false);savePopups({newsSeen:NEWS_ID});};
   // Fenêtre « appel avec un P2 » : PASS Grenoble, avant le concours, une fois la fenêtre Nouveautés fermée.
   const [callOpen,setCallOpen]=useState(false);
-  const callPrompt=settings?.callPrompt;
+  const callPrompt=popups.callPrompt;
   // Lien « ?appel=1 » (message d'annulation) : rouvre la demande d'appel, même après « Non merci ».
   const callAsk=new URLSearchParams(location.search).has("appel");
-  const callEligible=!showNews&&Date.now()<CALL_END_MS&&(callAsk||(!isAdmin&&(currentUser.cursus||"pass-grenoble")==="pass-grenoble"
+  const callEligible=!showNews&&(callAsk||!newsAtOpen)&&Date.now()<CALL_END_MS&&(callAsk||(!isAdmin&&(currentUser.cursus||"pass-grenoble")==="pass-grenoble"
     &&!(callPrompt&&(callPrompt.s==="no"||callPrompt.s==="done"||(callPrompt.s==="later"&&Date.now()<(callPrompt.until||0))))));
   useEffect(()=>{
     if(!callEligible)return;
@@ -9440,8 +9469,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     supa.getMyCallRequest().then(r=>{if(!off&&r.ok&&!r.row)setCallOpen(true);});
     return()=>{off=true;};
   },[callEligible]);
-  const [showNewsOdonto,setShowNewsOdonto]=useState(()=>currentUser?.cursus===CURSUS_LYON&&settings?.newsOdontoSeen!==NEWS_ODONTO_ID);
-  const closeNewsOdonto=()=>{setShowNewsOdonto(false);onSaveSettings({...settings,newsOdontoSeen:NEWS_ODONTO_ID});};
+  const [showNewsOdonto,setShowNewsOdonto]=useState(()=>currentUser?.cursus===CURSUS_LYON&&popups.newsOdontoSeen!==NEWS_ODONTO_ID);
+  const closeNewsOdonto=()=>{setShowNewsOdonto(false);savePopups({newsOdontoSeen:NEWS_ODONTO_ID});};
   const [explainDont,setExplainDont]=useState(false);
   const [explainSaved,setExplainSaved]=useState(false);
   const todayPts=useMemo(()=>isAdmin?0:todayPoints(currentUser.username).points,[currentUser.username,isAdmin,pointsTick]);
@@ -9482,7 +9511,8 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     const seen=getForumSeen(currentUser.username);
     if(!seen){ setForumSeen(currentUser.username,latest||new Date().toISOString()); setForumUnread(0); return; }
     const uid=sbUserId();
-    setForumUnread(meta.filter(p=>p.user_id!==uid&&p.created_at&&p.created_at>seen).length);
+    const seenTs=dmTs(seen);   // vraies dates : le texte brut se compare mal (formats Supabase / navigateur)
+    setForumUnread(meta.filter(p=>p.user_id!==uid&&p.created_at&&dmTs(p.created_at)>seenTs).length);
   },[currentUser.username]);
   useEffect(()=>{
     refreshForumUnread();
@@ -9803,7 +9833,7 @@ function Dashboard({currentUser,cards,userCards,progress,settings,onSaveSettings
     </div>
     {showUpgrade&&PURCHASES_VISIBLE&&<UpgradeModal currentPlanId={currentUser.plan?.planId} username={currentUser.username} onClose={()=>setShowUpgrade(false)} promo={promo} focusGroup={typeof showUpgrade==="string"?showUpgrade:null} fullGroups={fullGroups}/>}
     {showNewsOdonto?<NewsOdontoModal onClose={closeNewsOdonto}/>:showNews&&<NewsModal onClose={closeNews}/>}
-    {callOpen&&!showNews&&!showNewsOdonto&&<CallRequestModal track={!callAsk} currentUser={currentUser} settings={settings} onSaveSettings={onSaveSettings} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
+    {callOpen&&!showNews&&!showNewsOdonto&&<CallRequestModal track={!callAsk} currentUser={currentUser} settings={popups} onSaveSettings={savePopups} onClose={()=>{setCallOpen(false);if(callAsk){try{history.replaceState(null,"",location.pathname);}catch{}}}}/>}
     {semNotice&&<Modal onClose={()=>setSemNotice(false)} width={400}>
       <p style={{fontSize:32,margin:"0 0 8px",textAlign:"center"}}>🔒</p>
       <p style={{fontSize:14,color:C.textMed,margin:"0 0 20px",lineHeight:1.6,textAlign:"center"}}>Les cours de ce semestre ne sont pas inclus dans ton offre actuelle.<br/>Ils seront débloqués le semestre prochain.</p>
