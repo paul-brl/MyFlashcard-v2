@@ -2085,11 +2085,12 @@ const idbClear=async store=>{
   try{ const tx=db.transaction(store,"readwrite"); tx.objectStore(store).clear(); }catch{}
 };
 // ─── Version de l'application ─────────────────────────────────────────────────
-// À INCRÉMENTER À CHAQUE MISE EN LIGNE, en même temps que le fichier version.json
+// À INCRÉMENTER À CHAQUE MISE EN LIGNE : toujours modifier LES DEUX, cette constante ET
+// le fichier version.json, avec la même valeur (sinon bandeau « nouvelle version » permanent),
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-23-minuterie-2";
+const APP_VERSION="2026-11-23-anonymat-classement";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
