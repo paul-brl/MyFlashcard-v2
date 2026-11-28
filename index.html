@@ -2090,7 +2090,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-28-perso-points";
+const APP_VERSION="2026-11-28-perso-ordre";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -2969,7 +2969,7 @@ const MYCARD_METHODS = [
   { id:"j",     icon:"📅", label:"Méthode des J",
     help:"Planning fixe (J0, J1, J3, J7…) : seules les cartes dont un J tombe aujourd'hui sont proposées. Le plan appliqué est celui de la matière et du paquet, ou le plan par défaut de ton compte." },
   { id:"perso", icon:"🎯", label:"Personnalisée",
-    help:"Aucune échéance : les cartes les moins maîtrisées d'abord, librement répétables. Ne reprogramme ni l'échéance Anki, ni le planning des J." },
+    help:"Aucune échéance : les cartes dans l'ordre du paquet, librement répétables. Ne reprogramme ni l'échéance Anki, ni le planning des J." },
 ];
 const MYCARD_GLOBAL_MODES=[
   {id:"prioritaire",label:"Prioritaire",col:"var(--c-prio)",bg:"var(--c-prioBg)"},
@@ -3823,8 +3823,9 @@ function persoRank(rows){
     return b.total-a.total;
   });
 }
-// La file : les cartes les plus fragiles en premier. Les cartes jamais travaillées
-// dans ce mode complètent la file s'il reste de la place.
+// Le CHOIX des cartes : les plus fragiles d'abord, les cartes jamais travaillées
+// dans ce mode complètent s'il reste de la place. Depuis le 28/11/2026 (demande de
+// Paul), la session les présente ensuite dans l'ordre du paquet (persoOrder).
 function buildPersoQueue(cardList,prog,{limit=30,threshold=null}={}){
   const scored=cardList.filter(c=>!prog[c.id]?.buried).map(c=>({c,m:cardMastery(prog[c.id])}));
   const seen=scored.filter(x=>x.m!==null);
@@ -3835,6 +3836,11 @@ function buildPersoQueue(cardList,prog,{limit=30,threshold=null}={}){
   if(out.length<limit)out.push(...fresh.map(x=>x.c).slice(0,limit-out.length));
   return out.slice(0,limit);
 }
+// Ordre de présentation en révision personnalisée : celui du paquet (case 1, 2,
+// 3…), comme dans l'onglet Flashcards, pour qu'une session commence toujours par
+// la première carte. Quand la sélection dépasse la taille de la session, ce sont
+// bien les plus fragiles qui sont retenues, puis remises dans l'ordre.
+const persoOrder=cards=>sortCardsGlobally(cards);
 // ─── Tours d'un paquet en révision personnalisée (28/11/2026) ───────────────
 // Un paquet fini est noté (sur l'appareil) avec son tour et l'ordre de ses cartes
 // au début de la session. Relancé, il repart de sa première carte, au tour
@@ -3852,13 +3858,13 @@ function savePersoTour(u,label,tour,ids){
 }
 // Mêmes cartes, même ordre, tour suivant. Seules les cartes encore présentes dans
 // la sélection (et non enfouies) sont reprises ; s'il n'en reste aucune, le
-// paquet repart au tour 1 avec la file habituelle (les plus fragiles d'abord).
+// paquet repart au tour 1 avec la file habituelle.
 function persoTourQueue(u,label,cardList,prog,fallback){
   const rec=(u&&label)?getPersoTours(u)[label]:null;
   if(rec&&Array.isArray(rec.ids)){
     const byId=new Map(cardList.map(c=>[c.id,c]));
     const q=rec.ids.map(id=>byId.get(id)).filter(c=>c&&!prog[c.id]?.buried);
-    if(q.length)return {queue:q,tour:(rec.tour||1)+1};
+    if(q.length)return {queue:persoOrder(q),tour:(rec.tour||1)+1};
   }
   return {queue:fallback,tour:1};
 }
@@ -3870,7 +3876,7 @@ const persoTourOf=(u,label)=>((u&&label&&getPersoTours(u)[label]?.tour)||0)+1;
 // notation Anki, gestes de la méthode des J, maîtrise en révision libre).
 function buildQueueForMethod(cardList,method,prog,settings,plans){
   if(method==="j")    return { queue:buildJQueue(cardList,prog,plans||{}), mode:"j" };
-  if(method==="perso")return { queue:buildPersoQueue(cardList,prog,{limit:Math.max(30,Math.min(cardList.length,100))}), mode:"perso" };
+  if(method==="perso")return { queue:persoOrder(buildPersoQueue(cardList,prog,{limit:Math.max(30,Math.min(cardList.length,100))})), mode:"perso" };
   return { queue:buildQueue(cardList,prog,settings), mode:"anki" };
 }
 // Moyenne de maîtrise sur une sélection de paquets (pondérée par le nombre de
@@ -8976,7 +8982,7 @@ function PersoMethodModal({onClose}){
 
     <p style={{fontFamily:serif,fontSize:17,margin:"18px 0 4px"}}>Maîtrise et couverture</p>
     <p style={{fontSize:13,color:C.textMed,margin:"0 0 4px",lineHeight:1.7}}>La <strong>maîtrise du paquet</strong> est la moyenne de ses cartes <em>déjà travaillées dans ce mode</em>. À côté, la <strong>couverture</strong> dit combien de cartes du paquet tu as réellement ouvertes — sans elle, un paquet de 80 cartes dont deux ont été réussies afficherait fièrement 100 %.</p>
-    <p style={{fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.7}}>La liste est triée du plus fragile au plus solide, et le bouton <strong>« Réviser mes cartes les plus fragiles »</strong> pioche à travers tous les paquets à la fois, en commençant par les cartes les plus faibles.</p>
+    <p style={{fontSize:13,color:C.textMed,margin:"10px 0 0",lineHeight:1.7}}>La liste est triée du plus fragile au plus solide, et le bouton <strong>« Réviser mes cartes les plus fragiles »</strong> pioche les cartes les plus faibles à travers tous les paquets à la fois. Dans une session, les cartes passent toujours dans l'ordre du paquet.</p>
 
     <div style={{background:"var(--c-goldBg)",border:"1px solid #e6d3a3",borderRadius:10,padding:"16px 18px",margin:"18px 0"}}>
       <p style={{fontFamily:serif,fontSize:17,margin:"0 0 8px",color:"var(--c-gold)"}}>Ta note dit aussi quand la carte revient</p>
@@ -9400,8 +9406,8 @@ const masteryColor=m=>m===null?C.textLt:(m<0.5?C.again:(m<PERSO_WEAK?C.hard:(m<P
 const persoAgg=rs=>({mastery:overallMastery(rs),seen:rs.reduce((a,r)=>a+r.seen,0),total:rs.reduce((a,r)=>a+r.total,0),cards:rs.flatMap(r=>r.cards)});
 const masteryPct=m=>m===null?"—":`${Math.round(m*100)} %`;
 // ─── Révision personnalisée : un bloc par matière ─────────────────────────────
-// Même présentation que les deux autres méthodes. Les boutons : réviser (les
-// cartes les plus fragiles d'abord), fragiles (maîtrise sous 60 %), jamais vues
+// Même présentation que les deux autres méthodes. Les boutons : réviser (toutes
+// les cartes, dans l'ordre du paquet), fragiles (maîtrise sous 60 %), jamais vues
 // ici, acquises (85 % et plus). La maîtrise s'affiche à côté de chaque nom.
 function PersoGroupBlock({group,allCards,rows,progress,onStudyPerso,canAccess,onUpgrade,ask}){
   const gAgg=persoAgg(rows.filter(r=>r.groupId===group.id));
@@ -9421,7 +9427,7 @@ function PersoGroupBlock({group,allCards,rows,progress,onStudyPerso,canAccess,on
       const n=line.cards.filter(c=>!progress[c.id]?.buried).length;
       const title=`🎯 ${group.label} · Cours ${num} · ${row.isCourse?"Cours complet":row.name} · ${line.pk?line.pk.label:"Tous les paquets"}`;
       return [
-        <FoldBtn key="all" on={n>0} style={foldMixStyle(line.pk)} title="Toutes les cartes de la ligne, les moins maîtrisées d'abord" onClick={()=>ask("p_all",{n},()=>onStudyPerso(line.cards,n,title))}>{n>0?`Réviser · ${fmtN(n)}`:"Vide"}</FoldBtn>,
+        <FoldBtn key="all" on={n>0} style={foldMixStyle(line.pk)} title="Toutes les cartes de la ligne, dans l'ordre du paquet" onClick={()=>ask("p_all",{n},()=>onStudyPerso(line.cards,n,title))}>{n>0?`Réviser · ${fmtN(n)}`:"Vide"}</FoldBtn>,
         <FoldBtn key="fr" on={fr.length>0} style={FOLD_KIND.rev} title="Maîtrise sous 60 %" onClick={()=>ask("p_fr",{n:fr.length},()=>onStudyPerso(fr,fr.length,`${title} · Fragiles`))}>{fr.length?`${fmtN(fr.length)} fragile${fr.length>1?"s":""}`:"Aucune fragile"}</FoldBtn>,
         <FoldBtn key="nv" on={nv.length>0} style={FOLD_KIND.nw} title="Jamais travaillées dans ce mode" onClick={()=>ask("p_nv",{n:nv.length},()=>onStudyPerso(nv,nv.length,`${title} · Jamais vues`))}>{nv.length?`${fmtN(nv.length)} jamais vue${nv.length>1?"s":""}`:"Toutes vues"}</FoldBtn>,
         <FoldBtn key="ok" on={ok.length>0} style={FOLD_KIND.up} title="Maîtrise de 85 % et plus" onClick={()=>ask("p_ok",{n:ok.length},()=>onStudyPerso(ok,ok.length,`${title} · Acquises`))}>{ok.length?`${fmtN(ok.length)} acquise${ok.length>1?"s":""}`:"Aucune acquise"}</FoldBtn>,
@@ -12533,13 +12539,14 @@ function App(){
     setView("study");
   },[prog,jplans,enrichCards]);
   // ─── Lancer une session de révision personnalisée ───────────────────────────
-  // Aucune échéance : on prend les cartes les plus fragiles de la sélection.
+  // Aucune échéance : on prend les cartes les plus fragiles de la sélection,
+  // présentées dans l'ordre du paquet.
   // Réponses données à chaque carte dans la session perso en cours : seule la
   // première peut rapporter des points (awardPersoPoints). Repart à zéro à
   // chaque nouvelle session (nouveau studyCtx) ; un retour arrière la décompte.
   const persoVusRef=useRef({ctx:null,n:new Map()});
   const startPersoStudy=useCallback(async(cardList,size,label)=>{
-    const base=buildPersoQueue(cardList,prog,{limit:size||30});
+    const base=persoOrder(buildPersoQueue(cardList,prog,{limit:size||30}));
     // Paquet déjà fini une fois : mêmes cartes, même ordre, tour suivant.
     const {queue,tour}=persoTourQueue(currentUser?.username,label,cardList,prog,base);
     if(!queue.length){alert("Aucune carte dans cette sélection.");return;}
