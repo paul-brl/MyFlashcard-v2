@@ -2090,7 +2090,7 @@ const idbClear=async store=>{
 // déposé à côté de index.html. Les onglets déjà ouverts comparent régulièrement
 // leur propre version à celle du serveur : si elles diffèrent, un bandeau discret
 // propose de recharger — sans jamais interrompre une carte en cours.
-const APP_VERSION="2026-11-25-mes-cartes";
+const APP_VERSION="2026-11-28-perso-points";
 const VERSION_CHECK_MS=5*60*1000; // toutes les 5 minutes, + à chaque retour sur l'onglet
 // ─── Reprise de session de révision ───────────────────────────────────────────
 // La progression de chaque carte part déjà en base à la notation. Ce qui manquait,
@@ -3835,6 +3835,34 @@ function buildPersoQueue(cardList,prog,{limit=30,threshold=null}={}){
   if(out.length<limit)out.push(...fresh.map(x=>x.c).slice(0,limit-out.length));
   return out.slice(0,limit);
 }
+// ─── Tours d'un paquet en révision personnalisée (28/11/2026) ───────────────
+// Un paquet fini est noté (sur l'appareil) avec son tour et l'ordre de ses cartes
+// au début de la session. Relancé, il repart de sa première carte, au tour
+// suivant. Le paquet est reconnu à son intitulé (le même bouton donne le même).
+const PERSO_TOURS_KEY=u=>`mfc-perso-tours-${u}`;
+const getPersoTours=u=>{ try{ return JSON.parse(localStorage.getItem(PERSO_TOURS_KEY(u))||"{}")||{}; }catch{ return {}; } };
+function savePersoTour(u,label,tour,ids){
+  if(!u||!label||!ids||!ids.length)return;
+  try{
+    const all=getPersoTours(u);
+    all[label]={tour,ids,ts:Date.now()};
+    Object.keys(all).sort((a,b)=>(all[b].ts||0)-(all[a].ts||0)).slice(200).forEach(k=>{ delete all[k]; });
+    localStorage.setItem(PERSO_TOURS_KEY(u),JSON.stringify(all));
+  }catch{}
+}
+// Mêmes cartes, même ordre, tour suivant. Seules les cartes encore présentes dans
+// la sélection (et non enfouies) sont reprises ; s'il n'en reste aucune, le
+// paquet repart au tour 1 avec la file habituelle (les plus fragiles d'abord).
+function persoTourQueue(u,label,cardList,prog,fallback){
+  const rec=(u&&label)?getPersoTours(u)[label]:null;
+  if(rec&&Array.isArray(rec.ids)){
+    const byId=new Map(cardList.map(c=>[c.id,c]));
+    const q=rec.ids.map(id=>byId.get(id)).filter(c=>c&&!prog[c.id]?.buried);
+    if(q.length)return {queue:q,tour:(rec.tour||1)+1};
+  }
+  return {queue:fallback,tour:1};
+}
+const persoTourOf=(u,label)=>((u&&label&&getPersoTours(u)[label]?.tour)||0)+1;
 // ─── File de révision d'une sélection, selon la méthode choisie ─────────────
 // Point d'entrée unique utilisé par l'onglet « Mes cartes » : la sélection de
 // cartes est la même, seule la façon de la mettre en file change. Renvoie aussi
@@ -3894,8 +3922,8 @@ function persoDailyCurve(username,days=30){
 // donc des points, comme une révision Anki. La valeur suit le même esprit que
 // AGE_VALUES — un rappel précoce, où la mémoire est encore fragile, vaut plus
 // qu'un rappel lointain sur une carte déjà solide.
-// La révision personnalisée, elle, ne rapporte AUCUN point : elle est librement
-// répétable, on pourrait y rejouer la même carte cent fois dans la journée.
+// La révision personnalisée a ses propres règles (awardPersoPoints, plus bas) :
+// elle est librement répétable, on ne paie donc que les vrais rappels.
 const J_VALUES_POINTS = j => j<=1?10 : (j<=7?6 : (j<=30?3 : 1));
 function awardJPoints(username,cardId,j,packetId){
   if(!username)return null;
@@ -3917,6 +3945,59 @@ function awardJPoints(username,cardId,j,packetId){
   savePoints(username,store);
   queuePointsOp(username,{type:"add",row:pointAwardRow(username,key,cardId,points,age,packetId)});
   return {points,age,base,bonus,packetId,total:day.points};
+}
+// ─── Points en révision personnalisée (28/11/2026, demande de Paul) ──────────
+// Le mode est librement répétable et un paquet fini se relance au tour suivant.
+// Règles, voulues « boostées » par Paul :
+//  • Dans une session, seule la PREMIÈRE réponse sur une carte compte. Réussie
+//    (Correct ou Facile), elle rapporte ; ratée, la carte ne rapporte plus rien
+//    dans cette session (la réussir juste après avoir lu la réponse ne prouve
+//    rien). Relancer le paquet ouvre une nouvelle session : ça repaie.
+//  • La valeur dépend de la maîtrise de la carte AVANT la réponse (cardMastery) :
+//    fragile 12, en progrès 8, acquise 5, plus le bonus d'importance. Une carte
+//    jamais travaillée ici compte comme fragile.
+//  • Dégressif dans la journée, toutes méthodes confondues : 1re fois payée
+//    ×1, 2e ×½, 3e et suivantes ×¼ (1 point au moins). Une carte déjà payée
+//    aujourd'hui en Anki ou en J commence donc à ×½ en personnalisée.
+// Chaque paiement est une ligne en base : card_id « perso:<id> », puis
+// « perso:<id>#2 », « #3 »… (la clé de la table est élève + jour + card_id).
+const PERSO_POINTS={fragile:12,moyen:8,acquise:5}; // max 15 avec le bonus (plafond de la base : 20)
+const PERSO_LEVEL_LABELS={fragile:"Carte fragile",moyen:"Carte en progrès",acquise:"Carte acquise"};
+const PERSO_REPEAT_FACTORS=[1,0.5,0.25];
+const PERSO_REPEAT_LABELS=["","2e fois aujourd'hui ×½","3e fois et plus ×¼"];
+const persoPointsKey=id=>`perso:${id}`;
+function persoPointValue(prev,rating,packetId,repet=0){
+  if(rating<3)return {points:0,reason:"miss"};
+  const m=cardMastery(prev);
+  const niveau=(m===null||m<PERSO_WEAK)?"fragile":(m<PERSO_SOLID?"moyen":"acquise");
+  const base=PERSO_POINTS[niveau],bonus=IMP_BONUS[packetId]||0;
+  const i=Math.min(repet,PERSO_REPEAT_FACTORS.length-1);
+  return {points:Math.max(1,Math.round((base+bonus)*PERSO_REPEAT_FACTORS[i])),niveau,base,bonus,repet,reason:"ok"};
+}
+function awardPersoPoints(username,cardId,prev,rating,packetId){
+  if(!username)return null;
+  const store=getPoints(username),key=dateKey(),racine=persoPointsKey(cardId);
+  const day=store.days[key]||emptyPointsDay();
+  if(!day.scored)day.scored={};
+  // Combien de fois cette carte a déjà rapporté aujourd'hui (Anki ou J, puis perso).
+  const dejaPerso=Object.keys(day.scored).filter(k=>k===racine||k.startsWith(racine+"#")).length;
+  const repet=(day.scored[cardId]?1:0)+dejaPerso;
+  const res=persoPointValue(prev,rating,packetId,repet);
+  if(res.points<=0)return null;
+  let n=dejaPerso+1,k=n===1?racine:`${racine}#${n}`;
+  while(day.scored[k]){ n++; k=`${racine}#${n}`; }
+  const age=cardAgeClass(prev);
+  day.scored[k]=res.points;
+  if(!day.scoredInfo)day.scoredInfo={};
+  day.scoredInfo[k]={age,packetId:packetId||null};
+  day.points+=res.points; day.cards+=1;
+  day.byAge[age]=(day.byAge[age]||0)+res.points;
+  if(packetId&&day.byImp[packetId]!==undefined)day.byImp[packetId]+=res.points;
+  store.days[key]=day;
+  savePoints(username,store);
+  queuePointsOp(username,{type:"add",row:pointAwardRow(username,key,k,res.points,age,packetId)});
+  const rl=PERSO_REPEAT_LABELS[Math.min(repet,PERSO_REPEAT_LABELS.length-1)];
+  return {...res,age,packetId,label:PERSO_LEVEL_LABELS[res.niveau]+(rl?` (${rl})`:""),key:k,total:day.points};
 }
 // ─── Design ──────────────────────────────────────────────────────────────────
 const C={bg:"var(--c-bg)",surface:"var(--c-surface)",border:"var(--c-border)",text:"var(--c-text)",textMed:"var(--c-textMed)",textLt:"var(--c-textLt)",accent:"var(--c-accent)",accentBg:"var(--c-accentBg)",prio:"var(--c-prio)",prioBg:"var(--c-prioBg)",imp:"var(--c-imp)",impBg:"var(--c-impBg)",util:"var(--c-util)",utilBg:"var(--c-utilBg)",again:"var(--c-again)",againBg:"var(--c-againBg)",hard:"var(--c-hard)",hardBg:"var(--c-hardBg)",good:"var(--c-good)",goodBg:"var(--c-goodBg)",easy:"var(--c-easy)",easyBg:"var(--c-easyBg)"};
@@ -7042,6 +7123,12 @@ function RankTab({username,tick}){
           <li><strong>Le farming de cartes faciles est peu rentable.</strong> Une carte ancienne, déjà consolidée, ne vaut qu'1 point : l'effort utile (nouvelles cartes, cartes difficiles, cartes prioritaires) est mieux payé.</li>
           <li><strong>Remise à zéro quotidienne.</strong> Le classement porte uniquement sur la journée en cours : c'est la régularité qui compte, pas le cumul.</li>
         </ul>
+        <p style={{fontFamily:serif,fontSize:17,color:C.text,margin:"0 0 10px"}}>4 · Méthode des J et révision personnalisée</p>
+        <ul style={{margin:"0 0 18px 18px"}}>
+          <li><strong>Méthode des J :</strong> valider un J rapporte 10 (J0, J1), 6 (jusqu'à J7), 3 (jusqu'à J30) ou 1 point, plus le bonus d'importance.</li>
+          <li><strong>Révision personnalisée :</strong> dans une session, seule ta <strong>première réponse</strong> sur une carte compte. Réussie (Correct ou Facile), elle rapporte selon la maîtrise de la carte avant ta réponse : <strong>fragile {PERSO_POINTS.fragile}</strong>, <strong>en progrès {PERSO_POINTS.moyen}</strong>, <strong>acquise {PERSO_POINTS.acquise}</strong>, plus le bonus d'importance. Ratée, elle ne rapporte plus rien dans cette session : la réussir juste après avoir lu la réponse ne prouve rien.</li>
+          <li><strong>Relancer un paquet repaie</strong>, de façon dégressive dans la journée, toutes méthodes confondues : 1re fois ×1, 2e fois ×½, 3e fois et suivantes ×¼. Une carte déjà payée aujourd'hui en Anki ou en J commence donc à ×½.</li>
+        </ul>
         <p style={{fontSize:12,color:C.textLt,margin:0}}>L'algorithme de répétition espacée (boutons et intervalles) reste strictement inchangé : le système de points ne fait que l'observer.</p>
       </div>}
     </div>
@@ -8905,7 +8992,8 @@ function PersoMethodModal({onClose}){
       <p style={{fontSize:12,color:C.textLt,margin:"12px 0 0",lineHeight:1.7}}>Et si tu arrives au bout du paquet avant la fin d'un délai, les cartes en attente sont remises en jeu tout de suite : le paquet n'est jamais annoncé terminé tant qu'il en reste une.</p>
     </div>
 
-    <p style={{fontSize:12,color:C.textLt,margin:"18px 0 0",lineHeight:1.7}}>Ce mode ne touche à aucune échéance : il ne reprogramme rien, ni côté Anki, ni côté J. Comme les cartes y sont librement répétables, il ne rapporte pas de points au classement.</p>
+    <p style={{fontSize:12,color:C.textLt,margin:"18px 0 0",lineHeight:1.7}}>Ce mode ne touche à aucune échéance : il ne reprogramme rien, ni côté Anki, ni côté J. Un paquet fini se relance au tour suivant : il repart de sa première carte, dans le même ordre.</p>
+    <p style={{fontSize:12,color:C.textLt,margin:"8px 0 0",lineHeight:1.7}}><strong>Points :</strong> dans une session, seule ta première réponse sur une carte compte. Réussie, elle rapporte selon la maîtrise de la carte : fragile {PERSO_POINTS.fragile}, en progrès {PERSO_POINTS.moyen}, acquise {PERSO_POINTS.acquise}, plus le bonus d'importance ; ratée, rien dans cette session. Relancer le paquet repaie, de façon dégressive dans la journée : ×1, puis ×½, puis ×¼ (une carte déjà payée aujourd'hui en Anki ou en J commence à ×½).</p>
     <div style={{marginTop:16,textAlign:"right"}}><Btn fill onClick={onClose}>J'ai compris</Btn></div>
   </Modal>;
 }
@@ -10153,7 +10241,7 @@ function CardAdaptModal({card,onSave,onReset,onClose}){
   </Modal>;
 }
 // ─── Study ────────────────────────────────────────────────────────────────────
-function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSaveSettings,onReportCard,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,username,theme,onToggleTheme,onUndo,onQueueChange,allCards,onUnbury,promo,planId,fullGroups}){
+function StudyView({label,queue,persoTour=1,cram=false,jEarly=false,mode="anki",jplans,onSaveSettings,onReportCard,onRate,onJAction,onJUnsnooze,onBury,onChangePacket,onDeleteUserCard,onEditUserCard,onSaveOverride,onResetOverride,overrides={},onBack,settings,isAdmin,progress,username,theme,onToggleTheme,onUndo,onQueueChange,allCards,onUnbury,promo,planId,fullGroups}){
   const [promoOpen,setPromoOpen]=useState(false),[promoPillHidden,setPromoPillHidden]=useState(false);
   // Un compte qui possède tout le Semestre 1 a tout acheté : aucune incitation
   // à l'achat pendant la révision, et un message de félicitations en fin de série.
@@ -10303,6 +10391,18 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
     const file=done?[]:localQ.slice(idx).map(c=>c.id);
     onQueueChange([...file,...waiting.map(w=>w.card.id).filter(id=>!file.includes(id))]);
   },[localQ,idx,done,waiting]);
+  // ─── Révision personnalisée : tours du paquet (28/11/2026) ────────────────
+  // Paquet fini (plus rien dans la file ni en attente) : l'écran de fin s'affiche
+  // et le tour est noté avec l'ordre des cartes du début de session. Relancé, le
+  // paquet repart de sa première carte, au tour suivant (persoTourQueue). Les
+  // cartes enfouies ou supprimées pendant la session ne sont pas reprises.
+  const persoRetirees=useRef(new Set()),tourNote=useRef(false);
+  useEffect(()=>{
+    if(mode!=="perso"||!username||tourNote.current)return;
+    if(waiting.length||!(done||localQ.length===0||idx>=localQ.length))return;
+    tourNote.current=true;
+    savePersoTour(username,label,persoTour||1,queue.map(c=>c.id).filter(id=>!persoRetirees.current.has(id)));
+  },[mode,username,waiting.length,done,localQ,idx,queue,label,persoTour]);
   const cardStart=useRef(Date.now());
   // Historique de la session : permet de revenir sur la carte précédente et de
   // corriger une note donnée par erreur. Chaque entrée mémorise l'état EXACT
@@ -10445,6 +10545,7 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
   // ce qui doit être clair pour l'étudiant avant qu'il ne clique.
   const handleBury=()=>{
     onBury&&onBury(card);
+    persoRetirees.current.add(card.id);
     setConfirmBury(false);
     setBuryFlash(true);
     setTimeout(()=>setBuryFlash(false),1500);
@@ -10462,6 +10563,7 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
     setConfirmDelCard(null);
     const ok=await onDeleteUserCard(card);
     if(ok===false)return;
+    persoRetirees.current.add(card.id);
     setDelFlash(true);
     setTimeout(()=>setDelFlash(false),1800);
     const q=[...localQ];q.splice(idx,1);
@@ -10513,7 +10615,7 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
       </div>
     </div>;
   }
-  if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p>{cram&&<p style={{fontSize:12,color:C.textLt,margin:0,maxWidth:340,lineHeight:1.6}}>🗓️ Révision en avance : ces cartes ont bien été reprogrammées, avec un gain proportionné à l'avance que tu avais prise.</p>}{sessionPts>0&&<p style={{fontFamily:mono,fontSize:12,color:"var(--c-gold)",margin:0}}>🏆 +{sessionPts} points aujourd'hui</p>}<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap",justifyContent:"center"}}>{canUndo&&<Btn onClick={handleUndoClick}>↩ Revenir à la dernière carte</Btn>}<Btn fill onClick={onBack}>← Tableau de bord</Btn></div>{isSem1Client&&<StudyClientEnd count={stats.total}/>}{promoOn&&<StudyPromoEnd count={stats.total} onOpen={()=>setPromoOpen(true)}/>}{promoModal}</div>;
+  if(done||!card)return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,padding:20,textAlign:"center"}}><div style={{fontSize:52}}>✓</div><p style={{fontFamily:serif,fontSize:26,margin:0}}>Session terminée</p><p style={{fontSize:14,color:C.textMed}}>{stats.correct}/{stats.total} · {stats.total>0?Math.round((stats.correct/stats.total)*100):0}%</p>{cram&&<p style={{fontSize:12,color:C.textLt,margin:0,maxWidth:340,lineHeight:1.6}}>🗓️ Révision en avance : ces cartes ont bien été reprogrammées, avec un gain proportionné à l'avance que tu avais prise.</p>}{sessionPts>0&&<p style={{fontFamily:mono,fontSize:12,color:"var(--c-gold)",margin:0}}>🏆 +{sessionPts} points aujourd'hui</p>}{mode==="perso"&&<p style={{fontSize:12,color:C.textLt,margin:0,maxWidth:360,lineHeight:1.6}}>Tour {persoTour} terminé. Relance ce paquet : il repartira de sa première carte, au tour {persoTour+1}.</p>}<div style={{display:"flex",gap:10,marginTop:20,flexWrap:"wrap",justifyContent:"center"}}>{canUndo&&<Btn onClick={handleUndoClick}>↩ Revenir à la dernière carte</Btn>}<Btn fill onClick={onBack}>← Tableau de bord</Btn></div>{isSem1Client&&<StudyClientEnd count={stats.total}/>}{promoOn&&<StudyPromoEnd count={stats.total} onOpen={()=>setPromoOpen(true)}/>}{promoModal}</div>;
   const col=pC(card.packetId),grp=GROUPS.find(g=>g.id===card.groupId);
   const chName=getChapters(card.groupId,card.num)[card.chapterId-1];
   const cardProg=progress?.[card.id];
@@ -10592,10 +10694,11 @@ function StudyView({label,queue,cram=false,jEarly=false,mode="anki",jplans,onSav
     {showBuried&&allCards&&onUnbury&&<BuriedCardsModal username={username} progress={progress} allCards={allCards} onUnbury={onUnbury} onClose={()=>setShowBuried(false)}/>}
     {gainFlash&&<div key={gainFlash.id} style={{position:"fixed",top:88,right:24,zIndex:210,background:"var(--c-goldBg)",border:"1.5px solid #b7791f",color:"var(--c-goldText)",borderRadius:10,padding:"10px 16px",fontFamily:font,boxShadow:"0 6px 20px rgba(0,0,0,0.12)",animation:"pointsPop 0.35s ease",textAlign:"right"}}>
       <div style={{fontFamily:serif,fontSize:22,fontWeight:600,lineHeight:1}}>+{gainFlash.points} pts</div>
-      <div style={{fontSize:10,color:"var(--c-goldTextSoft)",marginTop:3}}>{AGE_LABELS[gainFlash.age]} {gainFlash.base} {gainFlash.bonus?`+ ${IMP_LABELS[gainFlash.packetId]||""} ${gainFlash.bonus}`:""} · {gainFlash.total} pts aujourd'hui</div>
+      <div style={{fontSize:10,color:"var(--c-goldTextSoft)",marginTop:3}}>{gainFlash.label||AGE_LABELS[gainFlash.age]} {gainFlash.base} {gainFlash.bonus?`+ ${IMP_LABELS[gainFlash.packetId]||""} ${gainFlash.bonus}`:""} · {gainFlash.total} pts aujourd'hui</div>
     </div>}
     <div className="mfc-page mfc-study" style={{maxWidth:560,margin:"0 auto",padding:"28px 24px 0"}}>
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:18,alignItems:"center"}}>
+        {mode==="perso"&&persoTour>1&&<Tag color={C.accent} bg={C.accentBg}>Tour {persoTour}</Tag>}
         {mode==="anki"&&isNewCard&&<span style={{fontFamily:mono,fontSize:9,letterSpacing:2,textTransform:"uppercase",padding:"3px 8px",borderRadius:3,background:"var(--c-nwBg)",color:"var(--c-nwFg)",border:"1px solid var(--c-nwBd)",fontWeight:700}}>Nouvelle</span>}
         <Tag color={col} bg={pB(card.packetId)}>{PACKETS.find(p=>p.id===card.packetId)?.label}</Tag>
         <Tag color={C.accent} bg={C.accentBg}>{grp?.label}</Tag>
@@ -12240,25 +12343,28 @@ function App(){
       (chapterId===null||c.chapterId===chapterId)&&
       (pkId===null||c.packetId===pkId)
     );
-    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
-    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
-    const fullQueue=await enrichCards(queue);
+    const {queue:q0,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
+    if(!q0.length){alert(METHOD_EMPTY_MSG[mode]);return;}
     const grp=GROUPS.find(g=>g.id===gid);
     const chName=chapterId?getChapters(gid,num)[chapterId-1]:"";
     const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
     const label=`${METHOD_PREFIX[mode]} Personnel · ${grp?.label} · Cours ${num}${chName?" · "+chName:""}${pkLabel?" · "+pkLabel:""}`;
-    setStudyCtx({label,queue:fullQueue,mode});
+    const {queue,tour}=mode==="perso"?persoTourQueue(currentUser?.username,label,filtered,prog,q0):{queue:q0,tour:1};
+    const fullQueue=await enrichCards(queue);
+    setStudyCtx({label,queue:fullQueue,mode,persoTour:tour});
     setView("study");
-  },[userCards,prog,settings,jplans,enrichCards]);
+  },[userCards,prog,settings,jplans,enrichCards,currentUser]);
   const startPersonalCourseStudy=useCallback(async(courseName,pkId,method="anki")=>{
     const filtered=userCards.filter(c=>c.personalCourseName===courseName&&(pkId===null||c.packetId===pkId));
-    const {queue,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
-    if(!queue.length){alert(METHOD_EMPTY_MSG[mode]);return;}
-    const fullQueue=await enrichCards(queue);
+    const {queue:q0,mode}=buildQueueForMethod(filtered,method,prog,settings,jplans);
+    if(!q0.length){alert(METHOD_EMPTY_MSG[mode]);return;}
     const pkLabel=pkId?PACKETS.find(p=>p.id===pkId)?.label:"Tout";
-    setStudyCtx({label:`${METHOD_PREFIX[mode]} Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`,queue:fullQueue,mode});
+    const label=`${METHOD_PREFIX[mode]} Cours perso · ${courseName}${pkLabel?" · "+pkLabel:""}`;
+    const {queue,tour}=mode==="perso"?persoTourQueue(currentUser?.username,label,filtered,prog,q0):{queue:q0,tour:1};
+    const fullQueue=await enrichCards(queue);
+    setStudyCtx({label,queue:fullQueue,mode,persoTour:tour});
     setView("study");
-  },[userCards,prog,settings,jplans,enrichCards]);
+  },[userCards,prog,settings,jplans,enrichCards,currentUser]);
   // « Toutes tes cartes à revoir » pour les cartes personnelles (onglet Mes cartes) :
   // cartes déjà en révision et dues, toutes matières et cours perso confondus, sans nouvelles cartes.
   const startUserGlobalStudy=useCallback(async pkId=>{
@@ -12301,7 +12407,7 @@ function App(){
       return;
     }
     const full=await enrichCards(queue);
-    setStudyCtx(saved.mode==="j-avance"?{label:saved.label,queue:full,mode:"j",jEarly:true}:{label:saved.label,queue:full,mode:saved.mode||"anki"});
+    setStudyCtx(saved.mode==="j-avance"?{label:saved.label,queue:full,mode:"j",jEarly:true}:{label:saved.label,queue:full,mode:saved.mode||"anki",persoTour:saved.mode==="perso"?persoTourOf(currentUser.username,saved.label):1});
     setView("study");
   },[currentUser,allCards,userCards,enrichCards]);
   const dismissResume=useCallback(()=>{
@@ -12428,27 +12534,41 @@ function App(){
   },[prog,jplans,enrichCards]);
   // ─── Lancer une session de révision personnalisée ───────────────────────────
   // Aucune échéance : on prend les cartes les plus fragiles de la sélection.
+  // Réponses données à chaque carte dans la session perso en cours : seule la
+  // première peut rapporter des points (awardPersoPoints). Repart à zéro à
+  // chaque nouvelle session (nouveau studyCtx) ; un retour arrière la décompte.
+  const persoVusRef=useRef({ctx:null,n:new Map()});
   const startPersoStudy=useCallback(async(cardList,size,label)=>{
-    const queue=buildPersoQueue(cardList,prog,{limit:size||30});
+    const base=buildPersoQueue(cardList,prog,{limit:size||30});
+    // Paquet déjà fini une fois : mêmes cartes, même ordre, tour suivant.
+    const {queue,tour}=persoTourQueue(currentUser?.username,label,cardList,prog,base);
     if(!queue.length){alert("Aucune carte dans cette sélection.");return;}
     const fullQueue=await enrichCards(queue);
-    setStudyCtx({label,queue:fullQueue,mode:"perso"});
+    setStudyCtx({label,queue:fullQueue,mode:"perso",persoTour:tour});
     setView("study");
-  },[prog,enrichCards]);
+  },[prog,enrichCards,currentUser]);
   const handleRate=useCallback(async(card,rating,elapsedMs=0)=>{
     const existing=progNow()[card.id]||{};
     // ─── Révision personnalisée ───────────────────────────────────────────────
     // Elle ne reprogramme RIEN : ni l'échéance FSRS, ni le planning de J. La note
     // n'est écrite que dans l'espace .p, qui sert au calcul du taux de maîtrise.
-    // Aucun point non plus : les cartes y sont librement répétables.
+    // Points : règles propres à ce mode (awardPersoPoints), calculées sur l'état
+    // d'AVANT la note.
     if((studyCtx&&studyCtx.mode)==="perso"){
       const merged={...existing,p:persoPush(existing,rating)};
       saveProg({...prog,[card.id]:merged},card.id);
+      let gain=null;
       if(currentUser&&currentUser.role!=="admin"){
         recordStat(currentUser.username,rating>=3,elapsedMs,false);
         recordModeStat(currentUser.username,"perso",rating>=3);
+        const vus=persoVusRef.current;
+        if(vus.ctx!==studyCtx){vus.ctx=studyCtx;vus.n=new Map();}
+        const deja=vus.n.get(card.id)||0;
+        vus.n.set(card.id,deja+1);
+        if(deja===0)gain=awardPersoPoints(currentUser.username,card.id,existing,rating,effPkt(card,prog));
+        if(gain){setPointsTick(t=>t+1);syncDailyPoints(currentUser.username);}
       }
-      return merged;
+      return gain?{...merged,__gain:gain}:merged;
     }
     const wasNew=isNew(existing);
     const np=computeNext(existing,rating,settings);
@@ -12530,11 +12650,13 @@ function App(){
     // prevProg vaut undefined si la carte n'avait jamais été vue : on la
     // retire alors complètement pour qu'elle redevienne « Nouveau ».
     commitProg({[cardId]:(prevProg===undefined||prevProg===null)?null:prevProg});
+    const vus=persoVusRef.current.n, nv=vus.get(cardId)||0;
+    if(nv>1)vus.set(cardId,nv-1); else vus.delete(cardId);
     let revoked=null;
     if(currentUser&&currentUser.role!=="admin"){
       revokeStat(currentUser.username,wasCorrect,elapsedMs,wasNew);
       if(gain){
-        revoked=revokePoints(currentUser.username,cardId);
+        revoked=revokePoints(currentUser.username,gain.key||cardId);
         setPointsTick(t=>t+1);
         syncDailyPoints(currentUser.username);
       }
@@ -12592,7 +12714,7 @@ function App(){
   if(view==="register")  return <RegisterView onRegister={acc=>{handleRegister(acc);setView("dashboard");}} onBack={()=>setView("login")} accounts={accounts}/>;
   if(userCardEditor!==null&&currentUser?.role!=="admin")return <CardEditor key={userCardKey} card={userCardEditor||null} onSave={handleSaveUserCard} onCancel={()=>setUserCardEditor(null)} userGroups={currentUser?.plan?.groups||[]} officialCards={cards} userCards={userCards} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="dashboard"&&currentUser) return <Dashboard currentUser={currentUser} cards={cards} userCards={userCards} progress={prog} settings={settings} onSaveSettings={saveSet} onStudy={startStudy} onStudyCram={startCramStudy} onGlobalStudy={startGlobalStudy} onAdmin={()=>setView("admin")} onSettings={()=>setView("settings")} onLogout={logout} onNewUserCard={()=>setUserCardEditor(false)} onEditUserCard={c=>setUserCardEditor(c)} onDeleteUserCard={handleDeleteUserCard} onToggleIntegration={handleToggleIntegration} onStudyUser={startUserCardStudy} onStudyPersonal={startPersonalCourseStudy} onStudyUserGlobal={startUserGlobalStudy} onUnbury={handleUnbury} allCards={allCards} paymentStatus={paymentStatus} onClosePaymentBanner={()=>setPaymentStatus(null)} pointsTick={pointsTick} pseudo={pseudo||getPseudo(currentUser.username)} theme={theme} onToggleTheme={toggleTheme} resumeInfo={resumeInfo} onResume={resumeStudySession} onDismissResume={dismissResume} studyMode={studyMode} onChangeMode={changeStudyMode} jplans={jplans} onSaveJPlan={handleSaveJPlan} onStudyJ={startJStudy} onStudyJEarly={startJEarlyStudy} onStudyPerso={startPersoStudy} promo={promo}/>;
-  if(view==="study"&&studyCtx) return <StudyView onReportCard={handleReportCard} onSaveSettings={saveSet} label={studyCtx.label} queue={studyCtx.queue} cram={!!studyCtx.cram} jEarly={!!studyCtx.jEarly} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} username={currentUser?.username} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue} allCards={allCards} onUnbury={handleUnbury} promo={promo} planId={currentUser?.plan?.planId} fullGroups={currentUser?.plan?.fullGroups}/>;
+  if(view==="study"&&studyCtx) return <StudyView onReportCard={handleReportCard} onSaveSettings={saveSet} label={studyCtx.label} queue={studyCtx.queue} persoTour={studyCtx.persoTour||1} cram={!!studyCtx.cram} jEarly={!!studyCtx.jEarly} mode={studyCtx.mode||"anki"} jplans={jplans} onJAction={handleJAction} onJUnsnooze={handleJUnsnooze} onRate={handleRate} onBury={handleBury} onChangePacket={handleChangePacket} onDeleteUserCard={handleDeleteOwnCardFromStudy} onSaveOverride={handleSaveOverride} onResetOverride={handleResetOverride} overrides={overrides} onBack={leaveStudy} settings={settings} isAdmin={currentUser?.role==="admin"} progress={prog} username={currentUser?.username} theme={theme} onToggleTheme={toggleTheme} onUndo={handleUndoRate} onQueueChange={persistStudyQueue} allCards={allCards} onUnbury={handleUnbury} promo={promo} planId={currentUser?.plan?.planId} fullGroups={currentUser?.plan?.fullGroups}/>;
   if(view==="admin")     return <AdminView cards={cards} accounts={accounts} onSaveCard={handleSaveCard} onDeleteCard={handleDeleteCard} onSaveUser={handleSaveUser} onDeleteUser={handleDeleteUser} onSortCards={handleBatchSortCards} onBack={()=>setView("dashboard")} theme={theme} onToggleTheme={toggleTheme}/>;
   if(view==="settings")  return <SettingsView settings={settings} onSave={saveSet} onBack={()=>setView("dashboard")} currentUser={currentUser} accounts={accounts} cards={cards} onResetProgress={handleResetProgress} onDeleteAccount={handleDeleteAccount} pseudo={pseudo||getPseudo(currentUser?.username)} onSavePseudo={savePseudo} theme={theme} onToggleTheme={toggleTheme}/>;
   return null;
